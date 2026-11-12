@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -13,6 +16,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { InstallSkillDto } from './dto/install-skill.dto.js';
+import { ToggleSkillDto } from './dto/toggle-skill.dto.js';
 import { ValidateSkillDto } from './dto/validate-skill.dto.js';
 import {
   SkillsService,
@@ -50,5 +54,22 @@ export class SkillsController {
   @UseGuards(JwtAuthGuard)
   list(): Promise<InstalledSkill[]> {
     return this.skillsService.getInstalledSkills();
+  }
+
+  @Patch(':id/toggle')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  toggle(
+    @Param('id') id: string,
+    @Body() dto: ToggleSkillDto,
+  ): Promise<InstalledSkill> {
+    return this.skillsService.toggleSkill(id, dto.isEnabled);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  uninstall(@Param('id') id: string): Promise<InstalledSkill> {
+    return this.skillsService.uninstallSkill(id);
   }
 }

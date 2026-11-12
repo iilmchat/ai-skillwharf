@@ -1,6 +1,26 @@
-import { LlmService } from './llm.service.js';
+import { BadRequestException } from '@nestjs/common';
+import type { SandboxService } from '../sandbox/sandbox.service.js';
+import {
+  LlmService,
+  SANDBOX_TOOL_DESCRIPTION,
+  SANDBOX_TOOL_NAME,
+} from './llm.service.js';
 
 const ENV_KEYS = ['LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODEL'] as const;
+
+type MockFn = ReturnType<typeof vi.fn>;
+
+interface SandboxMock {
+  runCommand: MockFn;
+}
+
+function createSandbox(): SandboxMock {
+  return { runCommand: vi.fn() };
+}
+
+function createService(sandbox: SandboxMock = createSandbox()): LlmService {
+  return new LlmService(sandbox as unknown as SandboxService);
+}
 
 describe('LlmService', () => {
   const originalEnv = new Map<string, string | undefined>();
@@ -25,7 +45,7 @@ describe('LlmService', () => {
   });
 
   it('возвращает эхо-заглушку, если LLM не настроен', async () => {
-    const service = new LlmService();
+    const service = createService();
 
     expect(service.isConfigured()).toBe(false);
     await expect(
@@ -41,7 +61,7 @@ describe('LlmService', () => {
     process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
     process.env.LLM_MODEL = 'llama3';
 
-    const service = new LlmService();
+    const service = createService();
 
     expect(service.isConfigured()).toBe(true);
   });
@@ -49,11 +69,61 @@ describe('LlmService', () => {
   it('работает как заглушка, если задан только адрес без имени модели', async () => {
     process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
 
-    const service = new LlmService();
+    const service = createService();
 
     expect(service.isConfigured()).toBe(false);
     await expect(service.chat([{ role: 'user', content: 'тест' }])).resolves.toBe(
       'LLM not configured: тест',
     );
+  });
+
+  describe('createSandboxTool', () => {
+    it('выполняет код через SandboxService и возвращает stdout', async () => {
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('hello\n');
+      const service = createService(sandbox);
+
+      const tool = service.createSandboxTool();
+
+      expect(tool.name).toBe(SANDBOX_TOOL_NAME);
+      expect(tool.description).toBe(SANDBOX_TOOL_DESCRIPTION);
+      await expect(tool.invoke({ code: 'echo hello' })).resolves.toBe(
+        'hello\n',
+      );
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello');
+    });
+
+    it('вызывает paywall-хук до запуска кода', async () => {
+      const order: string[] = [];
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockImplementation(async () => {
+        order.push('run');
+        return 'ok';
+      });
+      const service = createService(sandbox);
+      const beforeExecute = vi.fn(async () => {
+        order.push('charge');
+      });
+
+      const tool = service.createSandboxTool({ beforeExecute });
+      await tool.invoke({ code: 'echo ok' });
+
+      expect(order).toEqual(['charge', 'run']);
+    });
+
+    it('не запускает код, если paywall-хук выбросил ошибку', async () => {
+      const sandbox = createSandbox();
+      const service = createService(sandbox);
+      const beforeExecute = vi
+        .fn()
+        .mockRejectedValue(new BadRequestException('Недостаточно средств'));
+
+      const tool = service.createSandboxTool({ beforeExecute });
+
+      await expect(tool.invoke({ code: 'echo ok' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
   });
 });

@@ -41,6 +41,9 @@
 ## Спринт 6: Система расширений / Интеграция LLM — Текущий
 
 * [x] Хранение и установка Skills через REST API (каталог навыков в БД).
+* [x] Интеграция Sandbox в LangGraph: инструмент `execute_sandbox_code` и цикл tool calls.
+* [x] Paywall для вызовов песочницы (списание через `BillingService.chargeForSkill`).
+* [x] Управление навыками: включение/отключение и удаление (CRUD).
 * [ ] Реальные LLM-провайдеры: GigaChat, YandexGPT, Ollama через OpenAI-совместимый фасад.
 * [ ] E2E-тесты сквозных сценариев (auth → chat → skill → billing).
 * [ ] Remote Sandbox Provider (Firecracker/gVisor) вместо docker-сокета.

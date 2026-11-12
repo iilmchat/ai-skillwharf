@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, type InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema, type SkillManifest } from '@skillwharf/shared';
 import { parse } from 'yaml';
@@ -73,6 +77,34 @@ export class SkillsService {
     return this.prisma.installedSkill.findMany({
       orderBy: { installedAt: 'desc' },
     });
+  }
+
+  /** Включает или выключает установленный навык. */
+  async toggleSkill(id: string, isEnabled: boolean): Promise<InstalledSkill> {
+    await this.assertInstalled(id);
+
+    return this.prisma.installedSkill.update({
+      where: { id },
+      data: { isEnabled },
+    });
+  }
+
+  /** Удаляет навык из каталога. */
+  async uninstallSkill(id: string): Promise<InstalledSkill> {
+    await this.assertInstalled(id);
+
+    return this.prisma.installedSkill.delete({ where: { id } });
+  }
+
+  private async assertInstalled(id: string): Promise<void> {
+    const skill = await this.prisma.installedSkill.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!skill) {
+      throw new NotFoundException(`Навык ${id} не найден`);
+    }
   }
 
   private parseManifest(fileContent: string): ManifestParseResult {

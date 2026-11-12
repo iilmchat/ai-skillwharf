@@ -5,11 +5,37 @@ import {
   HumanMessage,
   SystemMessage,
 } from '@langchain/core/messages';
+import {
+  DynamicStructuredTool,
+  type StructuredToolInterface,
+} from '@langchain/core/tools';
 import { ChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
+import { SandboxService } from '../sandbox/sandbox.service.js';
 
 export interface ChatHistoryMessage {
   role: string;
   content: string;
+}
+
+/** Имя инструмента песочницы, которым LLM может вызвать выполнение кода. */
+export const SANDBOX_TOOL_NAME = 'execute_sandbox_code';
+
+/** Описание инструмента для LLM. */
+export const SANDBOX_TOOL_DESCRIPTION =
+  'Выполняет код на Python/Shell в изолированной среде и возвращает результат';
+
+/** Схема аргументов инструмента песочницы. */
+export const SandboxToolSchema = z.object({
+  code: z.string().describe('Код для выполнения'),
+});
+
+export interface SandboxToolOptions {
+  /**
+   * Хук перед выполнением кода (paywall). Если он выбрасывает исключение,
+   * код в песочнице не запускается.
+   */
+  beforeExecute?: () => Promise<void>;
 }
 
 /**
@@ -24,7 +50,7 @@ export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly client: ChatOpenAI | null;
 
-  constructor() {
+  constructor(private readonly sandboxService: SandboxService) {
     const baseURL = process.env.LLM_BASE_URL;
     const model = process.env.LLM_MODEL;
 
@@ -48,24 +74,64 @@ export class LlmService {
     return this.client !== null;
   }
 
-  async chat(messages: ChatHistoryMessage[]): Promise<string> {
-    const lastUserMessage =
-      [...messages].reverse().find((message) => message.role === 'user')
-        ?.content ?? '';
+  /**
+   * Инструмент LangChain `execute_sandbox_code`: запускает код через
+   * SandboxService. `beforeExecute` вызывается до запуска и используется
+   * для списания средств (paywall).
+   */
+  createSandboxTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: SANDBOX_TOOL_NAME,
+      description: SANDBOX_TOOL_DESCRIPTION,
+      schema: SandboxToolSchema,
+      func: async ({ code }) => {
+        await options.beforeExecute?.();
 
+        return this.sandboxService.runCommand(code);
+      },
+    });
+  }
+
+  async chat(messages: ChatHistoryMessage[]): Promise<string> {
+    const response = await this.chatWithTools(
+      messages.map(toLangChainMessage),
+      [],
+    );
+
+    return messageContentToText(response.content);
+  }
+
+  /**
+   * Вызов LLM с набором инструментов. Возвращает ответ модели как есть:
+   * если в нём есть `tool_calls`, их должен выполнить вызывающий граф.
+   */
+  async chatWithTools(
+    messages: BaseMessage[],
+    tools: StructuredToolInterface[],
+  ): Promise<AIMessage> {
     if (!this.client) {
-      return `LLM not configured: ${lastUserMessage}`;
+      const lastUserMessage = [...messages]
+        .reverse()
+        .find((message) => message instanceof HumanMessage);
+
+      return new AIMessage(
+        `LLM not configured: ${messageContentToText(lastUserMessage?.content ?? '')}`,
+      );
     }
 
-    const response = await this.client.invoke(messages.map(toLangChainMessage));
+    const model =
+      tools.length > 0 ? this.client.bindTools(tools) : this.client;
 
-    return typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
+    return model.invoke(messages);
   }
 }
 
-function toLangChainMessage(message: ChatHistoryMessage): BaseMessage {
+/** Приводит контент сообщения LangChain к строке. */
+export function messageContentToText(content: BaseMessage['content']): string {
+  return typeof content === 'string' ? content : JSON.stringify(content);
+}
+
+export function toLangChainMessage(message: ChatHistoryMessage): BaseMessage {
   switch (message.role) {
     case 'assistant':
       return new AIMessage(message.content);

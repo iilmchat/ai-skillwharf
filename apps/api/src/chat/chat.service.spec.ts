@@ -1,8 +1,24 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+  ToolMessage,
+} from '@langchain/core/messages';
 import { Test, TestingModule } from '@nestjs/testing';
-import { LlmService } from '../llm/llm.service.js';
+import { BillingService } from '../billing/billing.service.js';
+import {
+  LlmService,
+  SANDBOX_TOOL_NAME,
+} from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { ChatService } from './chat.service.js';
+import type { SandboxService } from '../sandbox/sandbox.service.js';
+import {
+  ChatService,
+  INSUFFICIENT_FUNDS_REPLY,
+  SANDBOX_CALL_DESCRIPTION,
+  SANDBOX_CALL_PRICE,
+} from './chat.service.js';
 
 const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
@@ -15,14 +31,28 @@ interface PrismaMock {
   message: { create: MockFn; findMany: MockFn };
 }
 
-interface LlmMock {
-  chat: MockFn;
+interface SandboxMock {
+  runCommand: MockFn;
+}
+
+interface BillingMock {
+  chargeForSkill: MockFn;
+}
+
+function toolCallMessage(code: string): AIMessage {
+  return new AIMessage({
+    content: '',
+    tool_calls: [{ id: 'call-1', name: SANDBOX_TOOL_NAME, args: { code } }],
+  });
 }
 
 describe('ChatService', () => {
   let service: ChatService;
   let prisma: PrismaMock;
-  let llm: LlmMock;
+  let sandbox: SandboxMock;
+  let billing: BillingMock;
+  let llm: LlmService;
+  let chatWithTools: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     prisma = {
@@ -33,13 +63,20 @@ describe('ChatService', () => {
       },
       message: { create: vi.fn(), findMany: vi.fn() },
     };
-    llm = { chat: vi.fn() };
+    sandbox = { runCommand: vi.fn() };
+    billing = { chargeForSkill: vi.fn() };
+
+    // Настоящий LlmService нужен, чтобы граф получил реальный инструмент
+    // песочницы; сам вызов модели подменяем.
+    llm = new LlmService(sandbox as unknown as SandboxService);
+    chatWithTools = vi.spyOn(llm, 'chatWithTools');
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: PrismaService, useValue: prisma },
         { provide: LlmService, useValue: llm },
+        { provide: BillingService, useValue: billing },
       ],
     }).compile();
 
@@ -72,18 +109,21 @@ describe('ChatService', () => {
   });
 
   describe('handleMessage', () => {
-    it('сохраняет сообщения пользователя и ассистента и возвращает ответ LLM', async () => {
+    beforeEach(() => {
       prisma.conversation.findUnique.mockResolvedValue({
         id: CONVERSATION_ID,
         userId: USER_ID,
       });
       prisma.message.create.mockResolvedValue({});
       prisma.conversation.update.mockResolvedValue({});
+    });
+
+    it('сохраняет сообщения и возвращает ответ LLM', async () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'assistant', content: 'предыдущий ответ' },
         { role: 'user', content: 'привет' },
       ]);
-      llm.chat.mockResolvedValue('ответ ассистента');
+      chatWithTools.mockResolvedValue(new AIMessage('ответ ассистента'));
 
       const result = await service.handleMessage(
         USER_ID,
@@ -118,11 +158,102 @@ describe('ChatService', () => {
           take: 10,
         }),
       );
-      // В LLM история уходит в хронологическом порядке (старые → новые).
-      expect(llm.chat).toHaveBeenCalledWith([
-        { role: 'user', content: 'привет' },
-        { role: 'assistant', content: 'предыдущий ответ' },
+
+      const [messages, tools] = chatWithTools.mock.calls[0] as [
+        BaseMessage[],
+        { name: string }[],
+      ];
+
+      // История уходит в LLM в хронологическом порядке (старые → новые).
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toBeInstanceOf(HumanMessage);
+      expect(messages[0]?.content).toBe('привет');
+      expect(messages[1]).toBeInstanceOf(AIMessage);
+      expect(messages[1]?.content).toBe('предыдущий ответ');
+
+      // LLM получает инструмент песочницы.
+      expect(tools.map((tool) => tool.name)).toEqual([SANDBOX_TOOL_NAME]);
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+
+    it('выполняет инструмент песочницы и списывает средства', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'запусти echo hi' },
       ]);
+      chatWithTools
+        .mockResolvedValueOnce(toolCallMessage('echo hi'))
+        .mockResolvedValueOnce(new AIMessage('Готово: hi'));
+      billing.chargeForSkill.mockResolvedValue({
+        balance: '9.90',
+        entryId: 'entry-1',
+      });
+      sandbox.runCommand.mockResolvedValue('hi\n');
+
+      const result = await service.handleMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'запусти echo hi',
+      );
+
+      expect(result.reply).toBe('Готово: hi');
+
+      // Paywall: списание за конкретного пользователя и один вызов песочницы.
+      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+        USER_ID,
+        SANDBOX_CALL_PRICE,
+        SANDBOX_CALL_DESCRIPTION,
+        expect.any(String),
+      );
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi');
+
+      // Сначала деньги, потом выполнение кода.
+      expect(
+        billing.chargeForSkill.mock.invocationCallOrder[0],
+      ).toBeLessThan(sandbox.runCommand.mock.invocationCallOrder[0]);
+
+      // Результат инструмента вернулся в LLM вторым вызовом.
+      expect(chatWithTools).toHaveBeenCalledTimes(2);
+      const [secondCallMessages] = chatWithTools.mock.calls[1] as [
+        BaseMessage[],
+        unknown[],
+      ];
+      const toolMessage = secondCallMessages[secondCallMessages.length - 1];
+
+      expect(toolMessage).toBeInstanceOf(ToolMessage);
+      expect(toolMessage?.content).toBe('hi\n');
+    });
+
+    it('прерывает выполнение при нехватке средств', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'запусти echo hi' },
+      ]);
+      chatWithTools.mockResolvedValueOnce(toolCallMessage('echo hi'));
+      billing.chargeForSkill.mockRejectedValue(
+        new BadRequestException('Insufficient funds or wallet not found'),
+      );
+
+      const result = await service.handleMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'запусти echo hi',
+      );
+
+      expect(result).toEqual({
+        conversationId: CONVERSATION_ID,
+        reply: INSUFFICIENT_FUNDS_REPLY,
+      });
+
+      // Песочница не запускалась, второй вызов LLM не состоялся.
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+      expect(chatWithTools).toHaveBeenCalledTimes(1);
+
+      expect(prisma.message.create).toHaveBeenNthCalledWith(2, {
+        data: {
+          conversationId: CONVERSATION_ID,
+          role: 'assistant',
+          content: INSUFFICIENT_FUNDS_REPLY,
+        },
+      });
     });
 
     it('запрещает писать в чужой диалог', async () => {
@@ -135,7 +266,7 @@ describe('ChatService', () => {
         service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.message.create).not.toHaveBeenCalled();
-      expect(llm.chat).not.toHaveBeenCalled();
+      expect(chatWithTools).not.toHaveBeenCalled();
     });
 
     it('отклоняет сообщение в несуществующий диалог', async () => {
@@ -145,7 +276,7 @@ describe('ChatService', () => {
         service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.message.create).not.toHaveBeenCalled();
-      expect(llm.chat).not.toHaveBeenCalled();
+      expect(chatWithTools).not.toHaveBeenCalled();
     });
   });
 });

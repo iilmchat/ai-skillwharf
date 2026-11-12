@@ -1,21 +1,59 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import {
+  AIMessage,
+  type BaseMessage,
+  ToolMessage,
+  type ToolCall,
+} from '@langchain/core/messages';
+import type { StructuredToolInterface } from '@langchain/core/tools';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
-import { LlmService, type ChatHistoryMessage } from '../llm/llm.service.js';
+import { BillingService } from '../billing/billing.service.js';
+import {
+  LlmService,
+  messageContentToText,
+  toLangChainMessage,
+} from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 /** Сколько последних сообщений диалога передаём в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
 
+/** Стоимость одного вызова песочницы (paywall). */
+export const SANDBOX_CALL_PRICE = 0.1;
+
+/** Описание списания в Ledger. */
+export const SANDBOX_CALL_DESCRIPTION = 'Выполнение кода в песочнице';
+
+/** Сколько раз за один ответ разрешено запускать инструменты. */
+export const MAX_TOOL_ROUNDS = 5;
+
+/** Ответ пользователю, если на балансе не хватает средств. */
+export const INSUFFICIENT_FUNDS_REPLY =
+  'Недостаточно средств для выполнения кода. Пополните баланс.';
+
+const TOOL_LIMIT_REPLY =
+  'Достигнут лимит вызовов инструментов. Уточните запрос и попробуйте снова.';
+
 const DEFAULT_CONVERSATION_TITLE = 'Новый диалог';
 
 const ChatStateAnnotation = Annotation.Root({
-  messages: Annotation<ChatHistoryMessage[]>({
+  messages: Annotation<BaseMessage[]>({
     reducer: (_previous, next) => next,
     default: () => [],
   }),
   reply: Annotation<string>({
     reducer: (_previous, next) => next,
     default: () => '',
+  }),
+  availableTools: Annotation<StructuredToolInterface[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
   }),
 });
 
@@ -26,17 +64,99 @@ export interface ChatReply {
   reply: string;
 }
 
+function lastMessage(messages: BaseMessage[]): BaseMessage | undefined {
+  return messages[messages.length - 1];
+}
+
+/** `tool_calls` последнего сообщения, если это ответ модели. */
+function toolCallsOf(message: BaseMessage | undefined): ToolCall[] {
+  return message instanceof AIMessage ? (message.tool_calls ?? []) : [];
+}
+
+/** Сколько раундов вызова инструментов уже завершено в истории. */
+function toolRounds(messages: BaseMessage[]): number {
+  return messages.filter((message) => toolCallsOf(message).length > 0).length;
+}
+
 /**
- * Граф состояний LangGraph: единственный узел `llm` вызывает LLM-сервис.
- * Историю диалога (последние CHAT_HISTORY_LIMIT сообщений) передаём как состояние.
+ * Выполняет `tool_calls` текущего ответа модели. Ошибки инструмента
+ * (например, от paywall) пробрасываются наружу и прерывают граф.
+ */
+async function executeToolCalls(
+  tools: StructuredToolInterface[],
+  calls: ToolCall[],
+): Promise<ToolMessage[]> {
+  return Promise.all(
+    calls.map(async (call) => {
+      const tool = tools.find((candidate) => candidate.name === call.name);
+
+      if (!tool) {
+        return new ToolMessage({
+          tool_call_id: call.id ?? '',
+          name: call.name,
+          content: `Инструмент «${call.name}» не найден`,
+          status: 'error',
+        });
+      }
+
+      const result = await tool.invoke(call.args);
+
+      return new ToolMessage({
+        tool_call_id: call.id ?? '',
+        name: call.name,
+        content:
+          typeof result === 'string' ? result : JSON.stringify(result),
+      });
+    }),
+  );
+}
+
+/**
+ * Граф состояний LangGraph в стиле AgentExecutor:
+ *
+ * `llm` → (есть tool_calls?) → `tools` → `llm` → … → END.
+ *
+ * Инструменты приходят в состоянии, потому что содержат привязанный к
+ * пользователю paywall-хук.
  */
 function buildChatGraph(llmService: LlmService) {
   return new StateGraph(ChatStateAnnotation)
-    .addNode('llm', async (state: ChatState): Promise<{ reply: string }> => ({
-      reply: await llmService.chat(state.messages),
+    .addNode('llm', async (state: ChatState) => {
+      const response = await llmService.chatWithTools(
+        state.messages,
+        state.availableTools,
+      );
+      const calls = response.tool_calls ?? [];
+      const limitReached = toolRounds(state.messages) >= MAX_TOOL_ROUNDS;
+      const text = messageContentToText(response.content);
+
+      return {
+        messages: [...state.messages, response],
+        reply:
+          calls.length > 0 && !limitReached
+            ? ''
+            : text || (limitReached ? TOOL_LIMIT_REPLY : ''),
+      };
+    })
+    .addNode('tools', async (state: ChatState) => ({
+      messages: [
+        ...state.messages,
+        ...(await executeToolCalls(
+          state.availableTools,
+          toolCallsOf(lastMessage(state.messages)),
+        )),
+      ],
     }))
     .addEdge(START, 'llm')
-    .addEdge('llm', END)
+    .addConditionalEdges('llm', (state: ChatState) => {
+      if (toolCallsOf(lastMessage(state.messages)).length === 0) {
+        return END;
+      }
+
+      // Защита от бесконечного цикла «модель просит инструмент снова».
+      return toolRounds(state.messages) > MAX_TOOL_ROUNDS ? END : 'tools';
+    })
+    .addEdge('tools', 'llm')
     .compile();
 }
 
@@ -47,6 +167,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llmService: LlmService,
+    private readonly billingService: BillingService,
   ) {
     this.graph = buildChatGraph(this.llmService);
   }
@@ -93,18 +214,49 @@ export class ChatService {
       select: { role: true, content: true },
     });
 
-    const state = await this.graph.invoke({
-      messages: latestMessages.reverse(),
-    });
+    const messages = latestMessages
+      .reverse()
+      .map((message) => toLangChainMessage(message));
+
+    const tools = [this.buildSandboxTool(userId)];
+
+    let reply: string;
+
+    try {
+      const state = await this.graph.invoke({ messages, availableTools: tools });
+      reply = state.reply;
+    } catch (error) {
+      // Paywall: списание не удалось — песочница не запускалась,
+      // прерываем граф и объясняем пользователю причину.
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+
+      reply = INSUFFICIENT_FUNDS_REPLY;
+    }
 
     await this.prisma.message.create({
-      data: { conversationId, role: 'assistant', content: state.reply },
+      data: { conversationId, role: 'assistant', content: reply },
     });
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
 
-    return { conversationId, reply: state.reply };
+    return { conversationId, reply };
+  }
+
+  /** Инструмент песочницы со списанием средств перед каждым запуском. */
+  private buildSandboxTool(userId: string): StructuredToolInterface {
+    return this.llmService.createSandboxTool({
+      beforeExecute: async () => {
+        await this.billingService.chargeForSkill(
+          userId,
+          SANDBOX_CALL_PRICE,
+          SANDBOX_CALL_DESCRIPTION,
+          randomUUID(),
+        );
+      },
+    });
   }
 }

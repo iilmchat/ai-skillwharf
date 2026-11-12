@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SkillsService } from './skills.service.js';
@@ -6,7 +6,13 @@ import { SkillsService } from './skills.service.js';
 type MockFn = ReturnType<typeof vi.fn>;
 
 interface PrismaMock {
-  installedSkill: { upsert: MockFn; findMany: MockFn };
+  installedSkill: {
+    upsert: MockFn;
+    findMany: MockFn;
+    findUnique: MockFn;
+    update: MockFn;
+    delete: MockFn;
+  };
 }
 
 const validSkill = `---
@@ -58,7 +64,13 @@ describe('SkillsService', () => {
 
   beforeEach(async () => {
     prisma = {
-      installedSkill: { upsert: vi.fn(), findMany: vi.fn() },
+      installedSkill: {
+        upsert: vi.fn(),
+        findMany: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+      },
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -192,6 +204,56 @@ version: 1
       expect(prisma.installedSkill.findMany).toHaveBeenCalledWith({
         orderBy: { installedAt: 'desc' },
       });
+    });
+  });
+
+  describe('toggleSkill', () => {
+    it('включает и выключает установленный навык', async () => {
+      prisma.installedSkill.findUnique.mockResolvedValue({ id: 'skill-1' });
+      prisma.installedSkill.update.mockResolvedValue({
+        id: 'skill-1',
+        isEnabled: false,
+      });
+
+      const result = await service.toggleSkill('skill-1', false);
+
+      expect(result).toEqual({ id: 'skill-1', isEnabled: false });
+      expect(prisma.installedSkill.update).toHaveBeenCalledWith({
+        where: { id: 'skill-1' },
+        data: { isEnabled: false },
+      });
+    });
+
+    it('отклоняет переключение несуществующего навыка', async () => {
+      prisma.installedSkill.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.toggleSkill('missing', true),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.installedSkill.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('uninstallSkill', () => {
+    it('удаляет навык из каталога', async () => {
+      prisma.installedSkill.findUnique.mockResolvedValue({ id: 'skill-1' });
+      prisma.installedSkill.delete.mockResolvedValue({ id: 'skill-1' });
+
+      await expect(service.uninstallSkill('skill-1')).resolves.toEqual({
+        id: 'skill-1',
+      });
+      expect(prisma.installedSkill.delete).toHaveBeenCalledWith({
+        where: { id: 'skill-1' },
+      });
+    });
+
+    it('отклоняет удаление несуществующего навыка', async () => {
+      prisma.installedSkill.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.uninstallSkill('missing'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.installedSkill.delete).not.toHaveBeenCalled();
     });
   });
 });
