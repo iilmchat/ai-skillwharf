@@ -14,6 +14,7 @@ pricing:
   model: Pay-per-Call
   price: 0.05
   currency: RUB
+requiresApproval: true
 ---
 
 # Code Runner

@@ -289,6 +289,14 @@ version: 1
         'tavily-search',
       ]);
 
+      const codeRunner = (
+        prisma.installedSkill.upsert.mock.calls as [UpsertArgs][]
+      ).find(([args]) => args.where.name === 'code-runner');
+
+      expect(codeRunner?.[0].create.manifest).toMatchObject({
+        requiresApproval: true,
+      });
+
       // Сидинг не должен включать навыки, выключенные администратором.
       for (const [args] of prisma.installedSkill.upsert.mock.calls as [
         UpsertArgs,

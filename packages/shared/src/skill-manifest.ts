@@ -64,6 +64,11 @@ export const skillManifestSchema = z.object({
   dependencies: skillDependenciesSchema.optional(),
   permissions: z.array(skillPermissionSchema),
   pricing: skillPricingSchema.optional(),
+  /**
+   * Требует ли навык подтверждения пользователя перед вызовом своих
+   * инструментов. Используется Human-in-the-Loop в Gateway.
+   */
+  requiresApproval: z.boolean().optional(),
   checksum: skillChecksumSchema.optional(),
 });
 

@@ -164,8 +164,13 @@ export class ChatGateway implements OnGatewayConnection {
       throw new WsException('Ожидается { conversationId }');
     }
 
+    const resumed = this.chatService.approveAction(
+      payload.conversationId,
+      userId,
+    );
+
     this.logger.log(
-      `Действие одобрено: conversationId=${payload.conversationId}, userId=${userId}, approved=${payload.approved !== false}`,
+      `Действие одобрено: conversationId=${payload.conversationId}, userId=${userId}, approved=${payload.approved !== false}, resumed=${resumed}`,
     );
 
     this.sendOfficeEvent(client, {

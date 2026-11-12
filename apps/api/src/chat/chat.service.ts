@@ -35,6 +35,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
   DEFAULT_OFFICE_AGENT_ID,
+  OFFICE_TASKS,
   officeTaskForTool,
   type ChatOfficeEvent,
   type OfficeEvent,
@@ -59,6 +60,10 @@ const ChatStateAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => '',
   }),
+  userId: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
+  }),
   messages: Annotation<BaseMessage[]>({
     reducer: (_previous, next) => next,
     default: () => [],
@@ -68,6 +73,11 @@ const ChatStateAnnotation = Annotation.Root({
     default: () => '',
   }),
   availableTools: Annotation<StructuredToolInterface[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  /** Инструменты, которые нельзя запускать без подтверждения пользователя. */
+  approvalRequiredTools: Annotation<string[]>({
     reducer: (_previous, next) => next,
     default: () => [],
   }),
@@ -138,6 +148,29 @@ function resolveToolPrice(
   return null;
 }
 
+/**
+ * Инструменты, для которых включённый навык требует подтверждения. Поле
+ * `requiresApproval` живёт в манифесте навыка и распространяется на все
+ * инструменты из его `dependencies.tools`.
+ */
+function resolveApprovalTools(skills: InstalledSkill[]): string[] {
+  const tools = new Set<string>();
+
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success || parsed.data.requiresApproval !== true) {
+      continue;
+    }
+
+    for (const tool of parsed.data.dependencies?.tools ?? []) {
+      tools.add(tool);
+    }
+  }
+
+  return [...tools];
+}
+
 function lastMessage(messages: BaseMessage[]): BaseMessage | undefined {
   return messages[messages.length - 1];
 }
@@ -185,6 +218,12 @@ async function executeToolCalls(
 }
 
 /**
+ * Колбэк ожидания подтверждения. Возвращает промис, который резолвится,
+ * когда пользователь пришлёт `approve_action` для этого диалога.
+ */
+type ApprovalGate = (conversationId: string, userId: string) => Promise<void>;
+
+/**
  * Граф состояний LangGraph в стиле AgentExecutor:
  *
  * `llm` → (есть tool_calls?) → `tools` → `llm` → … → END.
@@ -192,7 +231,7 @@ async function executeToolCalls(
  * Инструменты приходят в состоянии, потому что содержат привязанный к
  * пользователю paywall-хук.
  */
-function buildChatGraph(llmService: LlmService) {
+function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
   return new StateGraph(ChatStateAnnotation)
     .addNode('llm', async (state: ChatState, config) => {
       const emit = getWriter(config);
@@ -237,17 +276,37 @@ function buildChatGraph(llmService: LlmService) {
     .addNode('tools', async (state: ChatState, config) => {
       const emit = getWriter(config);
       const calls = toolCallsOf(lastMessage(state.messages));
+      const approvalRequired = new Set(state.approvalRequiredTools);
+      const approvalCall = calls.find((call) =>
+        approvalRequired.has(call.name),
+      );
 
-      // AI-Офис получает задачу по имени каждого инструмента, который
-      // запросила модель. События уходят до фактического запуска.
-      for (const call of calls) {
+      if (approvalCall) {
+        // Ставим промис в Map до отправки события, чтобы approve_action
+        // не мог прийти раньше, чем сохранено состояние ожидания.
+        const approved = waitForApproval(state.conversationId, state.userId);
+
         emit?.({
           type: 'office',
           conversationId: state.conversationId,
           agentId: DEFAULT_OFFICE_AGENT_ID,
-          status: 'working',
-          task: officeTaskForTool(call.name),
+          status: 'waiting_approval',
+          task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(approvalCall.name)}`,
         } satisfies ChatOfficeEvent);
+
+        await approved;
+      } else {
+        // AI-Офис получает задачу по имени каждого инструмента, который
+        // запросила модель. События уходят до фактического запуска.
+        for (const call of calls) {
+          emit?.({
+            type: 'office',
+            conversationId: state.conversationId,
+            agentId: DEFAULT_OFFICE_AGENT_ID,
+            status: 'working',
+            task: officeTaskForTool(call.name),
+          } satisfies ChatOfficeEvent);
+        }
       }
 
       return {
@@ -273,6 +332,14 @@ function buildChatGraph(llmService: LlmService) {
 @Injectable()
 export class ChatService {
   private readonly graph: ReturnType<typeof buildChatGraph>;
+  /**
+   * Ожидающие одобрения диалоги: ключ — `conversationId`, значение —
+   * владелец диалога и функция, которая будит граф.
+   */
+  private readonly pendingApprovals = new Map<
+    string,
+    { userId: string; resume: () => void }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -280,7 +347,27 @@ export class ChatService {
     private readonly billingService: BillingService,
     private readonly skillsService: SkillsService,
   ) {
-    this.graph = buildChatGraph(this.llmService);
+    this.graph = buildChatGraph(this.llmService, (conversationId, userId) =>
+      this.waitForApproval(conversationId, userId),
+    );
+  }
+
+  /**
+   * Возобновляет граф, приостановленный перед инструментом, которому нужно
+   * одобрение. Возвращает `false`, если ожидания для диалога нет или оно
+   * принадлежит другому пользователю.
+   */
+  approveAction(conversationId: string, userId: string): boolean {
+    const pending = this.pendingApprovals.get(conversationId);
+
+    if (!pending || pending.userId !== userId) {
+      return false;
+    }
+
+    this.pendingApprovals.delete(conversationId);
+    pending.resume();
+
+    return true;
   }
 
   async createConversation(
@@ -301,19 +388,18 @@ export class ChatService {
     conversationId: string,
     content: string,
   ): Promise<ChatReply> {
-    const { messages, tools } = await this.prepareMessage(
-      userId,
-      conversationId,
-      content,
-    );
+    const { messages, tools, approvalRequiredTools } =
+      await this.prepareMessage(userId, conversationId, content);
 
     let reply: string;
 
     try {
       const state = await this.graph.invoke({
         conversationId,
+        userId,
         messages,
         availableTools: tools,
+        approvalRequiredTools,
       });
       reply = state.reply;
     } catch (error) {
@@ -324,6 +410,8 @@ export class ChatService {
       }
 
       reply = ERROR_KEYS.insufficientFunds;
+    } finally {
+      this.pendingApprovals.delete(conversationId);
     }
 
     await this.persistReply(conversationId, reply);
@@ -343,17 +431,20 @@ export class ChatService {
     onDelta: (text: string) => void,
     onOfficeEvent?: (event: OfficeEvent) => void,
   ): Promise<ChatReply> {
-    const { messages, tools } = await this.prepareMessage(
-      userId,
-      conversationId,
-      content,
-    );
+    const { messages, tools, approvalRequiredTools } =
+      await this.prepareMessage(userId, conversationId, content);
 
     let reply = '';
 
     try {
       const stream = await this.graph.stream(
-        { conversationId, messages, availableTools: tools },
+        {
+          conversationId,
+          userId,
+          messages,
+          availableTools: tools,
+          approvalRequiredTools,
+        },
         { streamMode: ['custom', 'values'] },
       );
 
@@ -395,6 +486,9 @@ export class ChatService {
 
       reply = ERROR_KEYS.insufficientFunds;
       onDelta(reply);
+    } finally {
+      // Диалог завершился (в том числе с ошибкой) — ожидание больше не нужно.
+      this.pendingApprovals.delete(conversationId);
     }
 
     await this.persistReply(conversationId, reply);
@@ -410,6 +504,7 @@ export class ChatService {
   ): Promise<{
     messages: BaseMessage[];
     tools: StructuredToolInterface[];
+    approvalRequiredTools: string[];
   }> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -442,9 +537,11 @@ export class ChatService {
       .reverse()
       .map((message) => toLangChainMessage(message));
 
-    const tools = await this.buildTools(userId);
+    const skills = await this.skillsService.getEnabledSkills();
+    const tools = this.buildTools(userId, skills);
+    const approvalRequiredTools = resolveApprovalTools(skills);
 
-    return { messages, tools };
+    return { messages, tools, approvalRequiredTools };
   }
 
   /** Сохраняет ответ ассистента и обновляет время диалога. */
@@ -470,13 +567,24 @@ export class ChatService {
     }
   }
 
+  /** Сохраняет резолвер в Map и возвращает промис ожидания одобрения. */
+  private waitForApproval(
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.pendingApprovals.set(conversationId, { userId, resume: resolve });
+    });
+  }
+
   /**
    * Инструменты, доступные агенту. Цена каждого берётся из манифеста
    * включённого навыка, объявившего инструмент; если цены нет — бесплатно.
    */
-  private async buildTools(userId: string): Promise<StructuredToolInterface[]> {
-    const skills = await this.skillsService.getEnabledSkills();
-
+  private buildTools(
+    userId: string,
+    skills: InstalledSkill[],
+  ): StructuredToolInterface[] {
     const beforeExecuteFor = (
       toolName: string,
     ): SandboxToolOptions['beforeExecute'] => {

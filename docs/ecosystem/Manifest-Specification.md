@@ -81,6 +81,10 @@ Gateway использует эту схему (через библиотеку 
         "freeCallsLimit": { "type": "integer", "minimum": 0 }
       }
     },
+    "requiresApproval": {
+      "type": "boolean",
+      "description": "Требует ли навык подтверждения пользователя перед вызовом инструментов (Human-in-the-Loop)."
+    },
     "checksum": {
       "type": "string",
       "pattern": "^sha256:[a-f0-9]{64}$",

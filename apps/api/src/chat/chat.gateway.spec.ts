@@ -16,6 +16,7 @@ interface JwtMock {
 
 interface ChatServiceMock {
   streamMessage: MockFn;
+  approveAction: MockFn;
 }
 
 interface SocketMock {
@@ -41,7 +42,7 @@ describe('ChatGateway', () => {
 
   beforeEach(() => {
     jwt = { verifyAsync: vi.fn() };
-    chatService = { streamMessage: vi.fn() };
+    chatService = { streamMessage: vi.fn(), approveAction: vi.fn() };
 
     gateway = new ChatGateway(
       jwt as unknown as JwtService,
@@ -251,12 +252,17 @@ describe('ChatGateway', () => {
       const log = vi
         .spyOn(Logger.prototype, 'log')
         .mockImplementation(() => {});
+      chatService.approveAction.mockReturnValue(true);
 
       gateway.handleApproveAction(socket as unknown as Socket, {
         conversationId: CONVERSATION_ID,
         approved: true,
       });
 
+      expect(chatService.approveAction).toHaveBeenCalledWith(
+        CONVERSATION_ID,
+        USER_ID,
+      );
       expect(log).toHaveBeenCalledWith(
         expect.stringContaining(CONVERSATION_ID),
       );
@@ -278,6 +284,7 @@ describe('ChatGateway', () => {
           conversationId: CONVERSATION_ID,
         }),
       ).toThrow(WsException);
+      expect(chatService.approveAction).not.toHaveBeenCalled();
       expect(socket.emit).not.toHaveBeenCalled();
     });
   });
