@@ -8,8 +8,36 @@
       name="description"
       content="SkillWharf — рабочее пространство для автономных ИИ-агентов."
     />
-    <meta name="theme-color" content="#020617" />
-    <title>SkillWharf — вход</title>
+    <meta name="theme-color" content="#8B5CF6" />
+    <title>SkillWharf — рабочее пространство</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Тема применяется до первого рендера, чтобы не было вспышки светлого фона. -->
+    <script>
+      (() => {
+        try {
+          const saved = window.localStorage.getItem('skillwharf-theme');
+          const parsed = saved === null ? null : JSON.parse(saved);
+          const stored = parsed?.state?.theme;
+          const theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+
+          document.documentElement.dataset.theme = theme;
+        } catch {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
