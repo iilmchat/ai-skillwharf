@@ -1,25 +1,23 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Link,
-  NavLink,
-  useNavigate,
-  useSearchParams,
-} from 'react-router-dom';
+import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuditTab } from '../components/admin/AuditTab';
 import { LlmRouterTab } from '../components/admin/LlmRouterTab';
 import { PromptsTab } from '../components/admin/PromptsTab';
+import { SkillsTab } from '../components/admin/SkillsTab';
 import { Brand } from '../components/Brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuthStore } from '../store/auth.store';
 
-const TAB_IDS = ['prompts', 'router', 'audit'] as const;
+const TAB_IDS = ['prompts', 'router', 'skills', 'audit'] as const;
 type AdminTab = (typeof TAB_IDS)[number];
 
 function parseTab(value: string | null): AdminTab {
-  return value === 'router' || value === 'audit' ? value : 'prompts';
+  return value === 'router' || value === 'skills' || value === 'audit'
+    ? value
+    : 'prompts';
 }
 
 function navLinkClasses({ isActive }: { isActive: boolean }): string {
@@ -230,6 +228,7 @@ export function AdminPage() {
           >
             {activeTab === 'prompts' && <PromptsTab />}
             {activeTab === 'router' && <LlmRouterTab />}
+            {activeTab === 'skills' && <SkillsTab />}
             {activeTab === 'audit' && <AuditTab />}
           </section>
         </div>

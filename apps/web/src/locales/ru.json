@@ -382,6 +382,7 @@
       "label": "Разделы пульта",
       "prompts": "Промпты",
       "router": "LLM Роутер",
+      "skills": "Навыки",
       "audit": "Аудит"
     },
     "prompts": {
@@ -453,6 +454,23 @@
         "saving": "Сохраняем…",
         "success": "Правило добавлено."
       }
+    },
+    "skills": {
+      "title": "Навыки",
+      "subtitle": "Импорт навыков из OpenClaw и управление каталогом.",
+      "import": "Импорт из OpenClaw",
+      "emptyTitle": "Импорт навыков",
+      "emptyBody": "Загрузите ZIP-архив навыка: внутри должен быть файл SKILL.md с YAML frontmatter.",
+      "modalTitle": "Импорт из OpenClaw",
+      "modalSubtitle": "Выберите ZIP-архив навыка. Манифест проверится схемой и skill-vetter.",
+      "fileLabel": "ZIP-архив",
+      "fileHint": "Максимум 5 МБ. Опасные команды (rm -rf, eval, curl | sh) блокируют импорт.",
+      "cancel": "Отмена",
+      "submit": "Импортировать",
+      "submitting": "Импортируем…",
+      "success": "Навык успешно импортирован",
+      "noFile": "Выберите ZIP-архив.",
+      "importError": "Не удалось импортировать навык."
     },
     "audit": {
       "title": "Аудит",

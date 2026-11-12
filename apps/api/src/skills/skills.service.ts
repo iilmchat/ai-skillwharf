@@ -7,8 +7,9 @@ import {
 } from '@nestjs/common';
 import { Prisma, type InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema, type SkillManifest } from '@skillwharf/shared';
+import AdmZip from 'adm-zip';
 import { existsSync, globSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -99,6 +100,60 @@ export class SkillsService implements OnModuleInit {
     }
 
     const vetting = this.vetManifest(result.raw);
+    const installed = await this.persistSkillManifest(result.manifest, true);
+
+    return { ...installed, ...vetting };
+  }
+
+  /**
+   * Импорт навыка из ZIP-архива OpenClaw. Архив читается в памяти: ищем
+   * `SKILL.md` в корне или вложенной папке, валидируем YAML и прогоняем
+   * skill-vetter. Опасный код блокирует импорт.
+   */
+  async importFromZip(archive: Buffer): Promise<SkillInstallResult> {
+    let zip: AdmZip;
+
+    try {
+      zip = new AdmZip(archive);
+    } catch {
+      throw new BadRequestException('Не удалось прочитать ZIP-архив');
+    }
+
+    const skillEntry = zip
+      .getEntries()
+      .find(
+        (entry) =>
+          !entry.isDirectory &&
+          basename(entry.entryName).toLowerCase() === 'skill.md',
+      );
+
+    if (!skillEntry) {
+      throw new BadRequestException('В архиве не найден SKILL.md');
+    }
+
+    let fileContent: string;
+
+    try {
+      fileContent = skillEntry.getData().toString('utf8');
+    } catch {
+      throw new BadRequestException('Не удалось прочитать SKILL.md из архива');
+    }
+
+    const result = this.parseManifest(fileContent);
+
+    if (!result.success) {
+      throw new BadRequestException({
+        message: 'Некорректный манифест навыка',
+        errors: result.errors,
+      });
+    }
+
+    const vetting = this.vetManifest(result.raw);
+
+    if (vetting.danger !== undefined) {
+      throw new BadRequestException('Ошибка: найдены опасные команды');
+    }
+
     const installed = await this.persistSkillManifest(result.manifest, true);
 
     return { ...installed, ...vetting };

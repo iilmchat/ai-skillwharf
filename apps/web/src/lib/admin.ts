@@ -63,6 +63,14 @@ export interface AuditEntry {
   createdAt?: string;
 }
 
+export interface ImportedSkill {
+  id: string;
+  name: string;
+  version: string;
+  warning?: string;
+  danger?: string;
+}
+
 export const adminQueryKeys = {
   prompts: ['admin', 'prompts'] as const,
   promptVersions: (promptId: string) =>
@@ -191,12 +199,20 @@ export async function createLlmRoute(
 export async function fetchAudit(): Promise<AuditEntry[]> {
   const { data } = await api.get<unknown>('/admin/audit');
 
-  return unwrapList<AuditEntry>(data, [
-    'entries',
-    'events',
-    'items',
-    'data',
-  ]);
+  return unwrapList<AuditEntry>(data, ['entries', 'events', 'items', 'data']);
+}
+
+/** Загружает ZIP-архив OpenClaw в админский эндпоинт импорта. */
+export async function importSkillArchive(file: File): Promise<ImportedSkill> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const { data } = await api.postForm<ImportedSkill>(
+    '/admin/skills/import',
+    formData,
+  );
+
+  return data;
 }
 
 export function getAdminErrorMessage(

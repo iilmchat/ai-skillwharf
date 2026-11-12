@@ -382,6 +382,7 @@
       "label": "Control plane sections",
       "prompts": "Prompts",
       "router": "LLM Router",
+      "skills": "Skills",
       "audit": "Audit"
     },
     "prompts": {
@@ -453,6 +454,23 @@
         "saving": "Saving…",
         "success": "The rule has been added."
       }
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Import skills from OpenClaw and manage the catalogue.",
+      "import": "Import from OpenClaw",
+      "emptyTitle": "Import skills",
+      "emptyBody": "Upload a skill ZIP archive. It must contain a SKILL.md file with YAML frontmatter.",
+      "modalTitle": "Import from OpenClaw",
+      "modalSubtitle": "Choose a skill ZIP archive. The manifest will be validated by the schema and skill-vetter.",
+      "fileLabel": "ZIP archive",
+      "fileHint": "Up to 5 MB. Dangerous commands (rm -rf, eval, curl | sh) block the import.",
+      "cancel": "Cancel",
+      "submit": "Import",
+      "submitting": "Importing…",
+      "success": "Skill imported successfully",
+      "noFile": "Choose a ZIP archive.",
+      "importError": "Could not import the skill."
     },
     "audit": {
       "title": "Audit",

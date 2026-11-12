@@ -508,3 +508,35 @@ pnpm exec playwright show-report
   `docker compose logs api` и модуль `RegistryModule`.
 * Установка навыка возвращает 403 — тестовый пользователь не `admin`;
   локально это делает `promoteToAdmin()` в `beforeAll`.
+
+## 13. Импорт навыков
+
+Навыки из OpenClaw переносятся ZIP-архивом через Control Plane или API.
+Эндпоинт доступен только администратору:
+
+```text
+POST /api/v1/admin/skills/import
+Content-Type: multipart/form-data
+Поле файла: file
+```
+
+Ограничения и проверки:
+
+* размер архива — до 5 МБ;
+* `SKILL.md` ищется в корне архива или во вложенной папке;
+* YAML frontmatter валидируется схемой `SkillManifestSchema`;
+* skill-vetter блокирует опасные команды (`rm -rf`, `eval`, `curl | sh`);
+* при успехе навык сохраняется или обновляется в `InstalledSkill`.
+
+Пример запроса:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/admin/skills/import \
+  -H "Authorization: Bearer <JWT_АДМИНА>" \
+  -F "file=@my-skill.zip"
+```
+
+В интерфейсе откройте **Пульт управления → Навыки → Импорт из OpenClaw**,
+выберите ZIP-архив и нажмите «Импортировать». Успех подтверждается
+сообщением «Навык успешно импортирован», ошибки валидации и skill-vetter
+показываются в модалке.
