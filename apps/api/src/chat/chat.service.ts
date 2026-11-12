@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import {
   AIMessage,
   type BaseMessage,
@@ -68,12 +67,13 @@ export interface ChatReply {
 interface ToolPrice {
   price: number;
   skillName: string;
+  freeCallsLimit: number;
 }
 
 /**
  * Цена инструмента берётся из манифеста включённого навыка, который объявил
- * этот инструмент в `dependencies.tools`. Free, отсутствие `pricing` или
- * цены — инструмент бесплатный.
+ * этот инструмент в `dependencies.tools`. Поддерживаются Pay-per-Call и
+ * Freemium (с бесплатными вызовами); Free и отсутствие цены — бесплатно.
  */
 function resolveToolPrice(
   skills: InstalledSkill[],
@@ -95,14 +95,19 @@ function resolveToolPrice(
     const pricing = manifest.pricing;
 
     if (
-      pricing?.model === 'Pay-per-Call' &&
-      typeof pricing.price === 'number' &&
-      pricing.price > 0
+      !pricing ||
+      typeof pricing.price !== 'number' ||
+      pricing.price <= 0 ||
+      (pricing.model !== 'Pay-per-Call' && pricing.model !== 'Freemium')
     ) {
-      return { price: pricing.price, skillName: manifest.name };
+      return null;
     }
 
-    return null;
+    return {
+      price: pricing.price,
+      skillName: manifest.name,
+      freeCallsLimit: pricing.freeCallsLimit ?? 0,
+    };
   }
 
   return null;
@@ -322,11 +327,11 @@ export class ChatService {
       }
 
       return async (): Promise<void> => {
-        await this.billingService.chargeForSkill(
+        await this.billingService.checkAndChargeSkill(
           userId,
+          pricing.skillName,
           pricing.price,
-          `Вызов навыка ${pricing.skillName}`,
-          randomUUID(),
+          pricing.freeCallsLimit,
         );
       };
     };

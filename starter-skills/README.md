@@ -13,17 +13,19 @@
 | `github` | [`02-work-tools/github`](02-work-tools/github/SKILL.md) | Issues, pull requests и статусы CI через `gh` CLI | Freemium: 50 вызовов бесплатно, далее 0.02 RUB | `network`, `shell` | `exec` |
 | `cron-automation` | [`03-automation/cron-automation`](03-automation/cron-automation/SKILL.md) | Регулярные задачи и напоминания через `cron_manager` | Pay-per-Call, 0.05 RUB за вызов | — | `cron_manager` |
 | `skill-vetter` | [`04-security/skill-vetter`](04-security/skill-vetter/SKILL.md) | Аудит навыка на опасные паттерны перед установкой | Free | `filesystem` | `read_file` |
+| `code-runner` | [`05-utility/code-runner`](05-utility/code-runner/SKILL.md) | Выполнение Python/shell-кода в изолированной песочнице | Pay-per-Call, 0.05 RUB за вызов | `shell` | `execute_sandbox_code` |
 
 ## Модели монетизации
 
 - **Free** — вызовы не списывают средства. Подходит для служебных навыков,
   которые не создают нагрузки (например, `skill-vetter`).
 - **Pay-per-Call** — фиксированная цена за каждый вызов инструмента. Сумма
-  списывается через `BillingService.chargeForSkill()` до запуска песочницы;
-  при недостатке средств вызов отклоняется.
-- **Freemium** — первые вызовы бесплатны (поле `freeCallsLimit`), далее
-  действует цена за вызов. Так устроен `github`: базовые чтения не должны
-  упираться в paywall.
+  списывается через `BillingService.checkAndChargeSkill()` до запуска
+  песочницы; при недостатке средств вызов отклоняется.
+- **Freemium** — первые `freeCallsLimit` вызовов бесплатны, дальше действует
+  цена за вызов. Использованные бесплатные вызовы учитываются в таблице
+  `SkillUsage` (поле `callsCount`). Так устроен `github`: базовые чтения не
+  должны упираться в paywall.
 
 Модель и цена задаются в блоке `pricing` манифеста. Допустимые значения:
 `Free`, `Pay-per-Call`, `Subscription`, `Freemium`.
@@ -75,7 +77,7 @@ curl -sS -X DELETE "$API/api/v1/skills/<id>" -H "Authorization: Bearer $TOKEN"
 
 ### Проверка манифестов
 
-Тест `apps/api/src/skills/starter-skills.spec.ts` читает все четыре
+Тест `apps/api/src/skills/starter-skills.spec.ts` читает все пять
 `SKILL.md` из этого каталога и валидирует их схемой `SkillManifestSchema`:
 
 ```bash
@@ -86,6 +88,8 @@ pnpm --filter api test
 
 - `github` запрашивает разрешение `shell` и запускает `gh` в песочнице —
   устанавливайте его только в доверенном окружении.
+- `code-runner` выполняет произвольный shell/Python-код в песочнице без сети
+  и с read-only корневой файловой системой; таймаут — 10 секунд.
 - Перед установкой сторонних навыков используйте `skill-vetter`: он ищет
   `curl | bash`, `rm -rf`, `eval`, утечки секретов и другие опасные паттерны.
 - Разрешения из манифеста должен подтверждать администратор при установке.

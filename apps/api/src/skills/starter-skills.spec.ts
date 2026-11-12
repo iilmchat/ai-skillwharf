@@ -17,6 +17,7 @@ const STARTER_SKILLS = [
   '02-work-tools/github/SKILL.md',
   '03-automation/cron-automation/SKILL.md',
   '04-security/skill-vetter/SKILL.md',
+  '05-utility/code-runner/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

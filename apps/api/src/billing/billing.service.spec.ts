@@ -20,6 +20,7 @@ interface TxMock {
 interface PrismaMock {
   wallet: { upsert: MockFn };
   ledgerEntry: { findUnique: MockFn };
+  skillUsage: { updateMany: MockFn; findUnique: MockFn; create: MockFn };
   $transaction: MockFn;
 }
 
@@ -52,6 +53,11 @@ describe('BillingService', () => {
     prisma = {
       wallet: { upsert: vi.fn() },
       ledgerEntry: { findUnique: vi.fn() },
+      skillUsage: {
+        updateMany: vi.fn(),
+        findUnique: vi.fn(),
+        create: vi.fn(),
+      },
       $transaction: vi.fn(),
     };
 
@@ -337,6 +343,143 @@ describe('BillingService', () => {
       );
       expect(balance.toFixed(2)).toBe('40.00');
       expect(tx.ledgerEntry.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('checkAndChargeSkill', () => {
+    let chargeSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      prisma.skillUsage.updateMany.mockResolvedValue({ count: 0 });
+      prisma.skillUsage.findUnique.mockResolvedValue(null);
+      prisma.skillUsage.create.mockResolvedValue({ id: 'usage-1' });
+      chargeSpy = vi.spyOn(service, 'chargeForSkill').mockResolvedValue({
+        balance: '10.00',
+        entryId: 'entry-1',
+      });
+    });
+
+    it('первый вызов в пределах лимита создаёт счётчик и не списывает', async () => {
+      await expect(
+        service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+      ).resolves.toBeNull();
+
+      expect(chargeSpy).not.toHaveBeenCalled();
+      expect(prisma.skillUsage.create).toHaveBeenCalledWith({
+        data: {
+          userId: USER_ID,
+          skillName: 'github',
+          callsCount: 1,
+          lastResetAt: expect.any(Date),
+        },
+      });
+    });
+
+    it('тратит свободный вызов, пока callsCount меньше лимита', async () => {
+      prisma.skillUsage.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+      ).resolves.toBeNull();
+
+      expect(prisma.skillUsage.updateMany).toHaveBeenCalledWith({
+        where: {
+          userId: USER_ID,
+          skillName: 'github',
+          callsCount: { lt: 50 },
+        },
+        data: { callsCount: { increment: 1 } },
+      });
+      expect(prisma.skillUsage.create).not.toHaveBeenCalled();
+      expect(chargeSpy).not.toHaveBeenCalled();
+    });
+
+    it('списывает цену после исчерпания лимита', async () => {
+      prisma.skillUsage.findUnique.mockResolvedValue({
+        id: 'usage-1',
+        callsCount: 50,
+      });
+
+      await expect(
+        service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+      ).resolves.toEqual({ balance: '10.00', entryId: 'entry-1' });
+
+      expect(chargeSpy).toHaveBeenCalledWith(
+        USER_ID,
+        0.02,
+        'Вызов навыка github',
+        expect.any(String),
+      );
+    });
+
+    it('без freeCallsLimit списывает с первого вызова', async () => {
+      await service.checkAndChargeSkill(
+        USER_ID,
+        'tavily-search',
+        0.05,
+        0,
+      );
+
+      expect(prisma.skillUsage.updateMany).not.toHaveBeenCalled();
+      expect(chargeSpy).toHaveBeenCalledWith(
+        USER_ID,
+        0.05,
+        'Вызов навыка tavily-search',
+        expect.any(String),
+      );
+    });
+
+    it('повторяет инкремент при гонке создания счётчика', async () => {
+      prisma.skillUsage.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+      prisma.skillUsage.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '5.22.0',
+          meta: { target: ['userId', 'skillName'] },
+        }),
+      );
+
+      await expect(
+        service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+      ).resolves.toBeNull();
+
+      expect(prisma.skillUsage.updateMany).toHaveBeenCalledTimes(2);
+      expect(chargeSpy).not.toHaveBeenCalled();
+    });
+
+    it('github: не списывает первые 50 вызовов, 51-й — платный', async () => {
+      let callsCount = 0;
+
+      prisma.skillUsage.updateMany.mockImplementation(async () => {
+        if (callsCount < 50) {
+          callsCount += 1;
+
+          return { count: 1 };
+        }
+
+        return { count: 0 };
+      });
+      prisma.skillUsage.findUnique.mockImplementation(async () => ({
+        id: 'usage-1',
+        callsCount,
+      }));
+
+      for (let call = 0; call < 50; call += 1) {
+        await expect(
+          service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+        ).resolves.toBeNull();
+      }
+
+      expect(chargeSpy).not.toHaveBeenCalled();
+
+      await expect(
+        service.checkAndChargeSkill(USER_ID, 'github', 0.02, 50),
+      ).resolves.toEqual({ balance: '10.00', entryId: 'entry-1' });
+
+      expect(chargeSpy).toHaveBeenCalledTimes(1);
+      expect(callsCount).toBe(50);
     });
   });
 });

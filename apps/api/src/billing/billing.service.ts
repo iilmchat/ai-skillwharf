@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -155,6 +156,84 @@ export class BillingService {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Freemium: первые `freeCallsLimit` вызовов навыка бесплатны, дальше
+   * списывается `price`. Счётчик занимается атомарно, поэтому лимит не
+   * превышается при параллельных вызовах.
+   *
+   * Возвращает `null`, если вызов попал в бесплатный лимит.
+   */
+  async checkAndChargeSkill(
+    userId: string,
+    skillName: string,
+    price: number,
+    freeCallsLimit = 0,
+  ): Promise<LedgerOperationResult | null> {
+    if (
+      freeCallsLimit > 0 &&
+      (await this.tryConsumeFreeCall(userId, skillName, freeCallsLimit))
+    ) {
+      return null;
+    }
+
+    return this.chargeForSkill(
+      userId,
+      price,
+      `Вызов навыка ${skillName}`,
+      randomUUID(),
+    );
+  }
+
+  /** Атомарно занимает один бесплатный вызов; `false` — лимит исчерпан. */
+  private async tryConsumeFreeCall(
+    userId: string,
+    skillName: string,
+    freeCallsLimit: number,
+  ): Promise<boolean> {
+    const consumed = await this.prisma.skillUsage.updateMany({
+      where: { userId, skillName, callsCount: { lt: freeCallsLimit } },
+      data: { callsCount: { increment: 1 } },
+    });
+
+    if (consumed.count > 0) {
+      return true;
+    }
+
+    const existing = await this.prisma.skillUsage.findUnique({
+      where: { userId_skillName: { userId, skillName } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return false;
+    }
+
+    try {
+      await this.prisma.skillUsage.create({
+        data: {
+          userId,
+          skillName,
+          callsCount: 1,
+          lastResetAt: new Date(),
+        },
+      });
+
+      return true;
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      // Параллельный вызов уже создал запись — повторяем атомарный инкремент.
+      const raced = await this.prisma.skillUsage.updateMany({
+        where: { userId, skillName, callsCount: { lt: freeCallsLimit } },
+        data: { callsCount: { increment: 1 } },
+      });
+
+      return raced.count > 0;
     }
   }
 

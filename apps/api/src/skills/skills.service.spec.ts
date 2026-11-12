@@ -213,7 +213,7 @@ version: 1
 
       const seeded = await service.seedStarterSkills();
 
-      expect(seeded).toBe(4);
+      expect(seeded).toBe(5);
 
       const names = (
         prisma.installedSkill.upsert.mock.calls as [UpsertArgs][]
@@ -222,6 +222,7 @@ version: 1
         .sort();
 
       expect(names).toEqual([
+        'code-runner',
         'cron-automation',
         'github',
         'skill-vetter',

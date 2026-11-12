@@ -98,3 +98,15 @@ model InstalledSkill {
   isEnabled   Boolean  @default(true)
   installedAt DateTime @default(now())
 }
+
+/// Счётчик бесплатных вызовов навыка (Freemium).
+model SkillUsage {
+  id          String   @id @default(uuid())
+  userId      String
+  skillName   String
+  callsCount  Int      @default(0)
+  lastResetAt DateTime @default(now())
+
+  @@unique([userId, skillName])
+  @@index([userId])
+}

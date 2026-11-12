@@ -43,7 +43,7 @@ interface SandboxMock {
 }
 
 interface BillingMock {
-  chargeForSkill: MockFn;
+  checkAndChargeSkill: MockFn;
   getBalance: MockFn;
 }
 
@@ -52,9 +52,10 @@ interface SkillsMock {
 }
 
 interface TestPricing {
-  model: 'Free' | 'Pay-per-Call';
+  model: 'Free' | 'Pay-per-Call' | 'Freemium';
   price?: number;
   currency?: 'RUB' | 'USD';
+  freeCallsLimit?: number;
 }
 
 function toolCallMessage(
@@ -110,7 +111,7 @@ describe('ChatService', () => {
       message: { create: vi.fn(), findMany: vi.fn() },
     };
     sandbox = { runCommand: vi.fn() };
-    billing = { chargeForSkill: vi.fn(), getBalance: vi.fn() };
+    billing = { checkAndChargeSkill: vi.fn(), getBalance: vi.fn() };
     skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
 
     // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
@@ -232,7 +233,7 @@ describe('ChatService', () => {
       ]);
       expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
       expect(skills.getEnabledSkills).toHaveBeenCalledTimes(1);
-      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
     });
 
     it('не запускает агента при балансе ниже минимального', async () => {
@@ -250,7 +251,7 @@ describe('ChatService', () => {
       expect(prisma.message.create).not.toHaveBeenCalled();
       expect(skills.getEnabledSkills).not.toHaveBeenCalled();
       expect(chatWithTools).not.toHaveBeenCalled();
-      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
     });
 
     it('разрешает запуск при балансе ровно 0.50', async () => {
@@ -285,7 +286,7 @@ describe('ChatService', () => {
           toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
         )
         .mockResolvedValueOnce(new AIMessage('Готово'));
-      billing.chargeForSkill.mockResolvedValue({
+      billing.checkAndChargeSkill.mockResolvedValue({
         balance: '9.95',
         entryId: 'entry-1',
       });
@@ -300,11 +301,11 @@ describe('ChatService', () => {
       expect(result.reply).toBe('Готово');
 
       // Ровно цена из манифеста, а не прежние фиксированные 0.10.
-      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+      expect(billing.checkAndChargeSkill).toHaveBeenCalledWith(
         USER_ID,
+        'tavily-search',
         0.05,
-        'Вызов навыка tavily-search',
-        expect.any(String),
+        0,
       );
 
       const [command, env] = sandbox.runCommand.mock.calls[0] as [
@@ -317,7 +318,7 @@ describe('ChatService', () => {
 
       // Сначала деньги, потом запуск инструмента.
       expect(
-        billing.chargeForSkill.mock.invocationCallOrder[0],
+        billing.checkAndChargeSkill.mock.invocationCallOrder[0],
       ).toBeLessThan(sandbox.runCommand.mock.invocationCallOrder[0]);
 
       // Результат инструмента вернулся в LLM вторым вызовом.
@@ -330,6 +331,42 @@ describe('ChatService', () => {
 
       expect(toolMessage).toBeInstanceOf(ToolMessage);
       expect(toolMessage?.content).toBe('{"results":[]}');
+    });
+
+    it('передаёт freeCallsLimit Freemium-навыка', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('github', EXEC_TOOL_NAME, {
+          model: 'Freemium',
+          price: 0.02,
+          currency: 'RUB',
+          freeCallsLimit: 50,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'gh --version' },
+      ]);
+      chatWithTools
+        .mockResolvedValueOnce(
+          toolCallMessage(EXEC_TOOL_NAME, { command: 'gh --version' }),
+        )
+        .mockResolvedValueOnce(new AIMessage('Готово'));
+      billing.checkAndChargeSkill.mockResolvedValue(null);
+      sandbox.runCommand.mockResolvedValue('gh version 2.0.0\n');
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'gh --version'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      expect(billing.checkAndChargeSkill).toHaveBeenCalledWith(
+        USER_ID,
+        'github',
+        0.02,
+        50,
+      );
+      expect(sandbox.runCommand).toHaveBeenCalledWith(
+        'gh --version',
+        expect.objectContaining({ [SANDBOX_NETWORK_FLAG]: 'true' }),
+      );
     });
 
     it('не списывает средства за бесплатный навык', async () => {
@@ -351,7 +388,7 @@ describe('ChatService', () => {
         service.handleMessage(USER_ID, CONVERSATION_ID, 'найди новости'),
       ).resolves.toMatchObject({ reply: 'Готово' });
 
-      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
       expect(sandbox.runCommand).toHaveBeenCalledTimes(1);
     });
 
@@ -373,7 +410,7 @@ describe('ChatService', () => {
       );
 
       expect(result.reply).toBe('Готово: hi');
-      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
       expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
     });
 
@@ -391,7 +428,7 @@ describe('ChatService', () => {
       chatWithTools.mockResolvedValueOnce(
         toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
       );
-      billing.chargeForSkill.mockRejectedValue(
+      billing.checkAndChargeSkill.mockRejectedValue(
         new BadRequestException(ERROR_KEYS.insufficientFunds),
       );
 
