@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ADMIN_ROLES } from './lib/roles';
 import { disconnectSharedSocket } from './lib/socket';
 import { useAuthStore } from './store/auth.store';
 
@@ -38,6 +39,12 @@ const SkillsPage = lazy(() =>
 const StorePage = lazy(() =>
   import('./pages/StorePage').then((module) => ({
     default: module.StorePage,
+  })),
+);
+
+const AdminPage = lazy(() =>
+  import('./pages/AdminPage').then((module) => ({
+    default: module.AdminPage,
   })),
 );
 
@@ -98,6 +105,15 @@ function App() {
           }
         />
         <Route path="/app/office" element={<OfficePage />} />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+              <AdminPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/app/admin" element={<Navigate to="/admin" replace />} />
 
         {/* Старые пути остаются рабочими для сохранённых ссылок. */}
         <Route path="/chat" element={<Navigate to="/app/chat" replace />} />

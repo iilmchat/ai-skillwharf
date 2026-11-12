@@ -13,6 +13,7 @@ import {
   useRegistrySkills,
 } from '../hooks/useRegistrySkills';
 import { skillsQueryKey, useSkills } from '../hooks/useSkills';
+import { isAdminRole } from '../lib/roles';
 import {
   getRegistryPricing,
   getRegistryVetterReport,
@@ -23,6 +24,7 @@ import {
   type RegistrySkill,
   type VetterReport,
 } from '../lib/registry';
+import { useAuthStore } from '../store/auth.store';
 
 interface InstallVariables {
   skill: RegistrySkill;
@@ -150,6 +152,8 @@ function StoreSkeleton() {
 
 export function StorePage() {
   const { t } = useTranslation();
+  const role = useAuthStore((state) => state.user?.role);
+  const isAdmin = isAdminRole(role);
   const queryClient = useQueryClient();
   const registryQuery = useRegistrySkills();
   const skillsQuery = useSkills();
@@ -284,6 +288,11 @@ export function StorePage() {
               <NavLink to="/app/office" className={navLinkClasses}>
                 {t('nav.office')}
               </NavLink>
+              {isAdmin && (
+                <NavLink to="/admin" className={navLinkClasses}>
+                  {t('nav.admin')}
+                </NavLink>
+              )}
             </nav>
           </div>
 

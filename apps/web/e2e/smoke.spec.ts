@@ -16,6 +16,11 @@ const TEST_USER = {
   password: 'E2ePassword123!',
 };
 
+const VIEWER_USER = {
+  email: 'viewer@skillwharf.test',
+  password: 'ViewerPassword123!',
+};
+
 /** Пополняем баланс, иначе чат блокируется paywall'ом (минимум 0.50). */
 const MIN_BALANCE = 1;
 const TOPUP_AMOUNT = 10;
@@ -193,6 +198,56 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
     await expect(page.locator('form button[type="submit"]')).toBeVisible();
+  });
+
+  test('обычный пользователь не видит пульт управления', async ({
+    page,
+    request,
+  }) => {
+    const registration = await request.post(
+      `${API_BASE_URL}/auth/register`,
+      { data: VIEWER_USER },
+    );
+
+    if (!registration.ok() && registration.status() !== 409) {
+      throw new Error(
+        `Не удалось создать viewer-пользователя: ${registration.status()}`,
+      );
+    }
+
+    await page.goto('/login');
+    await page.fill('#email', VIEWER_USER.email);
+    await page.fill('#password', VIEWER_USER.password);
+    await page.click('form button[type="submit"]');
+
+    await expect(page).toHaveURL(/\/app\/chat$/);
+    await expect(page.locator('#chat-message')).toBeEnabled();
+    await expect(page.locator('a[href="/admin"]')).toHaveCount(0);
+  });
+
+  test('администратор открывает пульт управления', async ({ page }) => {
+    await loginViaUi(page);
+
+    const adminLink = page.locator('a[href="/admin"]');
+    await expect(adminLink).toBeVisible();
+    await adminLink.click();
+
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(
+      /Пульт управления|Control plane/,
+    );
+    await expect(
+      page.getByRole('tab', { name: /Промпты|Prompts/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('tab', { name: /LLM Роутер|LLM Router/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('tab', { name: /Аудит|Audit/ }),
+    ).toBeVisible();
+
+    await page.getByRole('tab', { name: /Аудит|Audit/ }).click();
+    await expect(page.getByRole('tabpanel')).toBeVisible();
   });
 
   test('пользователь входит, отправляет сообщение и получает ответ', async ({

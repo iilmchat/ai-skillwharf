@@ -52,7 +52,8 @@
     "chat": "Chat",
     "skills": "Skills",
     "store": "Store",
-    "office": "AI office"
+    "office": "AI office",
+    "admin": "Control plane"
   },
   "skills": {
     "title": "Skills",
@@ -339,6 +340,116 @@
       "mockHint": "This card uses mock data. Open the chat to receive live events.",
       "liveHint": "Events come over WebSocket and are bound to the current conversation.",
       "close": "Close agent card"
+    }
+  },
+  "admin": {
+    "eyebrow": "Control Plane",
+    "title": "Control plane",
+    "subtitle": "Prompts, LLM routing, and audit in one place.",
+    "roleBadge": "Role: {{role}}",
+    "guest": "Guest",
+    "backToChat": "Back to chat",
+    "retry": "Retry",
+    "tabs": {
+      "label": "Control plane sections",
+      "prompts": "Prompts",
+      "router": "LLM Router",
+      "audit": "Audit"
+    },
+    "prompts": {
+      "title": "Prompts",
+      "subtitle": "Templates, versions, and change history.",
+      "count": "Templates: {{count}}",
+      "loading": "Loading prompts…",
+      "errorTitle": "Could not load prompts",
+      "emptyTitle": "No templates yet",
+      "emptyBody": "Create the first template through the API and it will appear here.",
+      "updatedAt": "Updated {{date}}",
+      "inactive": "Inactive"
+    },
+    "drawer": {
+      "eyebrow": "Prompt template",
+      "versions": "Version history",
+      "activeVersion": "Active version: {{version}}",
+      "create": "Create version",
+      "close": "Close history",
+      "loading": "Loading versions…",
+      "error": "Could not load versions",
+      "empty": "This template has no versions yet.",
+      "version": "Version {{version}}",
+      "author": "Author: {{author}}",
+      "noContent": "No content",
+      "updatedAt": "Updated {{date}}"
+    },
+    "versionModal": {
+      "title": "New version",
+      "subtitle": "Template “{{name}}”. The text will be saved as a new version.",
+      "label": "Prompt text",
+      "placeholder": "Enter the new prompt text…",
+      "required": "Enter the prompt text.",
+      "save": "Save version",
+      "saving": "Saving…",
+      "success": "A new version has been created."
+    },
+    "router": {
+      "title": "LLM Router",
+      "subtitle": "Model selection rules, base URLs, and priorities.",
+      "add": "Add rule",
+      "count": "Rules: {{count}}",
+      "loading": "Loading rules…",
+      "errorTitle": "Could not load rules",
+      "emptyTitle": "No rules yet",
+      "emptyBody": "Add the first routing rule.",
+      "columns": {
+        "name": "Name",
+        "model": "Model",
+        "baseUrl": "Base URL",
+        "priority": "Priority"
+      },
+      "modal": {
+        "title": "New rule",
+        "subtitle": "A rule defines which model serves requests.",
+        "name": "Name",
+        "namePlaceholder": "For example, classification",
+        "model": "Model",
+        "modelPlaceholder": "deepseek-chat",
+        "baseUrl": "Base URL",
+        "baseUrlPlaceholder": "https://api.example.com/v1",
+        "priority": "Priority",
+        "invalid": "Fill in the name, model, and Base URL.",
+        "save": "Add rule",
+        "saving": "Saving…",
+        "success": "The rule has been added."
+      }
+    },
+    "audit": {
+      "title": "Audit",
+      "subtitle": "The latest administrator and system actions.",
+      "count": "Events: {{count}}",
+      "loading": "Loading the audit log…",
+      "errorTitle": "Could not load the audit log",
+      "emptyTitle": "The log is empty",
+      "emptyBody": "User and system actions will appear here.",
+      "columns": {
+        "time": "Time",
+        "actor": "Actor",
+        "action": "Action",
+        "target": "Target"
+      }
+    },
+    "errors": {
+      "network": "The server is unreachable. Check your connection.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "adminOnly": "This section is available to administrators only.",
+      "notAvailable": "The management API is not available on the server yet.",
+      "prompts": "Could not load prompts.",
+      "versions": "Could not load the version history.",
+      "createVersion": "Could not create the version.",
+      "router": "Could not load LLM rules.",
+      "createRoute": "Could not add the rule.",
+      "audit": "Could not load the audit log.",
+      "forbiddenTitle": "Access denied",
+      "forbiddenBody": "This section requires the administrator or owner role."
     }
   },
   "chat": {

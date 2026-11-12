@@ -8,6 +8,7 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SkillPricingBadge } from '../components/SkillPricingBadge';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { skillsQueryKey, useSkills } from '../hooks/useSkills';
+import { isAdminRole } from '../lib/roles';
 import {
   getSkillsErrorMessage,
   toggleSkill,
@@ -162,7 +163,8 @@ export function SkillsPage() {
   const queryClient = useQueryClient();
   const skillsQuery = useSkills();
   const role = useAuthStore((state) => state.user?.role);
-  const canManage = role === 'admin';
+  const isAdmin = isAdminRole(role);
+  const canManage = isAdmin;
   const [notice, setNotice] = useState<string | null>(null);
 
   const clearNotice = useCallback(() => setNotice(null), []);
@@ -255,6 +257,11 @@ export function SkillsPage() {
               <NavLink to="/app/office" className={navLinkClasses}>
                 {t('nav.office')}
               </NavLink>
+              {isAdmin && (
+                <NavLink to="/admin" className={navLinkClasses}>
+                  {t('nav.admin')}
+                </NavLink>
+              )}
             </nav>
           </div>
 

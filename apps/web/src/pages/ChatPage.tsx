@@ -21,6 +21,7 @@ import {
   type ConnectionState,
 } from '../hooks/useChatSession';
 import { useBalance } from '../hooks/useBalance';
+import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
 
 const LOGOUT_BUTTON_CLASSES =
@@ -140,6 +141,7 @@ export function ChatPage() {
   const { t } = useTranslation();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const isAdmin = isAdminRole(user?.role);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -284,6 +286,27 @@ export function ChatPage() {
               </svg>
               {t('nav.office')}
             </NavLink>
+
+            {isAdmin && (
+              <NavLink to="/admin" className={navItemClasses}>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                  <circle cx="9" cy="7" r="2" />
+                  <circle cx="15" cy="12" r="2" />
+                  <circle cx="7" cy="17" r="2" />
+                </svg>
+                {t('nav.admin')}
+              </NavLink>
+            )}
           </nav>
 
           <div className="flex-1 overflow-y-auto p-4">
