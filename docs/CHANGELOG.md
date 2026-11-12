@@ -15,11 +15,14 @@
 - Prisma ORM: схема БД (`User`, `Session`, `Transaction`), первая миграция и скрипт `db:migrate`.
 - Эндпоинт `GET /api/v1/health` с проверкой подключения к PostgreSQL.
 - Модуль аутентификации: регистрация/логин (Argon2, JWT access + refresh), `JwtStrategy` и `JwtAuthGuard`.
+- Ротация refresh-токенов: `POST /api/v1/auth/refresh` с проверкой сессии и срока действия.
+- RBAC: поле `role` у пользователя (по умолчанию `user`), декоратор `@Roles()` и `RolesGuard`.
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 
 ### Изменено
 
 - CI настроен на проверку сборки, тестов, Markdown-линтера и тестов песочницы.
+- Docker-образ API переведён на `pnpm deploy --prod` (560 МБ вместо 904 МБ), Prisma CLI для `db:migrate` ставится глобально.
 
 ## [0.1.0] - 2026-11-12
 

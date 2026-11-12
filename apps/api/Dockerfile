@@ -23,14 +23,15 @@ COPY apps/api ./apps/api
 # openssl нужен Prisma, чтобы определить версию OpenSSL (иначе выберется движок под libssl1.1).
 RUN apk add --no-cache openssl
 
-# Prisma Client генерируется до компиляции TypeScript: без него nest build не найдёт типы.
-RUN cd apps/api && npx prisma generate
-
-# Прогреваем schema-engine под openssl-3 в read-only node_modules рантайма:
-# иначе `db:migrate` попытается скачать движок в контейнере и упрётся в права.
-RUN cd apps/api && npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > /dev/null
-
+# Скрипт build сам генерирует Prisma Client: без него nest build не найдёт типы.
 RUN pnpm --filter api build
+
+# KI-001: изолированная папка только с production-зависимостями вместо всего node_modules.
+RUN pnpm --filter api deploy --prod /prod/api
+
+# `deploy` пересоздаёт node_modules из store и теряет сгенерированный клиент —
+# генерируем Prisma Client ещё раз уже в изолированной папке.
+RUN cd /prod/api && /app/apps/api/node_modules/.bin/prisma generate --schema prisma/schema.prisma
 
 # --- Stage 2: рантайм ---
 FROM node:24-alpine AS runner
@@ -41,20 +42,21 @@ ENV NODE_ENV=production
 # версию OpenSSL и Prisma пытается загрузить движок под libssl.so.1.1.
 RUN apk add --no-cache openssl
 
-RUN npm install --global pnpm@12.18.0
+# pnpm — для `pnpm run db:migrate` из Runbook, prisma CLI — для самого `migrate deploy`.
+# Кеш npm чистим в том же слое: иначе он добавляет сотни мегабайт к образу.
+RUN npm install --global --no-fund --no-audit pnpm@12.18.0 prisma@5.22.0 \
+  && npm cache clean --force
 WORKDIR /app
 
-# Берём node_modules из builder: там уже есть сгенерированный Prisma Client,
-# prisma CLI (нужен для `pnpm run db:migrate`) и нативные модули под alpine.
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps ./apps
-COPY --from=builder /app/packages ./packages
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Только production-зависимости + собранное приложение + схема и миграции Prisma.
+COPY --from=builder /prod/api/package.json ./package.json
+COPY --from=builder /prod/api/node_modules ./node_modules
+COPY --from=builder /prod/api/dist ./dist
+COPY --from=builder /prod/api/prisma ./prisma
 
 RUN addgroup -S -g 1001 appuser \
   && adduser -S -u 1001 -G appuser appuser
 
 USER appuser
-WORKDIR /app/apps/api
 EXPOSE 3000
 CMD ["node", "dist/main"]
