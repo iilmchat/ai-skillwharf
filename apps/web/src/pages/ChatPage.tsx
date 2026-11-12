@@ -179,6 +179,11 @@ export function ChatPage() {
       ? 'offline'
       : 'connecting';
 
+  const officeHref =
+    conversationId === null
+      ? '/app/office'
+      : `/app/office?conversationId=${encodeURIComponent(conversationId)}`;
+
   function handleLogout() {
     queryClient.clear();
     logout();
@@ -261,6 +266,23 @@ export function ChatPage() {
                 <path d="M9 7a3 3 0 0 1 6 0" />
               </svg>
               {t('nav.store')}
+            </NavLink>
+
+            <NavLink to={officeHref} className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M3 21h18M5 21V7l7-4 7 4v14" />
+                <path d="M9 21v-6h6v6" />
+              </svg>
+              {t('nav.office')}
             </NavLink>
           </nav>
 
@@ -396,6 +418,26 @@ export function ChatPage() {
                 >
                   <path d="M6 7h12l1 13H5L6 7Z" />
                   <path d="M9 7a3 3 0 0 1 6 0" />
+                </svg>
+              </Link>
+              <Link
+                to={officeHref}
+                aria-label={t('nav.office')}
+                title={t('nav.office')}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <path d="M3 21h18M5 21V7l7-4 7 4v14" />
+                  <path d="M9 21v-6h6v6" />
                 </svg>
               </Link>
               <ThemeToggle />

@@ -216,6 +216,49 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(messages.nth(1)).not.toBeEmpty();
   });
 
+  test('офис получает события агента и одобряет действие', async ({
+    page,
+  }) => {
+    await loginViaUi(page);
+
+    const chatForm = page
+      .locator('form')
+      .filter({ has: page.locator('#chat-message') });
+
+    await page.locator('#chat-message').fill(`E2E office ${Date.now()}`);
+    await chatForm.locator('button[type="submit"]').click();
+
+    await expect(
+      page.locator('ol[aria-live="polite"] > li'),
+    ).toHaveCount(2, { timeout: 90_000 });
+
+    await page.locator('a[href^="/app/office"]:visible').first().click();
+    await expect(page).toHaveURL(/\/app\/office/);
+
+    const nova = page.locator('main article').filter({ hasText: 'Nova' });
+    await expect(nova).toContainText(/Задача завершена|Task finished/);
+
+    await nova.getByRole('button').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i,
+    );
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+
+    const leo = page.locator('main article').filter({ hasText: 'Leo' });
+    await leo.getByRole('button').click();
+    await dialog
+      .getByRole('button', { name: /Одобрить действие|Approve action/i })
+      .click();
+
+    await expect(dialog).toContainText(
+      /Действие одобрено|Action approved/,
+    );
+    await expect(dialog).toContainText(/Печатает|Typing/);
+  });
+
   test('в магазине отображаются карточки и работает установка', async ({
     page,
   }) => {

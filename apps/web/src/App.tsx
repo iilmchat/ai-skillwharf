@@ -1,7 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { disconnectSharedSocket } from './lib/socket';
+import { useAuthStore } from './store/auth.store';
 
 const LandingPage = lazy(() =>
   import('./pages/LandingPage').then((module) => ({
@@ -54,6 +56,14 @@ function RouteFallback() {
 }
 
 function App() {
+  const accessToken = useAuthStore((state) => state.accessToken);
+
+  useEffect(() => {
+    if (accessToken === null) {
+      disconnectSharedSocket();
+    }
+  }, [accessToken]);
+
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>

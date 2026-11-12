@@ -252,6 +252,9 @@ export function SkillsPage() {
               <NavLink to="/app/store" className={navLinkClasses}>
                 {t('nav.store')}
               </NavLink>
+              <NavLink to="/app/office" className={navLinkClasses}>
+                {t('nav.office')}
+              </NavLink>
             </nav>
           </div>
 

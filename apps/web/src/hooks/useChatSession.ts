@@ -1,9 +1,12 @@
 import { isAxiosError } from 'axios';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import i18n from '../i18n';
 import { api } from '../lib/api';
+import { parseOfficeEvent } from '../lib/office-events';
+import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
+import { useOfficeStore } from '../store/office.store';
 
 const ACK_TIMEOUT_MS = 90_000;
 const INSUFFICIENT_FUNDS_MARKER = 'Недостаточно средств';
@@ -235,6 +238,8 @@ export function useChatSession(): ChatSession {
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
+    // Офис должен знать диалог, даже если пользователь уйдёт со страницы чата.
+    useOfficeStore.getState().setConversationId(conversationId);
   }, [conversationId]);
 
   const clearNotice = useCallback(() => {
@@ -253,6 +258,7 @@ export function useChatSession(): ChatSession {
     setConversationId(null);
     setMessages([]);
     setIsStreaming(false);
+    socketRef.current?.connect();
     setAttempt((value) => value + 1);
   }, []);
 
@@ -282,18 +288,23 @@ export function useChatSession(): ChatSession {
   }, [accessToken, attempt]);
 
   // Socket.IO идёт на тот же origin: в dev его проксирует Vite,
-  // в production — reverse proxy (Caddy/Nginx). Это убирает CORS
-  // и хардкод адреса API.
+  // в production — reverse proxy (Caddy/Nginx). Соединение общее с офисом,
+  // поэтому при переходе на /office поток событий не обрывается.
   useEffect(() => {
     if (accessToken === null) {
       return;
     }
 
-    const socket = io(window.location.origin, {
-      path: '/socket.io',
-      auth: { token: accessToken },
-    });
+    const socket = getSharedSocket(accessToken);
     socketRef.current = socket;
+    // Сокет — внешняя система, его состояние синхронизируется с UI.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsSocketOnline(socket.connected);
+    setSocketError(null);
+
+    if (!socket.connected) {
+      socket.connect();
+    }
 
     const handleConnect = () => {
       setIsSocketOnline(true);
@@ -395,10 +406,11 @@ export function useChatSession(): ChatSession {
     const handleStreamEnd = (payload: unknown) => {
       const pending = pendingRef.current;
       const eventConversationId = getPayloadConversationId(payload);
+      const activeConversationId = conversationIdRef.current;
 
       if (
         eventConversationId !== undefined &&
-        eventConversationId !== conversationIdRef.current
+        eventConversationId !== activeConversationId
       ) {
         return;
       }
@@ -411,12 +423,34 @@ export function useChatSession(): ChatSession {
       }
     };
 
+    const handleOfficeEvent = (payload: unknown) => {
+      const event = parseOfficeEvent(payload);
+      const activeConversationId = conversationIdRef.current;
+
+      if (event === null) {
+        return;
+      }
+
+      if (
+        event.conversationId !== undefined &&
+        event.conversationId !== activeConversationId
+      ) {
+        return;
+      }
+
+      // Само событие уже записал общий ingest; фиксируем привязку к чату.
+      useOfficeStore
+        .getState()
+        .setConversationId(event.conversationId ?? activeConversationId);
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleConnectError);
     socket.on('exception', handleException);
     socket.on('stream_delta', handleStreamDelta);
     socket.on('stream_end', handleStreamEnd);
+    socket.on('office_event', handleOfficeEvent);
 
     return () => {
       socket.off('connect', handleConnect);
@@ -425,9 +459,8 @@ export function useChatSession(): ChatSession {
       socket.off('exception', handleException);
       socket.off('stream_delta', handleStreamDelta);
       socket.off('stream_end', handleStreamEnd);
-      socket.disconnect();
+      socket.off('office_event', handleOfficeEvent);
       socketRef.current = null;
-      setIsSocketOnline(false);
 
       pendingRef.current?.cancel();
       pendingRef.current = null;

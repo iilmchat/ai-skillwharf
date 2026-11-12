@@ -7,21 +7,31 @@ import {
 } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import type { Socket } from 'socket.io-client';
 import { Brand } from '../components/Brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
+import {
+  DEFAULT_OFFICE_AGENT_ID,
+  parseOfficeEvent,
+  readConversationId,
+  type OfficeAgentStatus,
+} from '../lib/office-events';
+import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
-
-type AgentStatus = 'idle' | 'working' | 'waiting_approval';
+import { useOfficeStore } from '../store/office.store';
 
 interface OfficeAgent {
   id: string;
   name: string;
   roleKey: string;
   taskKey: string;
-  status: AgentStatus;
+  /** Задача, пришедшая с бэкенда; важнее локализованного mock-текста. */
+  task?: string;
+  status: OfficeAgentStatus;
   desk: string;
+  live?: boolean;
 }
 
 interface StatusMeta {
@@ -35,11 +45,11 @@ interface StatusMeta {
 
 const INITIAL_AGENTS: readonly OfficeAgent[] = [
   {
-    id: 'nova',
+    id: DEFAULT_OFFICE_AGENT_ID,
     name: 'Nova',
     roleKey: 'office.agents.nova.role',
     taskKey: 'office.agents.nova.task',
-    status: 'working',
+    status: 'idle',
     desk: '01',
   },
   {
@@ -84,13 +94,13 @@ const INITIAL_AGENTS: readonly OfficeAgent[] = [
   },
 ];
 
-const STATUS_ORDER: readonly AgentStatus[] = [
+const STATUS_ORDER: readonly OfficeAgentStatus[] = [
   'idle',
   'working',
   'waiting_approval',
 ];
 
-const STATUS_META: Record<AgentStatus, StatusMeta> = {
+const STATUS_META: Record<OfficeAgentStatus, StatusMeta> = {
   idle: {
     icon: '☕',
     labelKey: 'office.status.idle',
@@ -116,6 +126,36 @@ const STATUS_META: Record<AgentStatus, StatusMeta> = {
     iconTile: 'bg-warning-container text-on-warning-container',
   },
 };
+
+/**
+ * Накладывает событие бэкенда на карточки. Неизвестный agentId (пока MVP
+ * присылает `default`) обновляет первого агента, а не создаёт фантома.
+ */
+interface LiveAgentUpdate {
+  agentId: string;
+  status: OfficeAgentStatus;
+  task: string;
+}
+
+function applyLiveEvent(
+  agents: OfficeAgent[],
+  event: LiveAgentUpdate,
+): OfficeAgent[] {
+  const targetId = agents.some((agent) => agent.id === event.agentId)
+    ? event.agentId
+    : DEFAULT_OFFICE_AGENT_ID;
+
+  return agents.map((agent) =>
+    agent.id === targetId
+      ? {
+          ...agent,
+          status: event.status,
+          task: event.task,
+          live: true,
+        }
+      : agent,
+  );
+}
 
 const introVariants: Variants = {
   hidden: {},
@@ -219,9 +259,20 @@ function AgentDesk({
             </span>
           </div>
 
-          <h3 className="mt-4 font-display text-lg font-bold text-on-surface">
-            {agent.name}
-          </h3>
+          <div className="mt-4 flex items-center gap-2">
+            <h3 className="font-display text-lg font-bold text-on-surface">
+              {agent.name}
+            </h3>
+            {agent.live && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
+                <span
+                  aria-hidden="true"
+                  className="size-1 rounded-full bg-success"
+                />
+                {t('office.live')}
+              </span>
+            )}
+          </div>
           <p className="mt-0.5 text-sm text-on-surface-variant">
             {t(agent.roleKey)}
           </p>
@@ -231,7 +282,7 @@ function AgentDesk({
               {t('office.currentTask')}
             </p>
             <p className="mt-1 line-clamp-2 text-sm leading-snug text-on-surface">
-              {t(agent.taskKey)}
+              {agent.task ?? t(agent.taskKey)}
               {isWorking && (
                 <span
                   aria-hidden="true"
@@ -268,11 +319,13 @@ function AgentDesk({
 function AgentSidebar({
   agent,
   isApproved,
+  conversationId,
   onApprove,
   onClose,
 }: {
   agent: OfficeAgent;
   isApproved: boolean;
+  conversationId: string | null;
   onApprove: (agentId: string) => void;
   onClose: () => void;
 }) {
@@ -378,9 +431,19 @@ function AgentSidebar({
               {t('office.sidebar.task')}
             </dt>
             <dd className="mt-1 rounded-xl border border-outline-variant bg-surface-container p-3 text-sm leading-relaxed text-on-surface">
-              {t(agent.taskKey)}
+              {agent.task ?? t(agent.taskKey)}
             </dd>
           </div>
+          {conversationId !== null && (
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-on-surface-variant">
+                {t('office.sidebar.conversation')}
+              </dt>
+              <dd className="mt-1 break-all font-mono text-xs leading-relaxed text-on-surface-variant">
+                {conversationId}
+              </dd>
+            </div>
+          )}
         </dl>
 
         {isApproved && (
@@ -405,7 +468,9 @@ function AgentSidebar({
         )}
 
         <p className="mt-6 text-xs leading-relaxed text-on-surface-variant">
-          {t('office.sidebar.mockHint')}
+          {conversationId === null
+            ? t('office.sidebar.mockHint')
+            : t('office.sidebar.liveHint')}
         </p>
       </div>
 
@@ -429,14 +494,120 @@ export function OfficePage() {
   const { t } = useTranslation();
   const accessToken = useAuthStore((state) => state.accessToken);
   const isAuthenticated = accessToken !== null;
-  const [agents, setAgents] = useState<OfficeAgent[]>(() =>
-    INITIAL_AGENTS.map((agent) => ({ ...agent })),
-  );
+  const [searchParams] = useSearchParams();
+  const queryConversationId = searchParams.get('conversationId');
+  const [agents, setAgents] = useState<OfficeAgent[]>(() => {
+    const initial = INITIAL_AGENTS.map((agent) => ({ ...agent }));
+    const lastEvent = useOfficeStore.getState().lastEvent;
+    const activeConversationId = useOfficeStore.getState().conversationId;
+
+    if (lastEvent === null) {
+      return initial;
+    }
+
+    const expectedConversation =
+      queryConversationId ?? activeConversationId ?? null;
+
+    if (
+      lastEvent.conversationId !== null &&
+      expectedConversation !== null &&
+      lastEvent.conversationId !== expectedConversation
+    ) {
+      return initial;
+    }
+
+    return applyLiveEvent(initial, lastEvent);
+  });
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [approvedAgentId, setApprovedAgentId] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isLive, setIsLive] = useState(false);
+
+  const conversationId = useOfficeStore((state) => state.conversationId);
 
   const selectedAgent =
     agents.find((agent) => agent.id === selectedAgentId) ?? null;
+
+  useEffect(() => {
+    // Сокет — внешняя система: синхронизируем ссылку на неё с auth-состоянием.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSocket(accessToken === null ? null : getSharedSocket(accessToken));
+  }, [accessToken]);
+
+  // Ссылка из чата передаёт диалог, чтобы офис показывал именно его события.
+  useEffect(() => {
+    if (queryConversationId !== null && queryConversationId !== '') {
+      useOfficeStore.getState().setConversationId(queryConversationId);
+    }
+  }, [queryConversationId]);
+
+  useEffect(() => {
+    if (socket === null) {
+      return;
+    }
+
+    const updateLive = () => setIsLive(socket.connected);
+
+    updateLive();
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    const handleOfficeEvent = (payload: unknown) => {
+      const event = parseOfficeEvent(payload);
+
+      if (event === null) {
+        return;
+      }
+
+      const activeConversationId = useOfficeStore.getState().conversationId;
+
+      if (
+        event.conversationId !== undefined &&
+        activeConversationId !== null &&
+        event.conversationId !== activeConversationId
+      ) {
+        return;
+      }
+
+      setAgents((current) => applyLiveEvent(current, event));
+    };
+
+    // Завершение ответа — единственный сигнал, что агент освободился.
+    const handleStreamEnd = (payload: unknown) => {
+      const activeConversationId = useOfficeStore.getState().conversationId;
+      const eventConversationId = readConversationId(payload);
+
+      if (
+        eventConversationId !== null &&
+        activeConversationId !== null &&
+        eventConversationId !== activeConversationId
+      ) {
+        return;
+      }
+
+      const finishedEvent = {
+        agentId: DEFAULT_OFFICE_AGENT_ID,
+        status: 'idle' as const,
+        task: t('office.tasks.finished'),
+      };
+
+      setAgents((current) => applyLiveEvent(current, finishedEvent));
+    };
+
+    socket.on('connect', updateLive);
+    socket.on('disconnect', updateLive);
+    socket.on('office_event', handleOfficeEvent);
+    socket.on('stream_end', handleStreamEnd);
+
+    return () => {
+      socket.off('connect', updateLive);
+      socket.off('disconnect', updateLive);
+      socket.off('office_event', handleOfficeEvent);
+      socket.off('stream_end', handleStreamEnd);
+    };
+  }, [socket, t]);
 
   useEffect(() => {
     if (selectedAgentId === null) {
@@ -477,9 +648,25 @@ export function OfficePage() {
   }
 
   function handleApprove(agentId: string) {
+    if (socket !== null && socket.connected && conversationId !== null) {
+      socket.emit('approve_action', {
+        agentId,
+        conversationId,
+        approved: true,
+      });
+    }
+
+    // Оптимистичный отклик: бэкенд подтвердит его событием resuming.
     setAgents((current) =>
       current.map((agent) =>
-        agent.id === agentId ? { ...agent, status: 'working' } : agent,
+        agent.id === agentId
+          ? {
+              ...agent,
+              status: 'working',
+              task: t('office.tasks.approved'),
+              live: true,
+            }
+          : agent,
       ),
     );
     setApprovedAgentId(agentId);
@@ -508,12 +695,20 @@ export function OfficePage() {
                   <Brand />
                 </span>
               </Link>
-              <span className="hidden items-center gap-1.5 rounded-full border border-primary/30 bg-primary-container px-2.5 py-1 text-[11px] font-semibold text-on-primary-container sm:inline-flex">
+              <span
+                className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:inline-flex ${
+                  isLive
+                    ? 'border-success/30 bg-success/10 text-success'
+                    : 'border-primary/30 bg-primary-container text-on-primary-container'
+                }`}
+              >
                 <span
                   aria-hidden="true"
-                  className="size-1.5 animate-pulse rounded-full bg-primary"
+                  className={`size-1.5 rounded-full ${
+                    isLive ? 'animate-pulse bg-success' : 'bg-primary'
+                  }`}
                 />
-                {t('office.mockBadge')}
+                {isLive ? t('office.liveBadge') : t('office.mockBadge')}
               </span>
             </div>
 
@@ -618,9 +813,13 @@ export function OfficePage() {
             <p className="mt-6 flex items-start gap-2 text-xs leading-relaxed text-on-surface-variant">
               <span
                 aria-hidden="true"
-                className="mt-1 size-1.5 shrink-0 rounded-full bg-tertiary"
+                className={`mt-1 size-1.5 shrink-0 rounded-full ${
+                  isLive ? 'bg-success' : 'bg-tertiary'
+                }`}
               />
-              {t('office.mockNote')}
+              {isAuthenticated
+                ? t('office.liveNote')
+                : t('office.mockNote')}
             </p>
           </div>
         </main>
@@ -641,6 +840,7 @@ export function OfficePage() {
                 key={selectedAgent.id}
                 agent={selectedAgent}
                 isApproved={approvedAgentId === selectedAgent.id}
+                conversationId={conversationId}
                 onApprove={handleApprove}
                 onClose={closeSidebar}
               />

@@ -51,7 +51,8 @@
     "primary": "Primary navigation",
     "chat": "Chat",
     "skills": "Skills",
-    "store": "Store"
+    "store": "Store",
+    "office": "AI office"
   },
   "skills": {
     "title": "Skills",
@@ -158,6 +159,7 @@
   "landing": {
     "nav": {
       "features": "Features",
+      "tracks": "Scenarios",
       "office": "AI office"
     },
     "login": "Sign in",
@@ -166,7 +168,7 @@
     "titleLead": "Autonomous",
     "titleAccent": "AI agents",
     "titleTail": "for your business",
-    "subtitle": "Launch tasks, connect skills, and watch the team work. SkillWharf takes care of the sandbox, billing, and access control.",
+    "subtitle": "Launch tasks, connect skills, and watch the team work. Manage agents visually in a live AI office. SkillWharf takes care of the sandbox, billing, and access control.",
     "primaryCta": "Sign in",
     "secondaryCta": "See the AI office",
     "meta": {
@@ -181,6 +183,50 @@
       "waiting": "Awaiting approval: {{count}}",
       "approval": "Your decision is needed",
       "openOffice": "Open office"
+    },
+    "tracks": {
+      "eyebrow": "Two scenarios",
+      "title": "One office, two scenarios",
+      "subtitle": "The platform adapts to the business: pickup points and Dev teams get their own agents, tasks, and transparent pricing.",
+      "agentsLabel": "Five office employees",
+      "pricingLabel": "Monetization",
+      "openOffice": "Open the AI office",
+      "pvz": {
+        "badge": "Track A",
+        "title": "AI office for pickup points",
+        "subtitle": "Intake, handover, returns, and reporting — without an in-house IT team.",
+        "pain": "An owner of 1–3 pickup points spends 4–6 hours a day on routine.",
+        "agents": {
+          "storekeeper": "Warehouse keeper — intake and stock reconciliation",
+          "operator": "Handover operator — customer notifications",
+          "returns": "Returns — claims and disputed cases",
+          "reporting": "Reporting — the daily summary",
+          "support": "Support — FAQ answers"
+        },
+        "pricing": {
+          "free": "Free — 1 location, 2 agents",
+          "pro": "Pro — 2,490 ₽/month per location",
+          "payPerCall": "Pay-per-Call — 50 ₽ per return act"
+        }
+      },
+      "dev": {
+        "badge": "Track B",
+        "title": "AI office for Dev teams",
+        "subtitle": "Code review, incidents, tests, and documentation in one window.",
+        "pain": "Background agents are invisible, production deploys are stressful, context gets lost.",
+        "agents": {
+          "reviewer": "Reviewer — code review",
+          "oncall": "On-call — incident response",
+          "tester": "Tester — sandbox runs",
+          "documenter": "Documenter — README updates",
+          "security": "Security — scans and skill-vetter"
+        },
+        "pricing": {
+          "free": "Free — 3 agents, up to 5 developers",
+          "team": "Team — 990 ₽/month per developer",
+          "payPerCall": "Pay-per-Call — 100–500 ₽ per post-mortem"
+        }
+      }
     },
     "features": {
       "eyebrow": "Features",
@@ -199,9 +245,30 @@
         "description": "Install ready-made skills from the store and manage team access."
       }
     },
+    "why": {
+      "eyebrow": "Why an AI office",
+      "title": "Agents work — you see what happens",
+      "subtitle": "Not a black box, but a managed team: statuses, tools, and control points.",
+      "problem": {
+        "label": "Problem",
+        "title": "Agents work, but you cannot see what is happening",
+        "description": "The text chat shows the final answer but hides which tools and data the agent used."
+      },
+      "solution": {
+        "label": "Solution",
+        "title": "The AI office is a live window into your employees' work",
+        "description": "Desks, statuses, and current tasks update in real time over WebSocket."
+      },
+      "hitl": {
+        "label": "Human-in-the-Loop",
+        "title": "An agent cannot enter Production without your key",
+        "description": "Dangerous actions stop in waiting_approval and wait for confirmation in the side panel."
+      }
+    },
     "cta": {
-      "title": "Build your AI team",
-      "subtitle": "Launch your first agent in minutes — without running your own infrastructure.",
+      "badge": "Docker Compose · 15 minutes",
+      "title": "Deploy your office in 15 minutes",
+      "subtitle": "Docker Compose, one stack, and your first AI office. No infrastructure of your own.",
       "secondary": "Open the AI office"
     },
     "footer": {
@@ -214,7 +281,14 @@
     "title": "AI office",
     "subtitle": "A live view of the team at work: some are typing, some are waiting for your decision.",
     "mockBadge": "Mock data",
-    "mockNote": "This is a demo backed by local data. WebSocket events will replace it later.",
+    "liveBadge": "Live WebSocket",
+    "live": "Live",
+    "mockNote": "Open the chat and send a task — Nova will receive WebSocket events. The other cards are demo data.",
+    "liveNote": "Agent events come from the chat over WebSocket and are bound to a conversationId.",
+    "tasks": {
+      "finished": "Task finished",
+      "approved": "Resuming after approval"
+    },
     "backHome": "Home",
     "backToChat": "Chat",
     "login": "Sign in",
@@ -231,7 +305,7 @@
     "agents": {
       "nova": {
         "role": "Data analyst",
-        "task": "Compiling the quarterly sales report"
+        "task": "Waiting for a task from the chat"
       },
       "miles": {
         "role": "Automation engineer",
@@ -259,9 +333,11 @@
       "role": "Role",
       "status": "Status",
       "task": "Current task",
+      "conversation": "Conversation",
       "approve": "Approve action",
       "approved": "Action approved. The agent is back to work.",
-      "mockHint": "This card uses mock data. Once WebSocket is connected, it will update live.",
+      "mockHint": "This card uses mock data. Open the chat to receive live events.",
+      "liveHint": "Events come over WebSocket and are bound to the current conversation.",
       "close": "Close agent card"
     }
   },

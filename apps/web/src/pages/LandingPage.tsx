@@ -13,6 +13,8 @@ import { useAuthStore } from '../store/auth.store';
 
 type FeatureId = 'sandbox' | 'billing' | 'skills';
 type PreviewStatus = 'idle' | 'working' | 'waiting_approval';
+type TrackId = 'pvz' | 'dev';
+type WhyKey = 'problem' | 'solution' | 'hitl';
 
 interface PreviewAgent {
   name: string;
@@ -20,7 +22,83 @@ interface PreviewAgent {
   status: PreviewStatus;
 }
 
+interface LandingTrack {
+  id: TrackId;
+  icon: string;
+  agentKeys: readonly string[];
+  pricingKeys: readonly string[];
+}
+
 const FEATURE_IDS: readonly FeatureId[] = ['sandbox', 'billing', 'skills'];
+
+const TRACKS: readonly LandingTrack[] = [
+  {
+    id: 'pvz',
+    icon: '📦',
+    agentKeys: [
+      'landing.tracks.pvz.agents.storekeeper',
+      'landing.tracks.pvz.agents.operator',
+      'landing.tracks.pvz.agents.returns',
+      'landing.tracks.pvz.agents.reporting',
+      'landing.tracks.pvz.agents.support',
+    ],
+    pricingKeys: [
+      'landing.tracks.pvz.pricing.free',
+      'landing.tracks.pvz.pricing.pro',
+      'landing.tracks.pvz.pricing.payPerCall',
+    ],
+  },
+  {
+    id: 'dev',
+    icon: '🛠️',
+    agentKeys: [
+      'landing.tracks.dev.agents.reviewer',
+      'landing.tracks.dev.agents.oncall',
+      'landing.tracks.dev.agents.tester',
+      'landing.tracks.dev.agents.documenter',
+      'landing.tracks.dev.agents.security',
+    ],
+    pricingKeys: [
+      'landing.tracks.dev.pricing.free',
+      'landing.tracks.dev.pricing.team',
+      'landing.tracks.dev.pricing.payPerCall',
+    ],
+  },
+];
+
+const TRACK_ACCENT: Record<
+  TrackId,
+  { icon: string; gradient: string; badge: string }
+> = {
+  pvz: {
+    icon: 'bg-primary-container text-on-primary-container',
+    gradient: 'from-primary-container/70 via-surface to-surface',
+    badge: 'border-primary/30 bg-primary-container/60 text-on-primary-container',
+  },
+  dev: {
+    icon: 'bg-tertiary-container text-on-tertiary-container',
+    gradient: 'from-tertiary-container/70 via-surface to-surface',
+    badge:
+      'border-tertiary/30 bg-tertiary-container/60 text-on-tertiary-container',
+  },
+};
+
+const WHY_KEYS: readonly WhyKey[] = ['problem', 'solution', 'hitl'];
+
+const WHY_ACCENT: Record<WhyKey, { card: string; label: string }> = {
+  problem: {
+    card: 'border-error/25 bg-error-container/30',
+    label: 'text-error',
+  },
+  solution: {
+    card: 'border-primary/25 bg-primary-container/35',
+    label: 'text-primary',
+  },
+  hitl: {
+    card: 'border-warning/30 bg-warning-container/40',
+    label: 'text-warning',
+  },
+};
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -162,6 +240,12 @@ export function LandingPage() {
                 aria-label={t('nav.primary')}
                 className="hidden items-center gap-5 text-sm font-medium text-on-surface-variant md:flex"
               >
+                <a
+                  href="#tracks"
+                  className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('landing.nav.tracks')}
+                </a>
                 <a
                   href="#features"
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -453,6 +537,143 @@ export function LandingPage() {
           </section>
 
           <section
+            id="tracks"
+            aria-labelledby="landing-tracks-title"
+            className="relative"
+          >
+            <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
+              <motion.div
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="max-w-2xl"
+              >
+                <motion.p
+                  variants={fadeUpVariants}
+                  className="text-xs font-semibold uppercase tracking-[0.18em] text-primary"
+                >
+                  {t('landing.tracks.eyebrow')}
+                </motion.p>
+                <motion.h2
+                  id="landing-tracks-title"
+                  variants={fadeUpVariants}
+                  className="mt-3 text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
+                >
+                  {t('landing.tracks.title')}
+                </motion.h2>
+                <motion.p
+                  variants={fadeUpVariants}
+                  className="mt-3 text-base leading-relaxed text-on-surface-variant"
+                >
+                  {t('landing.tracks.subtitle')}
+                </motion.p>
+              </motion.div>
+
+              <motion.ul
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="mt-10 grid gap-4 lg:grid-cols-2"
+              >
+                {TRACKS.map((track) => {
+                  const accent = TRACK_ACCENT[track.id];
+
+                  return (
+                    <motion.li
+                      key={track.id}
+                      variants={fadeUpVariants}
+                      className="h-full"
+                    >
+                      <article
+                        className={`flex h-full flex-col rounded-3xl border border-outline-variant bg-linear-to-br p-6 shadow-sm sm:p-8 ${accent.gradient}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${accent.badge}`}
+                          >
+                            {t(`landing.tracks.${track.id}.badge`)}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className={`grid size-11 place-items-center rounded-2xl text-xl ${accent.icon}`}
+                          >
+                            {track.icon}
+                          </span>
+                        </div>
+
+                        <h3 className="mt-5 font-display text-2xl font-bold tracking-tight text-on-surface">
+                          {t(`landing.tracks.${track.id}.title`)}
+                        </h3>
+                        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+                          {t(`landing.tracks.${track.id}.subtitle`)}
+                        </p>
+                        <p className="mt-4 rounded-xl border border-outline-variant/70 bg-surface/70 px-3 py-2 text-xs leading-relaxed text-on-surface-variant">
+                          {t(`landing.tracks.${track.id}.pain`)}
+                        </p>
+
+                        <div className="mt-6">
+                          <h4 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
+                            {t('landing.tracks.agentsLabel')}
+                          </h4>
+                          <ul className="mt-2 flex flex-wrap gap-1.5">
+                            {track.agentKeys.map((agentKey) => (
+                              <li
+                                key={agentKey}
+                                className="rounded-full border border-outline-variant bg-surface/80 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant"
+                              >
+                                {t(agentKey)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div className="mt-5">
+                          <h4 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
+                            {t('landing.tracks.pricingLabel')}
+                          </h4>
+                          <ul className="mt-2 space-y-1.5">
+                            {track.pricingKeys.map((priceKey) => (
+                              <li
+                                key={priceKey}
+                                className="flex items-start gap-2 text-xs leading-relaxed text-on-surface-variant"
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className="mt-1.5 size-1 shrink-0 rounded-full bg-primary"
+                                />
+                                {t(priceKey)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <Link
+                          to="/app/office"
+                          className="mt-auto inline-flex w-fit items-center gap-1.5 pt-6 text-sm font-semibold text-primary transition hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        >
+                          {t('landing.tracks.openOffice')}
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="size-4"
+                          >
+                            <path d="M5 12h14M13 6l6 6-6 6" />
+                          </svg>
+                        </Link>
+                      </article>
+                    </motion.li>
+                  );
+                })}
+              </motion.ul>
+            </div>
+          </section>
+
+          <section
             id="features"
             aria-labelledby="landing-features-title"
             className="relative border-y border-outline-variant/70 bg-surface-container/40"
@@ -514,6 +735,76 @@ export function LandingPage() {
             </div>
           </section>
 
+          <section
+            id="why"
+            aria-labelledby="landing-why-title"
+            className="relative bg-surface-container/30"
+          >
+            <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
+              <motion.div
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="max-w-2xl"
+              >
+                <motion.p
+                  variants={fadeUpVariants}
+                  className="text-xs font-semibold uppercase tracking-[0.18em] text-primary"
+                >
+                  {t('landing.why.eyebrow')}
+                </motion.p>
+                <motion.h2
+                  id="landing-why-title"
+                  variants={fadeUpVariants}
+                  className="mt-3 text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
+                >
+                  {t('landing.why.title')}
+                </motion.h2>
+                <motion.p
+                  variants={fadeUpVariants}
+                  className="mt-3 text-base leading-relaxed text-on-surface-variant"
+                >
+                  {t('landing.why.subtitle')}
+                </motion.p>
+              </motion.div>
+
+              <motion.ul
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="mt-10 grid gap-4 md:grid-cols-3"
+              >
+                {WHY_KEYS.map((whyKey) => {
+                  const accent = WHY_ACCENT[whyKey];
+
+                  return (
+                    <motion.li
+                      key={whyKey}
+                      variants={fadeUpVariants}
+                      className="h-full"
+                    >
+                      <article
+                        className={`flex h-full flex-col rounded-2xl border p-6 ${accent.card}`}
+                      >
+                        <span
+                          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${accent.label}`}
+                        >
+                          {t(`landing.why.${whyKey}.label`)}
+                        </span>
+                        <h3 className="mt-3 font-display text-xl font-bold leading-snug text-on-surface">
+                          {t(`landing.why.${whyKey}.title`)}
+                        </h3>
+                        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+                          {t(`landing.why.${whyKey}.description`)}
+                        </p>
+                      </article>
+                    </motion.li>
+                  );
+                })}
+              </motion.ul>
+            </div>
+          </section>
+
           <section aria-labelledby="landing-cta-title">
             <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
               <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-linear-to-br from-primary-container via-surface-container to-tertiary-container px-6 py-12 text-center shadow-xl shadow-primary/5 sm:px-12">
@@ -527,9 +818,16 @@ export function LandingPage() {
                 />
 
                 <div className="relative">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-surface/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                    <span
+                      aria-hidden="true"
+                      className="size-1.5 rounded-full bg-primary"
+                    />
+                    {t('landing.cta.badge')}
+                  </span>
                   <h2
                     id="landing-cta-title"
-                    className="text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
+                    className="mt-4 text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
                   >
                     {t('landing.cta.title')}
                   </h2>
