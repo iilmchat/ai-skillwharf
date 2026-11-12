@@ -6,3 +6,4 @@
 
 - [C4 Level 1: Контекст](C4-Level1-Context.md)
 - [ADR 0001: Выбор паттерна Hub-and-Spoke](ADR/0001-hub-and-spoke.md)
+- [ADR 0002: Технологический стек](ADR/0002-tech-stack.md)
