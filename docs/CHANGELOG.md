@@ -43,7 +43,7 @@
 - Добавлены стартовые навыки `dzen-article`, `fact-checker`, `resume-screener` и `document-analyzer`.
 - Реализованы mock-инструменты `check_facts`, `screen_resume` и `extract_document_data`; реальные API фактчекинга, HR-систем и юридических сервисов пока не подключены.
 - `dzen-article` использует Pay-per-Outcome (100 ₽) и `requiresApproval: true`; `ChatService` подключает инструменты только при наличии соответствующего включённого навыка.
-- `dzen-article` переведён с Mock на экспорт Markdown-черновика: инструмент `publish_to_dzen` пишет файл в `/tmp/dzen-output/` песочницы, переносит его в `./dzen-output` API и получает разрешение `filesystem`.
+- `dzen-article` переведён с Mock на экспорт Markdown-черновика: инструмент `publish_to_dzen` принимает `title`, `text` и необязательный `imageUrl`, пишет файл в `/tmp/dzen-output/` песочницы, переносит его в `./dzen-output` API и получает разрешение `filesystem`.
 
 ### Financial Analyst (Track J)
 

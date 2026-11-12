@@ -166,7 +166,7 @@ export const PUBLISH_TO_DZEN_TOOL_DESCRIPTION =
 export const PublishToDzenToolSchema = z.object({
   title: z.string().describe('Заголовок статьи'),
   text: z.string().describe('Текст статьи'),
-  imageUrl: z.string().describe('URL обложки статьи'),
+  imageUrl: z.string().optional().describe('URL обложки статьи'),
 });
 
 /** Имя mock-инструмента юнит-экономики. */
@@ -534,14 +534,15 @@ export class LlmService {
         await options.beforeExecute?.();
 
         const filename = `dzen-${randomUUID()}.md`;
-        const markdown = [
-          `# ${title}`,
-          '',
-          `![Обложка](${imageUrl})`,
-          '',
-          text,
-          '',
-        ].join('\n');
+        const markdownParts = [`# ${title}`, ''];
+
+        if (imageUrl !== undefined && imageUrl !== '') {
+          markdownParts.push(`![Обложка](${imageUrl})`, '');
+        }
+
+        markdownParts.push(text, '');
+
+        const markdown = markdownParts.join('\n');
         const encoded = Buffer.from(markdown, 'utf8').toString('base64');
         const script = [
           'set -eu',
@@ -628,7 +629,7 @@ export class LlmService {
       func: async () => {
         await options.beforeExecute?.();
 
-        return 'Доказательный пакет неполный (отсутствует ERID). Риск санкции высокий.';
+        return 'Доказательный пакет неполный. Риск санкции высокий.';
       },
     });
   }

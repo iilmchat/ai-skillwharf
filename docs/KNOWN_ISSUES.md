@@ -17,7 +17,7 @@
 | KI-011 | Marketplace | Средняя | Открыто | MCP-серверы `ozon_mcp` и `wb_mcp` работают в режиме заглушки и возвращают демонстрационные данные |
 | KI-012 | Marketplace | Средняя | Открыто | Навыки внешних API (`messenger-connector`, `google-workspace`, `midjourney-api`, `ozon-seller`, `wb-seller`) работают в режиме Mock |
 | KI-013 | Security | Средняя | Открыто | `AgentGateway` покрывает только базовые regex-правила и не заменяет полноценный policy engine |
-| KI-014 | Content/HR/Legal | Средняя | Открыто | Навыки `dzen-article`, `fact-checker`, `resume-screener` и `document-analyzer` работают в режиме Mock и требуют реальных API |
+| KI-014 | Content/HR/Legal | Средняя | Открыто | `dzen-article` экспортирует только локальный Markdown-черновик; `fact-checker`, `resume-screener` и `document-analyzer` работают в режиме Mock |
 | KI-015 | Finance | Средняя | Открыто | Финансовые навыки `unit-economics`, `profit-leak-detector`, `price-monitor` и `fraud-shield-audit` работают в режиме Mock |
 
 ## Детали
@@ -174,16 +174,18 @@ allowlist команд, taint tracking, роли и контекст), доба�
 
 ### KI-014 — Content/HR/Legal навыки работают в режиме Mock
 
-**Влияние:** Навыки `dzen-article`, `fact-checker`, `resume-screener` и
-`document-analyzer` объявляют инструменты `generate_article`, `check_facts`,
-`screen_resume` и `extract_document_data`, но не обращаются к реальным
-сервисам. Статьи, проверка фактов, оценка резюме и извлечение данных из
-договоров возвращают фиксированные демонстрационные результаты; для
-`dzen-article` при этом действует Pay-per-Outcome и HITL-одобрение.
+**Влияние:** `dzen-article` создаёт Markdown-черновик через `publish_to_dzen`,
+но не публикует статью в Дзен: публичного API для внешних систем нет.
+`fact-checker`, `resume-screener` и `document-analyzer` объявляют
+инструменты `check_facts`, `screen_resume` и `extract_document_data`, но не
+обращаются к реальным сервисам. Проверка фактов, оценка резюме и извлечение
+данных из договоров возвращают фиксированные демонстрационные результаты;
+для `dzen-article` при этом действует Pay-per-Outcome и HITL-одобрение.
 
 **Обход:** Использовать навыки только для демонстраций и E2E-сценариев,
 явно помечать результаты как демонстрационные и не применять их для
-публикации контента или кадровых/юридических решений.
+публикации контента или кадровых/юридических решений. Черновик Дзена
+загружать в редакцию вручную.
 
 **План:** Подключить реальные API и адаптеры: публикацию в Дзен, источники
 фактчекинга, HR/ATS-системы и парсеры документов. Добавить проверку
