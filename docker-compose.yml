@@ -28,6 +28,10 @@ services:
     environment:
       # Внутри compose-сети API ходит в postgres по имени сервиса, а не localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      # Платёжные переменные передаются явно; значения берутся из .env.
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
     extra_hosts:
       # Доступ к LM Studio и другим сервисам на хосте из контейнера.
       # host-gateway нужен на Linux; на Windows и macOS работает из коробки.
