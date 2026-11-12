@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios';
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import i18n from '../i18n';
 import { api, setAuthToken } from '../lib/api';
 
@@ -65,48 +66,63 @@ function toErrorMessage(error: unknown): string {
   return i18n.t('auth.errors.loginFailed');
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  accessToken: null,
-  user: null,
-  isSubmitting: false,
-  error: null,
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      accessToken: null,
+      user: null,
+      isSubmitting: false,
+      error: null,
 
-  login: async (email, password) => {
-    set({ isSubmitting: true, error: null });
+      login: async (email, password) => {
+        set({ isSubmitting: true, error: null });
 
-    try {
-      const { data } = await api.post<AuthTokensResponse>('/auth/login', {
-        email,
-        password,
-      });
+        try {
+          const { data } = await api.post<AuthTokensResponse>('/auth/login', {
+            email,
+            password,
+          });
 
-      setAuthToken(data.accessToken);
+          setAuthToken(data.accessToken);
 
-      // Login возвращает только токены, профиль запрашиваем отдельно.
-      const profile = await api.get<AuthUser>('/auth/me');
+          // Login возвращает только токены, профиль запрашиваем отдельно.
+          const profile = await api.get<AuthUser>('/auth/me');
 
-      set({
-        accessToken: data.accessToken,
-        user: profile.data,
-        isSubmitting: false,
-      });
-    } catch (error) {
-      setAuthToken(null);
-      set({
-        accessToken: null,
-        user: null,
-        isSubmitting: false,
-        error: toErrorMessage(error),
-      });
+          set({
+            accessToken: data.accessToken,
+            user: profile.data,
+            isSubmitting: false,
+          });
+        } catch (error) {
+          setAuthToken(null);
+          set({
+            accessToken: null,
+            user: null,
+            isSubmitting: false,
+            error: toErrorMessage(error),
+          });
 
-      throw error;
-    }
-  },
+          throw error;
+        }
+      },
 
-  logout: () => {
-    setAuthToken(null);
-    set({ accessToken: null, user: null, error: null });
-  },
+      logout: () => {
+        setAuthToken(null);
+        set({ accessToken: null, user: null, error: null });
+      },
 
-  clearError: () => set({ error: null }),
-}));
+      clearError: () => set({ error: null }),
+    }),
+    {
+      name: 'skillwharf-auth',
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        accessToken: state.accessToken,
+        user: state.user,
+      }),
+      onRehydrateStorage: () => (state) => {
+        setAuthToken(state?.accessToken ?? null);
+      },
+    },
+  ),
+);

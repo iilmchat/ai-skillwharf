@@ -15,12 +15,16 @@
     "held": "On hold",
     "topUp": "Top up",
     "topUpTitle": "Top up balance",
-    "topUpSubtitle": "Test top-up via the mock provider.",
+    "topUpSubtitle": "Payment via YooKassa.",
     "currentBalance": "Current balance",
     "amountLabel": "Top-up amount",
     "presetsLabel": "Quick amount selection",
     "pay": "Pay",
     "processing": "Processing…",
+    "payment": {
+      "success": "Balance topped up successfully!",
+      "cancel": "Payment cancelled"
+    },
     "loading": "Loading balance…",
     "retry": "Retry",
     "history": {

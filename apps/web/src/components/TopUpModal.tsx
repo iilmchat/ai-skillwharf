@@ -1,14 +1,7 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { balanceQueryKey } from '../hooks/useBalance';
-import {
-  getBillingErrorMessage,
-  ledgerQueryKey,
-  topUpBalance,
-  type TopUpPayload,
-  type WalletBalance,
-} from '../lib/billing';
+import { createPayment, getBillingErrorMessage } from '../lib/billing';
 import { CURRENCY_SYMBOL, formatMoney } from '../lib/money';
 
 const PRESETS = [100, 500, 1000] as const;
@@ -17,7 +10,6 @@ const DEFAULT_AMOUNT = '500';
 interface TopUpModalProps {
   open: boolean;
   onClose: () => void;
-  userId: string;
   balance: string | undefined;
 }
 
@@ -33,34 +25,18 @@ function parseAmount(value: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
-export function TopUpModal({
-  open,
-  onClose,
-  userId,
-  balance,
-}: TopUpModalProps) {
+export function TopUpModal({ open, onClose, balance }: TopUpModalProps) {
   const { t, i18n } = useTranslation();
-  const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
-  const idempotencyRef = useRef<{ amount: number; key: string } | null>(null);
 
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (payload: TopUpPayload) => topUpBalance(payload),
+    mutationFn: (value: number) => createPayment(value),
     onSuccess: (data) => {
-      queryClient.setQueryData<WalletBalance>(
-        balanceQueryKey,
-        (current) => ({
-          balance: data.balance,
-          heldBalance: data.heldBalance ?? current?.heldBalance,
-        }),
-      );
-      void queryClient.invalidateQueries({ queryKey: balanceQueryKey });
-      void queryClient.invalidateQueries({ queryKey: ledgerQueryKey });
-      onClose();
+      window.location.assign(data.url);
     },
   });
 
@@ -81,7 +57,6 @@ export function TopUpModal({
 
     setAmount(DEFAULT_AMOUNT);
     setValidationError(null);
-    idempotencyRef.current = null;
     mutation.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -133,19 +108,6 @@ export function TopUpModal({
     }
   }
 
-  function getIdempotencyKey(amountValue: number): string {
-    const existing = idempotencyRef.current;
-
-    if (existing?.amount === amountValue) {
-      return existing.key;
-    }
-
-    const key = crypto.randomUUID();
-    idempotencyRef.current = { amount: amountValue, key };
-
-    return key;
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -154,17 +116,8 @@ export function TopUpModal({
       return;
     }
 
-    if (userId === '') {
-      setValidationError(t('billing.errors.sessionExpired'));
-      return;
-    }
-
     setValidationError(null);
-    mutation.mutate({
-      userId,
-      amount: parsedAmount,
-      idempotencyKey: getIdempotencyKey(parsedAmount),
-    });
+    mutation.mutate(parsedAmount);
   }
 
   return (

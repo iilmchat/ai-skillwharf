@@ -7,12 +7,18 @@ import {
   type FormEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import {
+  Link,
+  NavLink,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
+import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TopUpModal } from '../components/TopUpModal';
 import {
@@ -21,6 +27,7 @@ import {
   type ConnectionState,
 } from '../hooks/useChatSession';
 import { useBalance } from '../hooks/useBalance';
+import { ledgerQueryKey } from '../lib/billing';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
 
@@ -143,6 +150,7 @@ export function ChatPage() {
   const logout = useAuthStore((state) => state.logout);
   const isAdmin = isAdminRole(user?.role);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
   const {
@@ -160,15 +168,41 @@ export function ChatPage() {
   } = useChatSession();
 
   const balanceQuery = useBalance();
+  const { refetch: refetchBalance } = balanceQuery;
   const [draft, setDraft] = useState('');
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState<
+    'success' | 'cancel' | null
+  >(() => {
+    const payment = searchParams.get('payment');
+
+    return payment === 'success' || payment === 'cancel' ? payment : null;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const openTopUp = useCallback(() => setIsTopUpOpen(true), []);
   const closeTopUp = useCallback(() => setIsTopUpOpen(false), []);
   const openHistory = useCallback(() => setIsHistoryOpen(true), []);
   const closeHistory = useCallback(() => setIsHistoryOpen(false), []);
+
+  useEffect(() => {
+    const payment = searchParams.get('payment');
+
+    if (payment !== 'success' && payment !== 'cancel') {
+      return;
+    }
+
+    if (payment === 'success') {
+      void refetchBalance();
+      void queryClient.invalidateQueries({ queryKey: ledgerQueryKey });
+    }
+
+    // Убираем параметр, чтобы тост не вернулся после перезагрузки.
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('payment');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams, refetchBalance, queryClient]);
 
   // Каждая дельта стрима обновляет messages, поэтому скролл идёт за текстом.
   useEffect(() => {
@@ -668,7 +702,6 @@ export function ChatPage() {
       <TopUpModal
         open={isTopUpOpen}
         onClose={closeTopUp}
-        userId={user?.id ?? ''}
         balance={balanceQuery.data?.balance}
       />
 
@@ -689,6 +722,18 @@ export function ChatPage() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {paymentNotice !== null && (
+        <StatusToast
+          tone={paymentNotice === 'success' ? 'success' : 'warning'}
+          message={t(
+            paymentNotice === 'success'
+              ? 'billing.payment.success'
+              : 'billing.payment.cancel',
+          )}
+          onClose={() => setPaymentNotice(null)}
         />
       )}
     </>

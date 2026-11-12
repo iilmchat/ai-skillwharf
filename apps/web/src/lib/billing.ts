@@ -8,8 +8,8 @@ export interface WalletBalance {
   heldBalance?: string;
 }
 
-export interface LedgerOperationResult extends WalletBalance {
-  entryId: string;
+export interface PaymentLink {
+  url: string;
 }
 
 export interface LedgerEntry {
@@ -19,12 +19,6 @@ export interface LedgerEntry {
   type: string;
   description: string;
   createdAt: string;
-}
-
-export interface TopUpPayload {
-  userId: string;
-  amount: number;
-  idempotencyKey: string;
 }
 
 /** Ключ кэша истории операций. */
@@ -70,13 +64,10 @@ export async function fetchBalance(): Promise<WalletBalance> {
   return data;
 }
 
-export async function topUpBalance(
-  payload: TopUpPayload,
-): Promise<LedgerOperationResult> {
-  const { data } = await api.post<LedgerOperationResult>(
-    '/billing/topup',
-    payload,
-  );
+export async function createPayment(amount: number): Promise<PaymentLink> {
+  const { data } = await api.post<PaymentLink>('/billing/create-payment', {
+    amount,
+  });
 
   return data;
 }

@@ -15,12 +15,16 @@
     "held": "Заморожено",
     "topUp": "Пополнить",
     "topUpTitle": "Пополнение баланса",
-    "topUpSubtitle": "Тестовое пополнение через mock-провайдер.",
+    "topUpSubtitle": "Оплата через ЮKassa.",
     "currentBalance": "Текущий баланс",
     "amountLabel": "Сумма пополнения",
     "presetsLabel": "Быстрый выбор суммы",
     "pay": "Оплатить",
     "processing": "Обрабатываем…",
+    "payment": {
+      "success": "Баланс успешно пополнен!",
+      "cancel": "Оплата отменена"
+    },
     "loading": "Загрузка баланса…",
     "retry": "Повторить",
     "history": {

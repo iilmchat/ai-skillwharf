@@ -600,6 +600,58 @@ test.describe('Дымовые сценарии UI', () => {
     ).toBeVisible();
   });
 
+  test('пополнение уходит на страницу ЮKassa и обрабатывает возврат', async ({
+    page,
+  }) => {
+    const paymentUrl =
+      'https://yoomoney.ru/checkout/payments/v2/contract?orderId=e2e';
+
+    await loginViaUi(page);
+
+    let paymentBody: unknown = null;
+    await page.route('**/api/v1/billing/create-payment', async (route) => {
+      paymentBody = route.request().postDataJSON();
+      await route.fulfill({ json: { url: paymentUrl } });
+    });
+    // Внешний платёжный домен не должен реально открываться в тесте.
+    await page.route('https://yoomoney.ru/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<h1>YooKassa</h1>',
+      }),
+    );
+
+    await page
+      .getByRole('button', { name: /Пополнить|Top up/ })
+      .first()
+      .click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.locator('#topup-amount').fill('750');
+    await dialog.getByRole('button', { name: /Оплатить|Pay/ }).click();
+
+    await page.waitForURL(/yoomoney\.ru/, { timeout: 15_000 });
+    expect(paymentBody).toEqual({ amount: 750 });
+
+    // Сессия переживает возврат с внешней страницы.
+    await page.goto(`${WEB_BASE_URL}/app/chat?payment=success`);
+    await expect(
+      page.getByRole('status').filter({
+        hasText: /Баланс успешно пополнен|Balance topped up/,
+      }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/app\/chat$/);
+
+    await page.goto(`${WEB_BASE_URL}/app/chat?payment=cancel`);
+    await expect(
+      page.getByRole('status').filter({
+        hasText: /Оплата отменена|Payment cancelled/,
+      }),
+    ).toBeVisible();
+  });
+
   test('эскроу: sandbox-вызов ждёт одобрения и списывает баланс', async ({
     page,
     request,
