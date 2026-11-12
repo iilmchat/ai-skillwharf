@@ -1,14 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
   SANDBOX_NETWORK_FLAG,
   type SandboxService,
 } from '../sandbox/sandbox.service.js';
 import {
   EXEC_TOOL_NAME,
+  LANGUAGE_INSTRUCTION,
   LlmService,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
+  withLanguageInstruction,
 } from './llm.service.js';
 
 const ENV_KEYS = [
@@ -238,6 +241,19 @@ describe('LlmService', () => {
       expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {
         [SANDBOX_NETWORK_FLAG]: 'true',
       });
+    });
+  });
+
+  describe('withLanguageInstruction', () => {
+    it('добавляет системную инструкцию о языке ответа', () => {
+      const human = new HumanMessage('hello');
+
+      const messages = withLanguageInstruction([human]);
+
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toBeInstanceOf(SystemMessage);
+      expect(messages[0]?.content).toBe(LANGUAGE_INSTRUCTION);
+      expect(messages[1]).toBe(human);
     });
   });
 });

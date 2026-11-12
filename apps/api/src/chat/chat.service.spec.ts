@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AIMessage,
   type BaseMessage,
@@ -6,7 +10,9 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { Test, TestingModule } from '@nestjs/testing';
+import type { InstalledSkill } from '@prisma/client';
 import { BillingService } from '../billing/billing.service.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
   EXEC_TOOL_NAME,
   LlmService,
@@ -14,14 +20,12 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import type { SandboxService } from '../sandbox/sandbox.service.js';
 import {
-  ChatService,
-  INSUFFICIENT_BALANCE_MESSAGE,
-  INSUFFICIENT_FUNDS_REPLY,
-  SANDBOX_CALL_DESCRIPTION,
-  SANDBOX_CALL_PRICE,
-} from './chat.service.js';
+  SANDBOX_NETWORK_FLAG,
+  type SandboxService,
+} from '../sandbox/sandbox.service.js';
+import { SkillsService } from '../skills/skills.service.js';
+import { ChatService } from './chat.service.js';
 
 const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
@@ -43,11 +47,48 @@ interface BillingMock {
   getBalance: MockFn;
 }
 
-function toolCallMessage(code: string): AIMessage {
+interface SkillsMock {
+  getEnabledSkills: MockFn;
+}
+
+interface TestPricing {
+  model: 'Free' | 'Pay-per-Call';
+  price?: number;
+  currency?: 'RUB' | 'USD';
+}
+
+function toolCallMessage(
+  name: string,
+  args: Record<string, unknown>,
+): AIMessage {
   return new AIMessage({
     content: '',
-    tool_calls: [{ id: 'call-1', name: SANDBOX_TOOL_NAME, args: { code } }],
+    tool_calls: [{ id: 'call-1', name, args }],
   });
+}
+
+function createSkill(
+  name: string,
+  tool: string,
+  pricing?: TestPricing,
+): InstalledSkill {
+  return {
+    id: `skill-${name}`,
+    name,
+    version: '1.0.0',
+    author: 'SkillWharf Team',
+    manifest: {
+      name,
+      version: '1.0.0',
+      description: `Тестовый навык ${name}`,
+      author: { name: 'SkillWharf Team' },
+      dependencies: { tools: [tool] },
+      permissions: [],
+      ...(pricing ? { pricing } : {}),
+    },
+    isEnabled: true,
+    installedAt: new Date(),
+  } as InstalledSkill;
 }
 
 describe('ChatService', () => {
@@ -55,6 +96,7 @@ describe('ChatService', () => {
   let prisma: PrismaMock;
   let sandbox: SandboxMock;
   let billing: BillingMock;
+  let skills: SkillsMock;
   let llm: LlmService;
   let chatWithTools: ReturnType<typeof vi.spyOn>;
 
@@ -69,9 +111,10 @@ describe('ChatService', () => {
     };
     sandbox = { runCommand: vi.fn() };
     billing = { chargeForSkill: vi.fn(), getBalance: vi.fn() };
+    skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
 
-    // Настоящий LlmService нужен, чтобы граф получил реальный инструмент
-    // песочницы; сам вызов модели подменяем.
+    // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
+    // сам вызов модели подменяем.
     llm = new LlmService(sandbox as unknown as SandboxService);
     chatWithTools = vi.spyOn(llm, 'chatWithTools');
 
@@ -81,10 +124,15 @@ describe('ChatService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: LlmService, useValue: llm },
         { provide: BillingService, useValue: billing },
+        { provide: SkillsService, useValue: skills },
       ],
     }).compile();
 
     service = moduleRef.get(ChatService);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   describe('createConversation', () => {
@@ -183,6 +231,7 @@ describe('ChatService', () => {
         EXEC_TOOL_NAME,
       ]);
       expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
+      expect(skills.getEnabledSkills).toHaveBeenCalledTimes(1);
       expect(billing.chargeForSkill).not.toHaveBeenCalled();
     });
 
@@ -196,9 +245,10 @@ describe('ChatService', () => {
       );
 
       await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
-      await expect(attempt).rejects.toThrow(INSUFFICIENT_BALANCE_MESSAGE);
+      await expect(attempt).rejects.toThrow(ERROR_KEYS.insufficientFunds);
 
       expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(skills.getEnabledSkills).not.toHaveBeenCalled();
       expect(chatWithTools).not.toHaveBeenCalled();
       expect(billing.chargeForSkill).not.toHaveBeenCalled();
     });
@@ -218,37 +268,54 @@ describe('ChatService', () => {
       });
     });
 
-    it('выполняет инструмент песочницы и списывает средства', async () => {
+    it('списывает цену из манифеста навыка (Pay-per-Call)', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME, {
+          model: 'Pay-per-Call',
+          price: 0.05,
+          currency: 'RUB',
+        }),
+      ]);
       prisma.message.findMany.mockResolvedValue([
-        { role: 'user', content: 'запусти echo hi' },
+        { role: 'user', content: 'найди новости' },
       ]);
       chatWithTools
-        .mockResolvedValueOnce(toolCallMessage('echo hi'))
-        .mockResolvedValueOnce(new AIMessage('Готово: hi'));
+        .mockResolvedValueOnce(
+          toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+        )
+        .mockResolvedValueOnce(new AIMessage('Готово'));
       billing.chargeForSkill.mockResolvedValue({
-        balance: '9.90',
+        balance: '9.95',
         entryId: 'entry-1',
       });
-      sandbox.runCommand.mockResolvedValue('hi\n');
+      sandbox.runCommand.mockResolvedValue('{"results":[]}');
 
       const result = await service.handleMessage(
         USER_ID,
         CONVERSATION_ID,
-        'запусти echo hi',
+        'найди новости',
       );
 
-      expect(result.reply).toBe('Готово: hi');
+      expect(result.reply).toBe('Готово');
 
-      // Paywall: списание за конкретного пользователя и один вызов песочницы.
+      // Ровно цена из манифеста, а не прежние фиксированные 0.10.
       expect(billing.chargeForSkill).toHaveBeenCalledWith(
         USER_ID,
-        SANDBOX_CALL_PRICE,
-        SANDBOX_CALL_DESCRIPTION,
+        0.05,
+        'Вызов навыка tavily-search',
         expect.any(String),
       );
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
 
-      // Сначала деньги, потом выполнение кода.
+      const [command, env] = sandbox.runCommand.mock.calls[0] as [
+        string,
+        Record<string, string>,
+      ];
+
+      expect(command).toContain('https://api.tavily.com/search');
+      expect(env[SANDBOX_NETWORK_FLAG]).toBe('true');
+
+      // Сначала деньги, потом запуск инструмента.
       expect(
         billing.chargeForSkill.mock.invocationCallOrder[0],
       ).toBeLessThan(sandbox.runCommand.mock.invocationCallOrder[0]);
@@ -262,17 +329,42 @@ describe('ChatService', () => {
       const toolMessage = secondCallMessages[secondCallMessages.length - 1];
 
       expect(toolMessage).toBeInstanceOf(ToolMessage);
-      expect(toolMessage?.content).toBe('hi\n');
+      expect(toolMessage?.content).toBe('{"results":[]}');
     });
 
-    it('прерывает выполнение при нехватке средств', async () => {
+    it('не списывает средства за бесплатный навык', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME, { model: 'Free' }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'найди новости' },
+      ]);
+      chatWithTools
+        .mockResolvedValueOnce(
+          toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+        )
+        .mockResolvedValueOnce(new AIMessage('Готово'));
+      sandbox.runCommand.mockResolvedValue('{"results":[]}');
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'найди новости'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(sandbox.runCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it('не списывает за инструмент, которого нет в манифестах', async () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'запусти echo hi' },
       ]);
-      chatWithTools.mockResolvedValueOnce(toolCallMessage('echo hi'));
-      billing.chargeForSkill.mockRejectedValue(
-        new BadRequestException('Insufficient funds or wallet not found'),
-      );
+      chatWithTools
+        .mockResolvedValueOnce(
+          toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' }),
+        )
+        .mockResolvedValueOnce(new AIMessage('Готово: hi'));
+      sandbox.runCommand.mockResolvedValue('hi\n');
 
       const result = await service.handleMessage(
         USER_ID,
@@ -280,9 +372,38 @@ describe('ChatService', () => {
         'запусти echo hi',
       );
 
+      expect(result.reply).toBe('Готово: hi');
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
+    });
+
+    it('прерывает выполнение при нехватке средств', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME, {
+          model: 'Pay-per-Call',
+          price: 0.05,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'найди новости' },
+      ]);
+      chatWithTools.mockResolvedValueOnce(
+        toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+      );
+      billing.chargeForSkill.mockRejectedValue(
+        new BadRequestException(ERROR_KEYS.insufficientFunds),
+      );
+
+      const result = await service.handleMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'найди новости',
+      );
+
       expect(result).toEqual({
         conversationId: CONVERSATION_ID,
-        reply: INSUFFICIENT_FUNDS_REPLY,
+        reply: ERROR_KEYS.insufficientFunds,
       });
 
       // Песочница не запускалась, второй вызов LLM не состоялся.
@@ -293,7 +414,7 @@ describe('ChatService', () => {
         data: {
           conversationId: CONVERSATION_ID,
           role: 'assistant',
-          content: INSUFFICIENT_FUNDS_REPLY,
+          content: ERROR_KEYS.insufficientFunds,
         },
       });
     });

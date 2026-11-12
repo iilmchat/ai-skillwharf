@@ -13,36 +13,30 @@ import {
 } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import type { InstalledSkill } from '@prisma/client';
+import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
+  EXEC_TOOL_NAME,
   LlmService,
+  SANDBOX_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
   messageContentToText,
   toLangChainMessage,
+  type SandboxToolOptions,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SkillsService } from '../skills/skills.service.js';
 
 /** Сколько последних сообщений диалога передаём в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
 
-/** Стоимость одного вызова песочницы (paywall). */
-export const SANDBOX_CALL_PRICE = 0.1;
-
-/** Описание списания в Ledger. */
-export const SANDBOX_CALL_DESCRIPTION = 'Выполнение кода в песочнице';
-
 /** Сколько раз за один ответ разрешено запускать инструменты. */
 export const MAX_TOOL_ROUNDS = 5;
 
-/** Ответ пользователю, если на балансе не хватает средств. */
-export const INSUFFICIENT_FUNDS_REPLY =
-  'Недостаточно средств для выполнения кода. Пополните баланс.';
-
 /** Минимальный баланс, с которым разрешено запускать агента. */
 export const MIN_AGENT_BALANCE = 0.5;
-
-/** Ошибка, если баланса не хватает на запуск агента. */
-export const INSUFFICIENT_BALANCE_MESSAGE =
-  'Недостаточно средств для запуска агента. Пополните баланс.';
 
 const TOOL_LIMIT_REPLY =
   'Достигнут лимит вызовов инструментов. Уточните запрос и попробуйте снова.';
@@ -69,6 +63,49 @@ type ChatState = typeof ChatStateAnnotation.State;
 export interface ChatReply {
   conversationId: string;
   reply: string;
+}
+
+interface ToolPrice {
+  price: number;
+  skillName: string;
+}
+
+/**
+ * Цена инструмента берётся из манифеста включённого навыка, который объявил
+ * этот инструмент в `dependencies.tools`. Free, отсутствие `pricing` или
+ * цены — инструмент бесплатный.
+ */
+function resolveToolPrice(
+  skills: InstalledSkill[],
+  toolName: string,
+): ToolPrice | null {
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    const manifest = parsed.data;
+
+    if (!manifest.dependencies?.tools?.includes(toolName)) {
+      continue;
+    }
+
+    const pricing = manifest.pricing;
+
+    if (
+      pricing?.model === 'Pay-per-Call' &&
+      typeof pricing.price === 'number' &&
+      pricing.price > 0
+    ) {
+      return { price: pricing.price, skillName: manifest.name };
+    }
+
+    return null;
+  }
+
+  return null;
 }
 
 function lastMessage(messages: BaseMessage[]): BaseMessage | undefined {
@@ -175,6 +212,7 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly llmService: LlmService,
     private readonly billingService: BillingService,
+    private readonly skillsService: SkillsService,
   ) {
     this.graph = buildChatGraph(this.llmService);
   }
@@ -228,7 +266,7 @@ export class ChatService {
       .reverse()
       .map((message) => toLangChainMessage(message));
 
-    const tools = this.buildTools(userId);
+    const tools = await this.buildTools(userId);
 
     let reply: string;
 
@@ -237,12 +275,12 @@ export class ChatService {
       reply = state.reply;
     } catch (error) {
       // Paywall: списание не удалось — песочница не запускалась,
-      // прерываем граф и объясняем пользователю причину.
+      // прерываем граф и отдаём клиенту ключ ошибки для перевода.
       if (!(error instanceof BadRequestException)) {
         throw error;
       }
 
-      reply = INSUFFICIENT_FUNDS_REPLY;
+      reply = ERROR_KEYS.insufficientFunds;
     }
 
     await this.prisma.message.create({
@@ -261,28 +299,48 @@ export class ChatService {
     const { balance } = await this.billingService.getBalance(userId);
 
     if (Number.parseFloat(balance) < MIN_AGENT_BALANCE) {
-      throw new BadRequestException(INSUFFICIENT_BALANCE_MESSAGE);
+      throw new BadRequestException(ERROR_KEYS.insufficientFunds);
     }
   }
 
   /**
-   * Инструменты, доступные агенту. Каждый запуск песочницы оплачивается,
-   * поэтому у всех инструментов общий paywall-хук.
+   * Инструменты, доступные агенту. Цена каждого берётся из манифеста
+   * включённого навыка, объявившего инструмент; если цены нет — бесплатно.
    */
-  private buildTools(userId: string): StructuredToolInterface[] {
-    const beforeExecute = async (): Promise<void> => {
-      await this.billingService.chargeForSkill(
-        userId,
-        SANDBOX_CALL_PRICE,
-        SANDBOX_CALL_DESCRIPTION,
-        randomUUID(),
-      );
+  private async buildTools(
+    userId: string,
+  ): Promise<StructuredToolInterface[]> {
+    const skills = await this.skillsService.getEnabledSkills();
+
+    const beforeExecuteFor = (
+      toolName: string,
+    ): SandboxToolOptions['beforeExecute'] => {
+      const pricing = resolveToolPrice(skills, toolName);
+
+      if (!pricing) {
+        return undefined;
+      }
+
+      return async (): Promise<void> => {
+        await this.billingService.chargeForSkill(
+          userId,
+          pricing.price,
+          `Вызов навыка ${pricing.skillName}`,
+          randomUUID(),
+        );
+      };
     };
 
     return [
-      this.llmService.createSandboxTool({ beforeExecute }),
-      this.llmService.createWebSearchTool({ beforeExecute }),
-      this.llmService.createExecTool({ beforeExecute }),
+      this.llmService.createSandboxTool({
+        beforeExecute: beforeExecuteFor(SANDBOX_TOOL_NAME),
+      }),
+      this.llmService.createWebSearchTool({
+        beforeExecute: beforeExecuteFor(WEB_SEARCH_TOOL_NAME),
+      }),
+      this.llmService.createExecTool({
+        beforeExecute: beforeExecuteFor(EXEC_TOOL_NAME),
+      }),
     ];
   }
 }

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { BillingService } from './billing.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
@@ -270,7 +271,7 @@ describe('BillingService', () => {
 
       await expect(
         service.chargeForSkill(USER_ID, 50, 'Дорогой Skill', 'charge-key-2'),
-      ).rejects.toThrow('Insufficient funds or wallet not found');
+      ).rejects.toThrow(ERROR_KEYS.insufficientFunds);
       expect(tx.wallet.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
     });

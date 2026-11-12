@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 export interface WalletBalance {
@@ -125,9 +126,7 @@ export class BillingService {
         });
 
         if (updateResult.count === 0) {
-          throw new BadRequestException(
-            'Insufficient funds or wallet not found',
-          );
+          throw new BadRequestException(ERROR_KEYS.insufficientFunds);
         }
 
         // После атомарного списания баланс уже уменьшен.

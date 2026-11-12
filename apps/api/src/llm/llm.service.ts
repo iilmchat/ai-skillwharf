@@ -57,6 +57,10 @@ export const ExecToolSchema = z.object({
   command: z.string().describe('Shell-команда для выполнения'),
 });
 
+/** Инструкция, чтобы ответы шли на языке пользователя. */
+export const LANGUAGE_INSTRUCTION =
+  'Отвечай на том же языке, на котором написал пользователь (русский или английский).';
+
 /**
  * Запрос к Tavily. Тело собирается в JSON в Gateway и передаётся в песочницу
  * переменной окружения, поэтому пользовательский запрос не попадает в
@@ -220,8 +224,15 @@ export class LlmService {
     const model =
       tools.length > 0 ? this.client.bindTools(tools) : this.client;
 
-    return model.invoke(messages);
+    return model.invoke(withLanguageInstruction(messages));
   }
+}
+
+/** Добавляет системную инструкцию о языке ответа в начало диалога. */
+export function withLanguageInstruction(
+  messages: BaseMessage[],
+): BaseMessage[] {
+  return [new SystemMessage(LANGUAGE_INSTRUCTION), ...messages];
 }
 
 /** Собирает разрешённые секреты из окружения Gateway для песочницы. */

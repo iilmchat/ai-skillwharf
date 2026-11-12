@@ -86,6 +86,17 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
+   * Включённые навыки. По их манифестам ChatService определяет цену
+   * инструментов для динамического paywall.
+   */
+  getEnabledSkills(): Promise<InstalledSkill[]> {
+    return this.prisma.installedSkill.findMany({
+      where: { isEnabled: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /**
    * Загружает стартовый каталог навыков: читает все `SKILL.md` из
    * `starter-skills/`, валидирует манифесты и делает upsert по имени.
    * Возвращает количество успешно загруженных навыков.
