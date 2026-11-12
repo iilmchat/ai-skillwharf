@@ -556,8 +556,13 @@ export class LlmService {
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt();
+    const response = await model.invoke(
+      withLanguageInstruction(messages, systemPrompt),
+    );
 
-    return model.invoke(withLanguageInstruction(messages, systemPrompt));
+    this.logGenAiUsage(route, response.usage_metadata);
+
+    return response;
   }
 
   /**
@@ -606,7 +611,29 @@ export class LlmService {
         })
       : new AIMessage('');
 
+    this.logGenAiUsage(route, message.usage_metadata);
+
     yield { type: 'message', message };
+  }
+
+  /**
+   * OTel-совместимый лог вызова LLM. Пока пишем JSON в лог приложения:
+   * позже эти атрибуты можно отправить в OTLP-коллектор без изменения
+   * вызывающего кода.
+   */
+  private logGenAiUsage(
+    route: LlmRouteSelection | undefined,
+    usage: AIMessage['usage_metadata'],
+  ): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'gen_ai.usage',
+        'gen_ai.system': 'openai',
+        'gen_ai.model': route?.modelName.trim() || process.env.LLM_MODEL,
+        'gen_ai.prompt_tokens': usage?.input_tokens ?? 0,
+        'gen_ai.completion_tokens': usage?.output_tokens ?? 0,
+      }),
+    );
   }
 
   /**

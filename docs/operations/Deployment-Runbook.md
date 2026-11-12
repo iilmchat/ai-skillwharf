@@ -431,6 +431,53 @@ WebSocket (`/socket.io/`) идёт через тот же домен: edge-Caddy
 `POST /api/v1/billing/topup`; отдельный сид не нужен. Для локального стека
 тест повышает пользователя до `admin` и удаляет ранее установленный
 `weather-api`, чтобы установка из магазина проверялась при каждом прогоне.
+
+## 12. Наблюдаемость (AgentOps)
+
+API пишет OTel-совместимые события в лог приложения. Пока это JSON в stdout;
+те же атрибуты можно позже отправить в OTLP-коллектор без изменения кода.
+
+**Вызов LLM** (`apps/api/src/llm/llm.service.ts`) — одна запись на каждый
+ответ модели:
+
+```json
+{
+  "event": "gen_ai.usage",
+  "gen_ai.system": "openai",
+  "gen_ai.model": "qwen2.5-coder-7b-instruct",
+  "gen_ai.prompt_tokens": 128,
+  "gen_ai.completion_tokens": 42
+}
+```
+
+**Запуск агента** (`apps/api/src/chat/chat.service.ts`) — запись перед
+обработкой сообщения:
+
+```json
+{
+  "event": "gen_ai.agent.run",
+  "gen_ai.agent.id": "nova",
+  "gen_ai.tenant.id": "<user-id>",
+  "conversationId": "<conversation-id>"
+}
+```
+
+Как читать логи:
+
+```bash
+# Все события GenAI
+docker compose logs api | grep gen_ai
+
+# Поток логов в реальном времени
+docker compose logs -f api
+```
+
+В PowerShell вместо `grep` используйте
+`docker compose logs api | Select-String gen_ai`.
+
+Атрибуты `gen_ai.prompt_tokens` и `gen_ai.completion_tokens` позволяют считать
+стоимость по модели, а `gen_ai.tenant.id` — разносить расходы по клиентам.
+Если провайдер не вернул usage, значения будут `0`.
 На удалённом стенде (`E2E_BASE_URL`) эти шаги пропускаются: роль и чистое
 состояние должен обеспечить сид.
 

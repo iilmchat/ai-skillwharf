@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createServer, type ServerResponse } from 'node:http';
 import {
   expect,
   test,
@@ -177,6 +178,202 @@ async function loginViaUi(page: Page): Promise<void> {
   await expect(page.locator('#chat-message')).toBeEnabled();
 }
 
+interface MockLlmServer {
+  /** Адрес, доступный из контейнера api через host.docker.internal. */
+  baseUrl: string;
+  close: () => Promise<void>;
+}
+
+interface LlmRouteView {
+  id: string;
+  isActive: boolean;
+}
+
+function writeSseChunk(
+  response: ServerResponse,
+  delta: unknown,
+  finishReason: string | null,
+): void {
+  response.write(
+    `data: ${JSON.stringify({
+      id: 'chatcmpl-e2e',
+      object: 'chat.completion.chunk',
+      created: 0,
+      model: 'e2e-mock',
+      choices: [{ index: 0, delta, finish_reason: finishReason }],
+    })}\n\n`,
+  );
+}
+
+/**
+ * Детерминированная OpenAI-совместимая LLM для E2E: на первый запрос просит
+ * `execute_sandbox_code`, после результата инструмента отдаёт финальный текст.
+ * Так escrow-сценарий не зависит от внешней модели и работает в CI.
+ */
+async function startMockLlmServer(): Promise<MockLlmServer> {
+  const server = createServer((request, response) => {
+    if (
+      request.method !== 'POST' ||
+      !request.url?.endsWith('/chat/completions')
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    let body = '';
+    request.on('data', (chunk: Buffer) => {
+      body += chunk.toString();
+    });
+    request.on('end', () => {
+      const payload = JSON.parse(body) as {
+        messages?: Array<{ role?: string }>;
+      };
+      const hasToolResult = (payload.messages ?? []).some(
+        (message) => message.role === 'tool',
+      );
+
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+
+      if (hasToolResult) {
+        writeSseChunk(
+          response,
+          { role: 'assistant', content: 'Готово: e2e-escrow' },
+          null,
+        );
+        writeSseChunk(response, {}, 'stop');
+      } else {
+        writeSseChunk(
+          response,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call_e2e_escrow',
+                type: 'function',
+                function: {
+                  name: 'execute_sandbox_code',
+                  arguments: JSON.stringify({ code: 'print("e2e-escrow")' }),
+                },
+              },
+            ],
+          },
+          null,
+        );
+        writeSseChunk(response, {}, 'tool_calls');
+      }
+
+      response.write('data: [DONE]\n\n');
+      response.end();
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '0.0.0.0', resolve);
+  });
+
+  const address = server.address();
+  const port =
+    typeof address === 'object' && address !== null ? address.port : 0;
+
+  return {
+    baseUrl: `http://host.docker.internal:${port}/v1`,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      }),
+  };
+}
+
+async function getBalance(
+  request: APIRequestContext,
+  accessToken: string,
+): Promise<number> {
+  const response = await request.get(`${API_BASE_URL}/billing/balance`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  expect(response.ok(), `balance failed: ${response.status()}`).toBeTruthy();
+
+  const { balance } = (await response.json()) as { balance: string };
+
+  return Number.parseFloat(balance);
+}
+
+async function createMockRoute(
+  request: APIRequestContext,
+  accessToken: string,
+  baseUrl: string,
+): Promise<{ routeId: string; restore: () => Promise<void> }> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const listResponse = await request.get(`${API_BASE_URL}/admin/llm-routes`, {
+    headers,
+  });
+
+  expect(listResponse.ok()).toBeTruthy();
+
+  const routes = (await listResponse.json()) as LlmRouteView[];
+  const activeRoutes = routes.filter((route) => route.isActive);
+
+  for (const route of activeRoutes) {
+    const disabled = await request.patch(
+      `${API_BASE_URL}/admin/llm-routes/${route.id}`,
+      { headers, data: { isActive: false } },
+    );
+    expect(disabled.ok()).toBeTruthy();
+  }
+
+  const disabledResponse = await request.get(
+    `${API_BASE_URL}/admin/llm-routes`,
+    { headers },
+  );
+  const stillActive = (
+    (await disabledResponse.json()) as LlmRouteView[]
+  ).filter((route) => route.isActive);
+
+  expect(
+    stillActive,
+    'перед тестом не должно остаться активных маршрутов',
+  ).toEqual([]);
+
+  const created = await request.post(`${API_BASE_URL}/admin/llm-routes`, {
+    headers,
+    data: {
+      name: `e2e-mock-${Date.now()}`,
+      modelName: 'e2e-mock',
+      baseUrl,
+      priority: 0,
+      isActive: true,
+    },
+  });
+
+  expect(created.ok(), `route create: ${created.status()}`).toBeTruthy();
+
+  const { id: routeId } = (await created.json()) as { id: string };
+
+  return {
+    routeId,
+    restore: async () => {
+      await request.delete(`${API_BASE_URL}/admin/llm-routes/${routeId}`, {
+        headers,
+      });
+
+      for (const route of activeRoutes) {
+        await request.patch(`${API_BASE_URL}/admin/llm-routes/${route.id}`, {
+          headers,
+          data: { isActive: true },
+        });
+      }
+    },
+  };
+}
+
 test.beforeAll(async ({ request }) => {
   await ensureTestUser(request);
   resetStoreSkill();
@@ -192,7 +389,10 @@ test.describe('Дымовые сценарии UI', () => {
       /Автономные|Autonomous/,
     );
 
-    await page.getByRole('link', { name: /Войти|Sign in/i }).first().click();
+    await page
+      .getByRole('link', { name: /Войти|Sign in/i })
+      .first()
+      .click();
 
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.locator('#email')).toBeVisible();
@@ -204,10 +404,9 @@ test.describe('Дымовые сценарии UI', () => {
     page,
     request,
   }) => {
-    const registration = await request.post(
-      `${API_BASE_URL}/auth/register`,
-      { data: VIEWER_USER },
-    );
+    const registration = await request.post(`${API_BASE_URL}/auth/register`, {
+      data: VIEWER_USER,
+    });
 
     if (!registration.ok() && registration.status() !== 409) {
       throw new Error(
@@ -242,9 +441,7 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(
       page.getByRole('tab', { name: /LLM Роутер|LLM Router/ }),
     ).toBeVisible();
-    await expect(
-      page.getByRole('tab', { name: /Аудит|Audit/ }),
-    ).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Аудит|Audit/ })).toBeVisible();
 
     await page.getByRole('tab', { name: /Аудит|Audit/ }).click();
     await expect(page.getByRole('tabpanel')).toBeVisible();
@@ -271,9 +468,7 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(messages.nth(1)).not.toBeEmpty();
   });
 
-  test('офис получает события агента и одобряет действие', async ({
-    page,
-  }) => {
+  test('офис получает события агента и одобряет действие', async ({ page }) => {
     await loginViaUi(page);
 
     const chatForm = page
@@ -283,9 +478,9 @@ test.describe('Дымовые сценарии UI', () => {
     await page.locator('#chat-message').fill(`E2E office ${Date.now()}`);
     await chatForm.locator('button[type="submit"]').click();
 
-    await expect(
-      page.locator('ol[aria-live="polite"] > li'),
-    ).toHaveCount(2, { timeout: 90_000 });
+    await expect(page.locator('ol[aria-live="polite"] > li')).toHaveCount(2, {
+      timeout: 90_000,
+    });
 
     await page.locator('a[href^="/app/office"]:visible').first().click();
     await expect(page).toHaveURL(/\/app\/office/);
@@ -296,9 +491,7 @@ test.describe('Дымовые сценарии UI', () => {
     await nova.getByRole('button').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(
-      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i,
-    );
+    await expect(dialog).toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i);
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
 
@@ -308,9 +501,7 @@ test.describe('Дымовые сценарии UI', () => {
       .getByRole('button', { name: /Одобрить действие|Approve action/i })
       .click();
 
-    await expect(dialog).toContainText(
-      /Действие одобрено|Action approved/,
-    );
+    await expect(dialog).toContainText(/Действие одобрено|Action approved/);
     await expect(dialog).toContainText(/Печатает|Typing/);
   });
 
@@ -326,9 +517,9 @@ test.describe('Дымовые сценарии UI', () => {
 
     await page.getByRole('tab', { name: /Коммуникации/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(1);
-    await expect(
-      page.locator('main ul > li > article'),
-    ).toContainText('messenger-connector');
+    await expect(page.locator('main ul > li > article')).toContainText(
+      'messenger-connector',
+    );
 
     await page.getByRole('tab', { name: /Продуктивность/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(5);
@@ -368,5 +559,77 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(
       page.getByRole('status').filter({ hasText: /установлен|installed/i }),
     ).toBeVisible();
+  });
+
+  test('эскроу: sandbox-вызов ждёт одобрения и списывает баланс', async ({
+    page,
+    request,
+  }) => {
+    const accessToken = await loginViaApi(request);
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    const topup = await request.post(`${API_BASE_URL}/billing/topup`, {
+      headers,
+      data: {
+        amount: 10,
+        description: 'E2E escrow balance',
+        idempotencyKey: `e2e-escrow-${Date.now()}`,
+      },
+    });
+
+    expect(topup.ok(), `topup failed: ${topup.status()}`).toBeTruthy();
+
+    const balanceBefore = await getBalance(request, accessToken);
+    const mockLlm = await startMockLlmServer();
+    let mockRoute: Awaited<ReturnType<typeof createMockRoute>> | null = null;
+
+    try {
+      mockRoute = await createMockRoute(request, accessToken, mockLlm.baseUrl);
+
+      await loginViaUi(page);
+
+      const chatForm = page
+        .locator('form')
+        .filter({ has: page.locator('#chat-message') });
+
+      await page
+        .locator('#chat-message')
+        .fill(`E2E escrow ${Date.now()}: выполни код в песочнице`);
+      await chatForm.locator('button[type="submit"]').click();
+
+      // Граф остановился перед execute_sandbox_code и ждёт approve_action,
+      // поэтому ответа в чате ещё нет — переходим в офис.
+      await page.locator('a[href^="/app/office"]:visible').first().click();
+      await expect(page).toHaveURL(/\/app\/office/);
+
+      const nova = page.locator('main article').filter({ hasText: 'Nova' });
+      await expect(nova).toContainText(
+        /Ждёт одобрения|Ожидает одобрения|Awaiting approval/,
+        { timeout: 30_000 },
+      );
+
+      await nova.getByRole('button').click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await dialog
+        .getByRole('button', {
+          name: /Одобрить действие|Approve action/i,
+        })
+        .click();
+
+      await expect(dialog).toContainText(/Действие одобрено|Action approved/);
+
+      // Списание происходит после одобрения, до запуска sandbox-контейнера.
+      await expect
+        .poll(async () => getBalance(request, accessToken), {
+          timeout: 30_000,
+          intervals: [500, 1_000, 2_000],
+        })
+        .toBeLessThan(balanceBefore);
+    } finally {
+      await mockRoute?.restore();
+      await mockLlm.close();
+    }
   });
 });
