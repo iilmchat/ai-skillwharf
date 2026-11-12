@@ -1,15 +1,25 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TopUpModal } from '../components/TopUpModal';
 import {
   useChatSession,
   type ChatMessage,
   type ConnectionState,
 } from '../hooks/useChatSession';
+import { balanceQueryKey, useBalance } from '../hooks/useBalance';
 import { useAuthStore } from '../store/auth.store';
 
 const LOGOUT_BUTTON_CLASSES =
@@ -108,6 +118,7 @@ export function ChatPage() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const {
     messages,
@@ -116,13 +127,19 @@ export function ChatPage() {
     isSending,
     setupError,
     notice,
+    noticeTopUp,
     sendMessage,
     clearNotice,
     retry,
   } = useChatSession();
 
+  const balanceQuery = useBalance();
   const [draft, setDraft] = useState('');
+  const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const openTopUp = useCallback(() => setIsTopUpOpen(true), []);
+  const closeTopUp = useCallback(() => setIsTopUpOpen(false), []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
@@ -135,6 +152,7 @@ export function ChatPage() {
       : 'connecting';
 
   function handleLogout() {
+    queryClient.removeQueries({ queryKey: balanceQueryKey });
     logout();
     navigate('/login', { replace: true });
   }
@@ -185,7 +203,17 @@ export function ChatPage() {
           </div>
 
           <div className="border-t border-outline-variant p-4">
-            <div className="flex items-center justify-between gap-3">
+            <BalanceWidget
+              balance={balanceQuery.data}
+              isFetching={balanceQuery.isFetching}
+              isError={balanceQuery.isError}
+              onRetry={() => {
+                void balanceQuery.refetch();
+              }}
+              onTopUp={openTopUp}
+            />
+
+            <div className="mt-4 flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-on-surface-variant">
                 {t('language.title')}
               </span>
@@ -252,6 +280,19 @@ export function ChatPage() {
               </button>
             </div>
           </header>
+
+          <div className="border-b border-outline-variant bg-surface-container/50 px-4 py-2 md:hidden">
+            <BalanceWidget
+              variant="inline"
+              balance={balanceQuery.data}
+              isFetching={balanceQuery.isFetching}
+              isError={balanceQuery.isError}
+              onRetry={() => {
+                void balanceQuery.refetch();
+              }}
+              onTopUp={openTopUp}
+            />
+          </div>
 
           <div className="flex-1 overflow-y-auto">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -408,7 +449,30 @@ export function ChatPage() {
         </main>
       </div>
 
-      {notice !== null && <ErrorToast message={notice} onClose={clearNotice} />}
+      <TopUpModal
+        open={isTopUpOpen}
+        onClose={closeTopUp}
+        userId={user?.id ?? ''}
+        balance={balanceQuery.data}
+      />
+
+      {notice !== null && (
+        <ErrorToast
+          message={notice}
+          onClose={clearNotice}
+          action={
+            noticeTopUp
+              ? {
+                  label: t('billing.topUp'),
+                  onClick: () => {
+                    clearNotice();
+                    openTopUp();
+                  },
+                }
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

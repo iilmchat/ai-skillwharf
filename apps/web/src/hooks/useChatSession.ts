@@ -27,6 +27,7 @@ export interface ChatSession {
   connectionState: ConnectionState;
   setupError: string | null;
   notice: string | null;
+  noticeTopUp: boolean;
   sendMessage: (content: string) => void;
   clearNotice: () => void;
   retry: () => void;
@@ -85,15 +86,45 @@ function formatServerMessage(message: string | string[]): string {
 interface NormalizedReply {
   content: string;
   notice: string | null;
+  needsTopUp: boolean;
+}
+
+function hasInsufficientFundsMessage(message: string): boolean {
+  return (
+    message === 'errors.insufficient_funds' ||
+    message.includes(INSUFFICIENT_FUNDS_MARKER)
+  );
+}
+
+function isInsufficientFundsPayload(payload: unknown): boolean {
+  if (!isRecord(payload) || !('message' in payload)) {
+    return false;
+  }
+
+  const { message } = payload;
+
+  if (typeof message === 'string') {
+    return hasInsufficientFundsMessage(message);
+  }
+
+  return (
+    Array.isArray(message) &&
+    message.some(
+      (item): boolean =>
+        typeof item === 'string' && hasInsufficientFundsMessage(item),
+    )
+  );
 }
 
 function normalizeAssistantReply(reply: string): NormalizedReply {
+  const needsTopUp = hasInsufficientFundsMessage(reply);
+
   if (reply.startsWith(ERROR_KEY_PREFIX)) {
     const content = i18n.exists(reply)
       ? i18n.t(reply)
       : i18n.t('chat.errors.messageFailed');
 
-    return { content, notice: content };
+    return { content, notice: content, needsTopUp };
   }
 
   // Совместимость со старым ответом бэкенда, где текст был захардкожен.
@@ -101,10 +132,11 @@ function normalizeAssistantReply(reply: string): NormalizedReply {
     return {
       content: reply,
       notice: i18n.t('chat.errors.insufficientFunds'),
+      needsTopUp: true,
     };
   }
 
-  return { content: reply, notice: null };
+  return { content: reply, notice: null, needsTopUp };
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -149,17 +181,23 @@ export function useChatSession(): ChatSession {
   );
   const [socketError, setSocketError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTopUp, setNoticeTopUp] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
   const pendingRef = useRef<PendingReply | null>(null);
+  const pendingTopUpRef = useRef(false);
   const conversationRequestedRef = useRef(false);
 
-  const clearNotice = useCallback(() => setNotice(null), []);
+  const clearNotice = useCallback(() => {
+    setNotice(null);
+    setNoticeTopUp(false);
+  }, []);
 
   const retry = useCallback(() => {
     conversationRequestedRef.current = false;
     setNotice(null);
+    setNoticeTopUp(false);
     setConversationError(null);
     setSocketError(null);
     setConversationId(null);
@@ -219,6 +257,7 @@ export function useChatSession(): ChatSession {
       if (pending !== null) {
         window.clearTimeout(pending.timeoutId);
         pendingRef.current = null;
+        pendingTopUpRef.current = false;
         pending.reject(new Error(i18n.t('chat.errors.disconnected')));
       }
 
@@ -239,16 +278,19 @@ export function useChatSession(): ChatSession {
         payload,
         i18n.t('chat.errors.messageFailed'),
       );
+      const needsTopUp = isInsufficientFundsPayload(payload);
       const pending = pendingRef.current;
 
       if (pending !== null) {
         window.clearTimeout(pending.timeoutId);
         pendingRef.current = null;
+        pendingTopUpRef.current = needsTopUp;
         pending.reject(new Error(message));
         return;
       }
 
       setNotice(message);
+      setNoticeTopUp(needsTopUp);
     };
 
     socket.on('connect', handleConnect);
@@ -285,6 +327,7 @@ export function useChatSession(): ChatSession {
 
       if (conversationId === null || socket === null || !socket.connected) {
         setNotice(i18n.t('chat.errors.notReady'));
+        setNoticeTopUp(false);
         return;
       }
 
@@ -294,6 +337,8 @@ export function useChatSession(): ChatSession {
       ]);
       setIsSending(true);
       setNotice(null);
+      setNoticeTopUp(false);
+      pendingTopUpRef.current = false;
 
       new Promise<string>((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {
@@ -348,9 +393,15 @@ export function useChatSession(): ChatSession {
           if (normalized.notice !== null) {
             setNotice(normalized.notice);
           }
+
+          setNoticeTopUp(normalized.needsTopUp);
         })
         .catch((error: unknown) => {
+          const needsTopUp = pendingTopUpRef.current;
+          pendingTopUpRef.current = false;
+
           setNotice(getErrorMessage(error, i18n.t('chat.errors.sendFailed')));
+          setNoticeTopUp(needsTopUp);
         })
         .finally(() => setIsSending(false));
     },
@@ -372,6 +423,7 @@ export function useChatSession(): ChatSession {
     connectionState,
     setupError: conversationError ?? socketError,
     notice,
+    noticeTopUp,
     sendMessage,
     clearNotice,
     retry,

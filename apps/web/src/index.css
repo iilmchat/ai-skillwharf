@@ -132,6 +132,23 @@ body {
   );
 }
 
+dialog::backdrop {
+  background-color: rgb(2 6 23 / 0.65);
+  backdrop-filter: blur(2px);
+}
+
+/* Сумма пополнения: скрываем нативные стрелки number-инпута. */
+input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,

@@ -4,7 +4,30 @@
     "description": "SkillWharf is a workspace for autonomous AI agents."
   },
   "common": {
-    "closeNotification": "Close notification"
+    "closeNotification": "Close notification",
+    "cancel": "Cancel",
+    "close": "Close"
+  },
+  "billing": {
+    "balance": "Balance",
+    "topUp": "Top up",
+    "topUpTitle": "Top up balance",
+    "topUpSubtitle": "Test top-up via the mock provider.",
+    "currentBalance": "Current balance",
+    "amountLabel": "Top-up amount",
+    "presetsLabel": "Quick amount selection",
+    "pay": "Pay",
+    "processing": "Processing…",
+    "loading": "Loading balance…",
+    "retry": "Retry",
+    "errors": {
+      "network": "Could not reach the billing service.",
+      "load": "Could not load the balance.",
+      "adminOnly": "Only an administrator can top up the balance.",
+      "topUp": "Could not top up the balance. Please try again.",
+      "invalidAmount": "Enter an amount greater than zero with at most two decimal places.",
+      "sessionExpired": "Your session has expired. Please sign in again."
+    }
   },
   "errors": {
     "insufficient_funds": "Insufficient funds to run the agent. Top up your balance."

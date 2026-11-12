@@ -1,14 +1,20 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
+interface ErrorToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ErrorToastProps {
   message: string;
   onClose: () => void;
+  action?: ErrorToastAction;
 }
 
 const AUTO_DISMISS_MS = 8000;
 
-export function ErrorToast({ message, onClose }: ErrorToastProps) {
+export function ErrorToast({ message, onClose, action }: ErrorToastProps) {
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -43,7 +49,18 @@ export function ErrorToast({ message, onClose }: ErrorToastProps) {
         />
         <circle cx="10" cy="14" r="1" fill="currentColor" />
       </svg>
-      <p className="flex-1 leading-relaxed">{message}</p>
+      <div className="min-w-0 flex-1">
+        <p className="leading-relaxed">{message}</p>
+        {action !== undefined && (
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="mt-2 rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-on-error transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
       <button
         type="button"
         onClick={onClose}
