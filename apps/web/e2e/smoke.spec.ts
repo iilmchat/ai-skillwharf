@@ -447,6 +447,36 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(page.getByRole('tabpanel')).toBeVisible();
   });
 
+  test('в LLM-роутере можно выбрать провайдера', async ({ page }) => {
+    await loginViaUi(page);
+
+    await page.locator('a[href="/admin"]').click();
+    await expect(page).toHaveURL(/\/admin$/);
+    await page
+      .getByRole('tab', { name: /LLM Роутер|LLM Router/ })
+      .click();
+
+    await page
+      .getByRole('button', { name: /Добавить правило|Add rule/ })
+      .click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    const provider = dialog.locator('#admin-route-provider');
+    await expect(provider).toHaveValue('OpenAI');
+    await expect(provider.locator('option')).toHaveCount(3);
+
+    await provider.selectOption('YandexGPT');
+    await expect(dialog).toContainText('gpt://');
+
+    await provider.selectOption('GigaChat');
+    await expect(dialog).toContainText(/OAuth/i);
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+
   test('пользователь входит, отправляет сообщение и получает ответ', async ({
     page,
   }) => {
