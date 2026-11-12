@@ -510,7 +510,7 @@ test.describe('Дымовые сценарии UI', () => {
 
     await page.locator('a[href="/app/store"]:visible').first().click();
     await expect(page).toHaveURL(/\/app\/store$/);
-    await expect(page.getByRole('tab')).toHaveCount(8);
+    await expect(page.getByRole('tab')).toHaveCount(9);
 
     await page.getByRole('tab', { name: /Поиск/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(2);
@@ -526,6 +526,16 @@ test.describe('Дымовые сценарии UI', () => {
 
     await page.getByRole('tab', { name: /Разработка/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(6);
+
+    await page.getByRole('tab', { name: /Финансы/ }).click();
+    const financeCards = page.locator('main ul > li > article');
+    await expect(financeCards).toHaveCount(4);
+    await expect(
+      financeCards.filter({ hasText: 'fraud-shield-audit' }),
+    ).toContainText('500,00 ₽ / результат');
+    await expect(
+      financeCards.filter({ hasText: 'profit-leak-detector' }),
+    ).toContainText('300,00 ₽ / вызов');
   });
 
   test('в магазине отображаются карточки и работает установка', async ({

@@ -103,6 +103,7 @@
       "content": "Content",
       "hr": "HR",
       "documents": "Documents",
+      "finance": "Finance",
       "emptyTitle": "No skills in this category yet",
       "emptyBody": "Choose another category or show all skills.",
       "reset": "Show all"

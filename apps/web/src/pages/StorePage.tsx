@@ -42,6 +42,7 @@ const STORE_CATEGORIES: readonly StoreCategory[] = [
   'content',
   'hr',
   'documents',
+  'finance',
 ];
 
 interface InstallVariables {
@@ -318,6 +319,7 @@ export function StorePage() {
       content: 0,
       hr: 0,
       documents: 0,
+      finance: 0,
     };
 
     for (const skill of allSkills) {

@@ -11,7 +11,8 @@ export type StoreCategory =
   | 'productivity'
   | 'content'
   | 'hr'
-  | 'documents';
+  | 'documents'
+  | 'finance';
 
 interface CategoryRule {
   category: Exclude<StoreCategory, 'all'>;
@@ -32,6 +33,10 @@ const CATEGORY_PREFIX_RULES: readonly CategoryPrefixRule[] = [
 
 /** Порядок важен: поиск должен сработать раньше разработки. */
 const CATEGORY_RULES: readonly CategoryRule[] = [
+  {
+    category: 'finance',
+    keywords: ['unit', 'profit', 'price', 'fraud'],
+  },
   {
     category: 'search',
     keywords: ['search', 'tavily', 'weather', 'web', 'research'],
