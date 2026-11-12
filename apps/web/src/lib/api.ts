@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useRateLimitStore } from './rate-limit'
 
 /**
  * Базовый URL REST API.
@@ -23,3 +24,16 @@ export function setAuthToken(token: string | null): void {
 
   api.defaults.headers.common.Authorization = `Bearer ${token}`
 }
+
+// 429 приходит при брутфорсе логина и при превышении лимитов API:
+// показываем один общий тост независимо от того, какой запрос упал.
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 429) {
+      useRateLimitStore.getState().notify()
+    }
+
+    return Promise.reject(error)
+  },
+)

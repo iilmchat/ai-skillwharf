@@ -635,13 +635,14 @@ test.describe('Дымовые сценарии UI', () => {
     await page.waitForURL(/yoomoney\.ru/, { timeout: 15_000 });
     expect(paymentBody).toEqual({ amount: 750 });
 
-    // Сессия переживает возврат с внешней страницы.
+    // Сессия переживает возврат с внешней страницы: полная навигация
+    // восстанавливает её по refresh-токену.
     await page.goto(`${WEB_BASE_URL}/app/chat?payment=success`);
     await expect(
       page.getByRole('status').filter({
         hasText: /Баланс успешно пополнен|Balance topped up/,
       }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 90_000 });
     await expect(page).toHaveURL(/\/app\/chat$/);
 
     await page.goto(`${WEB_BASE_URL}/app/chat?payment=cancel`);
@@ -649,7 +650,7 @@ test.describe('Дымовые сценарии UI', () => {
       page.getByRole('status').filter({
         hasText: /Оплата отменена|Payment cancelled/,
       }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 90_000 });
   });
 
   test('эскроу: sandbox-вызов ждёт одобрения и списывает баланс', async ({

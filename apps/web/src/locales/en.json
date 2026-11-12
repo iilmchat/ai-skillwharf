@@ -52,7 +52,8 @@
     }
   },
   "errors": {
-    "insufficient_funds": "Insufficient funds to run the agent. Top up your balance."
+    "insufficient_funds": "Insufficient funds to run the agent. Top up your balance.",
+    "rateLimit": "Too many attempts. Please wait a minute."
   },
   "nav": {
     "primary": "Primary navigation",

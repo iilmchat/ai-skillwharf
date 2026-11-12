@@ -42,7 +42,22 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   const accessToken = useAuthStore((state) => state.accessToken);
   const user = useAuthStore((state) => state.user);
+  const isInitializing = useAuthStore((state) => state.isInitializing);
+  const { t } = useTranslation();
   const location = useLocation();
+
+  // Пока идёт восстановление сессии после F5, не отправляем на /login.
+  if (isInitializing) {
+    return (
+      <div className="grid min-h-svh place-items-center bg-surface text-on-surface">
+        <div
+          role="status"
+          aria-label={t('common.loading')}
+          className="size-8 animate-spin rounded-full border-2 border-outline border-t-primary"
+        />
+      </div>
+    );
+  }
 
   if (accessToken === null || user === null) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;

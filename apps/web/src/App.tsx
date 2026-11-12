@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { RateLimitToast } from './components/RateLimitToast';
 import { ADMIN_ROLES } from './lib/roles';
 import { disconnectSharedSocket } from './lib/socket';
 import { useAuthStore } from './store/auth.store';
@@ -64,6 +65,12 @@ function RouteFallback() {
 
 function App() {
   const accessToken = useAuthStore((state) => state.accessToken);
+  const initialize = useAuthStore((state) => state.initialize);
+
+  // После F5 восстанавливаем сессию по refresh-токену из localStorage.
+  useEffect(() => {
+    void initialize();
+  }, [initialize]);
 
   useEffect(() => {
     if (accessToken === null) {
@@ -72,57 +79,64 @@ function App() {
   }, [accessToken]);
 
   return (
-    <Suspense fallback={<RouteFallback />}>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/welcome" element={<LandingPage />} />
-        <Route path="/office" element={<OfficePage />} />
-        <Route path="/login" element={<LoginPage />} />
+    <>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/welcome" element={<LandingPage />} />
+          <Route path="/office" element={<OfficePage />} />
+          <Route path="/login" element={<LoginPage />} />
 
-        <Route path="/app" element={<Navigate to="/app/chat" replace />} />
-        <Route
-          path="/app/chat"
-          element={
-            <ProtectedRoute>
-              <ChatPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/app/skills"
-          element={
-            <ProtectedRoute>
-              <SkillsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/app/store"
-          element={
-            <ProtectedRoute>
-              <StorePage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/app/office" element={<OfficePage />} />
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-              <AdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/app/admin" element={<Navigate to="/admin" replace />} />
+          <Route path="/app" element={<Navigate to="/app/chat" replace />} />
+          <Route
+            path="/app/chat"
+            element={
+              <ProtectedRoute>
+                <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/skills"
+            element={
+              <ProtectedRoute>
+                <SkillsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/store"
+            element={
+              <ProtectedRoute>
+                <StorePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/app/office" element={<OfficePage />} />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/app/admin" element={<Navigate to="/admin" replace />} />
 
-        {/* Старые пути остаются рабочими для сохранённых ссылок. */}
-        <Route path="/chat" element={<Navigate to="/app/chat" replace />} />
-        <Route path="/skills" element={<Navigate to="/app/skills" replace />} />
-        <Route path="/store" element={<Navigate to="/app/store" replace />} />
+          {/* Старые пути остаются рабочими для сохранённых ссылок. */}
+          <Route path="/chat" element={<Navigate to="/app/chat" replace />} />
+          <Route
+            path="/skills"
+            element={<Navigate to="/app/skills" replace />}
+          />
+          <Route path="/store" element={<Navigate to="/app/store" replace />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+
+      <RateLimitToast />
+    </>
   );
 }
 

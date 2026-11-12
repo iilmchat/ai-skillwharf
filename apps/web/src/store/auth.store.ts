@@ -17,9 +17,13 @@ interface AuthTokensResponse {
 
 interface AuthState {
   accessToken: string | null;
+  refreshToken: string | null;
   user: AuthUser | null;
+  /** Идёт восстановление сессии после перезагрузки страницы. */
+  isInitializing: boolean;
   isSubmitting: boolean;
   error: string | null;
+  initialize: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
@@ -66,13 +70,75 @@ function toErrorMessage(error: unknown): string {
   return i18n.t('auth.errors.loginFailed');
 }
 
+/** 429 показывает общий тост из interceptor, дублировать его в форме не нужно. */
+function isRateLimited(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 429;
+}
+
+/**
+ * Восстановление сессии должно запускаться один раз: в StrictMode эффект
+ * вызывается дважды, а refresh-токен одноразовый — повторный запрос
+ * инвалидировал бы только что выданную пару.
+ */
+let bootstrapPromise: Promise<void> | null = null;
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       accessToken: null,
+      refreshToken: null,
       user: null,
+      isInitializing: true,
       isSubmitting: false,
       error: null,
+
+      initialize: async () => {
+        if (bootstrapPromise !== null) {
+          return bootstrapPromise;
+        }
+
+        const storedRefreshToken = get().refreshToken;
+
+        if (storedRefreshToken === null) {
+          set({ isInitializing: false });
+
+          return;
+        }
+
+        bootstrapPromise = (async () => {
+          try {
+            const { data } = await api.post<AuthTokensResponse>(
+              '/auth/refresh',
+              { refreshToken: storedRefreshToken },
+            );
+
+            setAuthToken(data.accessToken);
+
+            const profile = await api.get<AuthUser>('/auth/me');
+
+            set({
+              accessToken: data.accessToken,
+              refreshToken: data.refreshToken,
+              user: profile.data,
+              isInitializing: false,
+              error: null,
+            });
+          } catch {
+            // Истёкший или отозванный токен: чистим сессию и идём на /login.
+            // 429 отдельно не пишем — его показывает общий тост.
+            setAuthToken(null);
+            set({
+              accessToken: null,
+              refreshToken: null,
+              user: null,
+              isInitializing: false,
+              error: null,
+            });
+          }
+        })();
+
+        return bootstrapPromise;
+      },
 
       login: async (email, password) => {
         set({ isSubmitting: true, error: null });
@@ -90,6 +156,7 @@ export const useAuthStore = create<AuthState>()(
 
           set({
             accessToken: data.accessToken,
+            refreshToken: data.refreshToken,
             user: profile.data,
             isSubmitting: false,
           });
@@ -97,9 +164,10 @@ export const useAuthStore = create<AuthState>()(
           setAuthToken(null);
           set({
             accessToken: null,
+            refreshToken: null,
             user: null,
             isSubmitting: false,
-            error: toErrorMessage(error),
+            error: isRateLimited(error) ? null : toErrorMessage(error),
           });
 
           throw error;
@@ -108,21 +176,22 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         setAuthToken(null);
-        set({ accessToken: null, user: null, error: null });
+        bootstrapPromise = null;
+        set({
+          accessToken: null,
+          refreshToken: null,
+          user: null,
+          error: null,
+        });
       },
 
       clearError: () => set({ error: null }),
     }),
     {
+      // Refresh-токен переживает F5; access-токен остаётся только в памяти.
       name: 'skillwharf-auth',
-      storage: createJSONStorage(() => sessionStorage),
-      partialize: (state) => ({
-        accessToken: state.accessToken,
-        user: state.user,
-      }),
-      onRehydrateStorage: () => (state) => {
-        setAuthToken(state?.accessToken ?? null);
-      },
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ refreshToken: state.refreshToken }),
     },
   ),
 );
