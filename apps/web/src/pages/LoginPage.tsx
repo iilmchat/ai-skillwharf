@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Brand } from '../components/Brand';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuthStore } from '../store/auth.store';
 
@@ -8,11 +10,11 @@ interface LoginLocationState {
   from?: string;
 }
 
-const FEATURES = [
-  'Автономные агенты с доступом к инструментам',
-  'Изолированная песочница для выполнения кода',
-  'Единое пространство для чатов и задач',
-];
+const FEATURE_KEYS = [
+  'login.features.tools',
+  'login.features.sandbox',
+  'login.features.workspace',
+] as const;
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -20,6 +22,7 @@ const INPUT_CLASSES =
   'block w-full rounded-xl border border-outline bg-surface px-4 py-3 text-sm text-on-surface outline-none transition placeholder:text-on-surface-variant/60 hover:border-primary/40 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60';
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const accessToken = useAuthStore((state) => state.accessToken);
   const login = useAuthStore((state) => state.login);
   const isSubmitting = useAuthStore((state) => state.isSubmitting);
@@ -70,7 +73,8 @@ export function LoginPage() {
         className="pointer-events-none absolute bottom-0 right-0 size-80 translate-x-1/3 translate-y-1/3 rounded-full bg-tertiary/10 blur-3xl"
       />
 
-      <div className="fixed right-4 top-4 z-20">
+      <div className="fixed right-4 top-4 z-20 flex items-center gap-2">
+        <LanguageSwitcher />
         <ThemeToggle />
       </div>
 
@@ -86,25 +90,24 @@ export function LoginPage() {
               aria-hidden="true"
               className="size-1.5 rounded-full bg-tertiary"
             />
-            Платформа автономных ИИ-агентов
+            {t('login.badge')}
           </p>
 
           <h1
             id="login-hero-title"
             className="mt-5 font-display text-4xl font-bold leading-tight tracking-tight text-on-surface"
           >
-            Один рабочий стол для ваших ИИ-агентов
+            {t('login.heroTitle')}
           </h1>
 
           <p className="mt-4 text-base leading-relaxed text-on-surface-variant">
-            Запускайте задачи, подключайте навыки и наблюдайте за работой
-            агентов в реальном времени.
+            {t('login.heroSubtitle')}
           </p>
 
           <ul className="mt-8 space-y-3">
-            {FEATURES.map((feature) => (
+            {FEATURE_KEYS.map((featureKey) => (
               <li
-                key={feature}
+                key={featureKey}
                 className="flex items-start gap-3 text-sm text-on-surface-variant"
               >
                 <svg
@@ -129,14 +132,14 @@ export function LoginPage() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                {feature}
+                {t(featureKey)}
               </li>
             ))}
           </ul>
         </div>
 
         <p className="text-xs text-on-surface-variant">
-          © {CURRENT_YEAR} SkillWharf
+          {t('login.copyright', { year: CURRENT_YEAR })}
         </p>
       </section>
 
@@ -148,10 +151,10 @@ export function LoginPage() {
 
           <div className="rounded-2xl border border-outline-variant bg-surface-container p-6 shadow-xl shadow-primary/5 sm:p-8">
             <h2 className="font-display text-2xl font-bold tracking-tight text-on-surface">
-              Вход в SkillWharf
+              {t('login.title')}
             </h2>
             <p className="mt-2 text-sm text-on-surface-variant">
-              Введите данные учётной записи, чтобы продолжить.
+              {t('login.subtitle')}
             </p>
 
             <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
@@ -191,7 +194,7 @@ export function LoginPage() {
                   htmlFor="email"
                   className="block text-sm font-medium text-on-surface"
                 >
-                  Email
+                  {t('login.emailLabel')}
                 </label>
                 <input
                   id="email"
@@ -199,7 +202,7 @@ export function LoginPage() {
                   type="email"
                   autoComplete="email"
                   inputMode="email"
-                  placeholder="you@example.com"
+                  placeholder={t('login.emailPlaceholder')}
                   required
                   disabled={isSubmitting}
                   value={email}
@@ -213,7 +216,7 @@ export function LoginPage() {
                   htmlFor="password"
                   className="block text-sm font-medium text-on-surface"
                 >
-                  Пароль
+                  {t('login.passwordLabel')}
                 </label>
                 <div className="relative">
                   <input
@@ -221,7 +224,7 @@ export function LoginPage() {
                     name="password"
                     type={isPasswordVisible ? 'text' : 'password'}
                     autoComplete="current-password"
-                    placeholder="••••••••"
+                    placeholder={t('login.passwordPlaceholder')}
                     required
                     disabled={isSubmitting}
                     value={password}
@@ -232,7 +235,9 @@ export function LoginPage() {
                     type="button"
                     onClick={() => setIsPasswordVisible((visible) => !visible)}
                     aria-label={
-                      isPasswordVisible ? 'Скрыть пароль' : 'Показать пароль'
+                      isPasswordVisible
+                        ? t('login.hidePassword')
+                        : t('login.showPassword')
                     }
                     aria-pressed={isPasswordVisible}
                     className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-on-surface-variant transition hover:text-on-surface focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
@@ -301,13 +306,13 @@ export function LoginPage() {
                     />
                   </svg>
                 )}
-                {isSubmitting ? 'Входим…' : 'Войти'}
+                {isSubmitting ? t('login.submitting') : t('login.submit')}
               </button>
             </form>
           </div>
 
           <p className="mt-6 text-center text-xs text-on-surface-variant">
-            Нет аккаунта? Обратитесь к администратору платформы.
+            {t('login.noAccount')}
           </p>
         </div>
       </main>

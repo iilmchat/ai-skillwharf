@@ -1,6 +1,8 @@
+import { useTranslation } from 'react-i18next';
 import { useThemeStore } from '../store/theme.store';
 
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const theme = useThemeStore((state) => state.theme);
   const toggleTheme = useThemeStore((state) => state.toggleTheme);
   const isDark = theme === 'dark';
@@ -9,9 +11,9 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={toggleTheme}
-      aria-label="Тёмная тема"
+      aria-label={t('theme.toggleLabel')}
       aria-pressed={isDark}
-      title={isDark ? 'Включить светлую тему' : 'Включить тёмную тему'}
+      title={isDark ? t('theme.switchToLight') : t('theme.switchToDark')}
       className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       {isDark ? (

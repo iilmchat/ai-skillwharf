@@ -34,8 +34,8 @@
   --font-body: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
   --font-heading: 'Manrope', 'Inter', ui-sans-serif, system-ui, sans-serif;
 
-  /* Brandbook */
-  --brand-primary: #8b5cf6;
+  /* Brandbook: primary для светлой темы затемнён до AA-контраста с белым. */
+  --brand-primary: #6b38d4;
   --brand-on-primary: #ffffff;
   --brand-primary-container: #ede9fe;
   --brand-on-primary-container: #4c1d95;
@@ -61,6 +61,10 @@
 }
 
 :root[data-theme='dark'] {
+  /* На тёмном фоне брендовый фиолетовый остаётся ярким, текст — тёмный:
+     контраст #8B5CF6 и #0B0B12 составляет 4.63:1. */
+  --brand-primary: #8b5cf6;
+  --brand-on-primary: #0b0b12;
   --brand-surface: #0f172a;
   --brand-surface-container: #1b2538;
   --brand-surface-container-high: #253249;

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface ErrorToastProps {
   message: string;
@@ -8,6 +9,8 @@ interface ErrorToastProps {
 const AUTO_DISMISS_MS = 8000;
 
 export function ErrorToast({ message, onClose }: ErrorToastProps) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     const timeoutId = window.setTimeout(onClose, AUTO_DISMISS_MS);
 
@@ -44,7 +47,7 @@ export function ErrorToast({ message, onClose }: ErrorToastProps) {
       <button
         type="button"
         onClick={onClose}
-        aria-label="Закрыть уведомление"
+        aria-label={t('common.closeNotification')}
         className="rounded-md p-0.5 text-on-error-container/70 transition hover:bg-error/10 hover:text-on-error-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
       >
         <svg

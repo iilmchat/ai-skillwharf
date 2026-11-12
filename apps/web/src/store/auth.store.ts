@@ -1,66 +1,68 @@
-import { isAxiosError } from 'axios'
-import { create } from 'zustand'
-import { api, setAuthToken } from '../lib/api'
+import { isAxiosError } from 'axios';
+import { create } from 'zustand';
+import i18n from '../i18n';
+import { api, setAuthToken } from '../lib/api';
 
 export interface AuthUser {
-  id: string
-  email: string
-  role: string
+  id: string;
+  email: string;
+  role: string;
 }
 
 interface AuthTokensResponse {
-  accessToken: string
-  refreshToken: string
+  accessToken: string;
+  refreshToken: string;
 }
 
 interface AuthState {
-  accessToken: string | null
-  user: AuthUser | null
-  isSubmitting: boolean
-  error: string | null
-  login: (email: string, password: string) => Promise<void>
-  logout: () => void
-  clearError: () => void
+  accessToken: string | null;
+  user: AuthUser | null;
+  isSubmitting: boolean;
+  error: string | null;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+  clearError: () => void;
 }
 
 interface ApiErrorBody {
-  message: string | string[]
+  message: string | string[];
 }
 
 function isApiErrorBody(value: unknown): value is ApiErrorBody {
   if (typeof value !== 'object' || value === null || !('message' in value)) {
-    return false
+    return false;
   }
 
-  const { message } = value as { message?: unknown }
+  const { message } = value as { message?: unknown };
 
   return (
     typeof message === 'string' ||
     (Array.isArray(message) &&
       message.every((item): item is string => typeof item === 'string'))
-  )
+  );
 }
 
 function toErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
     if (error.response === undefined) {
-      return 'Сервер недоступен. Проверьте, что API запущен на localhost:3001.'
+      return i18n.t('auth.errors.network');
     }
 
-    const data: unknown = error.response.data
+    // Для 401 показываем локализованный текст, а не сообщение бэкенда.
+    if (error.response.status === 401) {
+      return i18n.t('auth.errors.invalidCredentials');
+    }
+
+    const data: unknown = error.response.data;
 
     if (isApiErrorBody(data)) {
       return Array.isArray(data.message)
         ? data.message.join('; ')
-        : data.message
-    }
-
-    if (error.response.status === 401) {
-      return 'Неверный email или пароль.'
+        : data.message;
     }
   }
 
-  return 'Не удалось выполнить вход. Попробуйте ещё раз.'
+  return i18n.t('auth.errors.loginFailed');
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -70,41 +72,41 @@ export const useAuthStore = create<AuthState>((set) => ({
   error: null,
 
   login: async (email, password) => {
-    set({ isSubmitting: true, error: null })
+    set({ isSubmitting: true, error: null });
 
     try {
       const { data } = await api.post<AuthTokensResponse>('/auth/login', {
         email,
         password,
-      })
+      });
 
-      setAuthToken(data.accessToken)
+      setAuthToken(data.accessToken);
 
       // Login возвращает только токены, профиль запрашиваем отдельно.
-      const profile = await api.get<AuthUser>('/auth/me')
+      const profile = await api.get<AuthUser>('/auth/me');
 
       set({
         accessToken: data.accessToken,
         user: profile.data,
         isSubmitting: false,
-      })
+      });
     } catch (error) {
-      setAuthToken(null)
+      setAuthToken(null);
       set({
         accessToken: null,
         user: null,
         isSubmitting: false,
         error: toErrorMessage(error),
-      })
+      });
 
-      throw error
+      throw error;
     }
   },
 
   logout: () => {
-    setAuthToken(null)
-    set({ accessToken: null, user: null, error: null })
+    setAuthToken(null);
+    set({ accessToken: null, user: null, error: null });
   },
 
   clearError: () => set({ error: null }),
-}))
+}));

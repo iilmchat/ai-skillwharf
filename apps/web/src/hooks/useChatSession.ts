@@ -1,12 +1,14 @@
 import { isAxiosError } from 'axios';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import i18n from '../i18n';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 
 const SOCKET_URL = import.meta.env.VITE_WS_URL ?? 'http://localhost:3001';
 const ACK_TIMEOUT_MS = 90_000;
 const INSUFFICIENT_FUNDS_MARKER = 'Недостаточно средств';
+const ERROR_KEY_PREFIX = 'errors.';
 
 export type ChatRole = 'user' | 'assistant';
 export type ConnectionState = 'connecting' | 'online' | 'offline';
@@ -67,31 +69,65 @@ function isChatReply(value: unknown): value is ChatReply {
   return isRecord(value) && 'reply' in value && typeof value.reply === 'string';
 }
 
+/** Бэкенд может вернуть ключ ошибки (`errors.*`) вместо готового текста. */
+function translateServerMessage(message: string): string {
+  return message.startsWith(ERROR_KEY_PREFIX) && i18n.exists(message)
+    ? i18n.t(message)
+    : message;
+}
+
+function formatServerMessage(message: string | string[]): string {
+  return Array.isArray(message)
+    ? message.map(translateServerMessage).join('; ')
+    : translateServerMessage(message);
+}
+
+interface NormalizedReply {
+  content: string;
+  notice: string | null;
+}
+
+function normalizeAssistantReply(reply: string): NormalizedReply {
+  if (reply.startsWith(ERROR_KEY_PREFIX)) {
+    const content = i18n.exists(reply)
+      ? i18n.t(reply)
+      : i18n.t('chat.errors.messageFailed');
+
+    return { content, notice: content };
+  }
+
+  // Совместимость со старым ответом бэкенда, где текст был захардкожен.
+  if (reply.includes(INSUFFICIENT_FUNDS_MARKER)) {
+    return {
+      content: reply,
+      notice: i18n.t('chat.errors.insufficientFunds'),
+    };
+  }
+
+  return { content: reply, notice: null };
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (isAxiosError(error)) {
     if (error.response === undefined) {
-      return 'Сервер недоступен. Проверьте, что API запущен на localhost:3001.';
+      return i18n.t('chat.errors.network');
+    }
+
+    if (error.response.status === 401) {
+      return i18n.t('chat.errors.expired');
     }
 
     const data: unknown = error.response.data;
 
     if (isMessagePayload(data)) {
-      return Array.isArray(data.message)
-        ? data.message.join('; ')
-        : data.message;
-    }
-
-    if (error.response.status === 401) {
-      return 'Сессия истекла. Войдите заново.';
+      return formatServerMessage(data.message);
     }
 
     return fallback;
   }
 
   if (isMessagePayload(error)) {
-    return Array.isArray(error.message)
-      ? error.message.join('; ')
-      : error.message;
+    return formatServerMessage(error.message);
   }
 
   if (error instanceof Error && error.message !== '') {
@@ -143,13 +179,15 @@ export function useChatSession(): ChatSession {
     setConversationId(null);
 
     api
-      .post<{ id: string }>('/chat/conversations', { title: 'Новый диалог' })
+      .post<{ id: string }>('/chat/conversations', {
+        title: i18n.t('chat.newConversation'),
+      })
       .then(({ data }) => {
         setConversationId(data.id);
       })
       .catch((error: unknown) => {
         setConversationError(
-          getErrorMessage(error, 'Не удалось начать новый диалог.'),
+          getErrorMessage(error, i18n.t('chat.errors.conversationFailed')),
         );
       });
   }, [accessToken, attempt]);
@@ -181,29 +219,25 @@ export function useChatSession(): ChatSession {
       if (pending !== null) {
         window.clearTimeout(pending.timeoutId);
         pendingRef.current = null;
-        pending.reject(
-          new Error('Соединение с чатом прервано. Попробуйте снова.'),
-        );
+        pending.reject(new Error(i18n.t('chat.errors.disconnected')));
       }
 
       setSocketError(
         reason === 'io server disconnect'
-          ? 'Сервер отклонил подключение. Войдите заново или повторите попытку.'
-          : 'Соединение с чатом потеряно. Переподключаемся…',
+          ? i18n.t('chat.errors.connectionRejected')
+          : i18n.t('chat.errors.connectionLost'),
       );
     };
 
     const handleConnectError = () => {
       setIsSocketOnline(false);
-      setSocketError(
-        'Не удалось подключиться к чату. Проверьте, что API запущен на localhost:3001.',
-      );
+      setSocketError(i18n.t('chat.errors.connectionFailed'));
     };
 
     const handleException = (payload: unknown) => {
       const message = getErrorMessage(
         payload,
-        'Не удалось отправить сообщение. Попробуйте ещё раз.',
+        i18n.t('chat.errors.messageFailed'),
       );
       const pending = pendingRef.current;
 
@@ -250,9 +284,7 @@ export function useChatSession(): ChatSession {
       }
 
       if (conversationId === null || socket === null || !socket.connected) {
-        setNotice(
-          'Чат ещё не подключён. Подождите немного и попробуйте снова.',
-        );
+        setNotice(i18n.t('chat.errors.notReady'));
         return;
       }
 
@@ -266,7 +298,7 @@ export function useChatSession(): ChatSession {
       new Promise<string>((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {
           pendingRef.current = null;
-          reject(new Error('Сервер не ответил вовремя. Попробуйте снова.'));
+          reject(new Error(i18n.t('chat.errors.timeout')));
         }, ACK_TIMEOUT_MS);
 
         pendingRef.current = {
@@ -297,23 +329,28 @@ export function useChatSession(): ChatSession {
               return;
             }
 
-            pending.reject(new Error('Сервер вернул некорректный ответ.'));
+            pending.reject(new Error(i18n.t('chat.errors.invalidResponse')));
           },
         );
       })
         .then((reply) => {
+          const normalized = normalizeAssistantReply(reply);
+
           setMessages((current) => [
             ...current,
-            { id: crypto.randomUUID(), role: 'assistant', content: reply },
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: normalized.content,
+            },
           ]);
 
-          // Paywall: сервер возвращает текст об ошибке обычным ответом.
-          if (reply.includes(INSUFFICIENT_FUNDS_MARKER)) {
-            setNotice(reply);
+          if (normalized.notice !== null) {
+            setNotice(normalized.notice);
           }
         })
         .catch((error: unknown) => {
-          setNotice(getErrorMessage(error, 'Не удалось отправить сообщение.'));
+          setNotice(getErrorMessage(error, i18n.t('chat.errors.sendFailed')));
         })
         .finally(() => setIsSending(false));
     },

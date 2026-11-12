@@ -1,8 +1,10 @@
 interface BrandProps {
   className?: string;
+  /** Только знак без текстового написания — для узких экранов. */
+  compact?: boolean;
 }
 
-export function Brand({ className = '' }: BrandProps) {
+export function Brand({ className = '', compact = false }: BrandProps) {
   return (
     <div className={`flex items-center gap-3 ${className}`}>
       <span
@@ -11,9 +13,13 @@ export function Brand({ className = '' }: BrandProps) {
       >
         SW
       </span>
-      <span className="font-display text-xl font-bold tracking-tight text-on-surface">
-        Skill<span className="text-primary">Wharf</span>
-      </span>
+      {compact ? (
+        <span className="sr-only">SkillWharf</span>
+      ) : (
+        <span className="font-display text-xl font-bold tracking-tight text-on-surface">
+          Skill<span className="text-primary">Wharf</span>
+        </span>
+      )}
     </div>
   );
 }

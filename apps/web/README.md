@@ -28,11 +28,19 @@ pnpm --filter web build
 
 ## Брендбук и темы
 
-Цветовые токены Material 3 (Primary `#8B5CF6`, Tertiary `#0EA5E9`, Surface
-`#FFFFFF`/`#0F172A`) и шрифты Inter/Manrope заданы в `src/index.css`.
-Светлая и тёмная темы переключаются атрибутом `data-theme` на `<html>`;
-выбор хранится в Zustand (`persist`) и применяется до первого рендера
-скриптом в `index.html`.
+Цветовые токены Material 3 (Primary `#6B38D4` в светлой теме и `#8B5CF6` в
+тёмной, Tertiary `#0EA5E9`, Surface `#FFFFFF`/`#0F172A`) и шрифты
+Inter/Manrope заданы в `src/index.css`. Светлая и тёмная темы переключаются
+атрибутом `data-theme` на `<html>`; выбор хранится в Zustand (`persist`) и
+применяется до первого рендера скриптом в `index.html`.
+
+## Локализация
+
+Интерфейс переводится через `react-i18next`; словари лежат в
+`src/locales/ru.json` и `src/locales/en.json`, инициализация — в
+`src/i18n.ts`. Язык по умолчанию — русский, выбор пользователя сохраняется
+в `localStorage` под ключом `skillwharf-language`. Переключатель RU/EN есть
+на экране входа, в сайдбаре чата и в мобильной шапке.
 
 ## Маршруты и чат
 

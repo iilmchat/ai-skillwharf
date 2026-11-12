@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import {
   useChatSession,
@@ -13,10 +15,10 @@ import { useAuthStore } from '../store/auth.store';
 const LOGOUT_BUTTON_CLASSES =
   'rounded-lg border border-outline px-3 py-2 text-sm font-medium text-on-surface-variant transition hover:border-error/40 hover:bg-error-container hover:text-on-error-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
 
-const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  connecting: 'Подключение…',
-  online: 'Онлайн',
-  offline: 'Нет связи',
+const CONNECTION_LABEL_KEY: Record<ConnectionState, string> = {
+  connecting: 'chat.status.connecting',
+  online: 'chat.status.online',
+  offline: 'chat.status.offline',
 };
 
 const CONNECTION_DOT: Record<ConnectionState, string> = {
@@ -30,6 +32,7 @@ function getInitial(email: string): string {
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation();
   const isUser = message.role === 'user';
 
   return (
@@ -41,7 +44,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             : 'rounded-bl-md border border-outline-variant bg-surface-container-high text-on-surface'
         }`}
       >
-        <span className="sr-only">{isUser ? 'Вы:' : 'Ассистент:'}</span>
+        <span className="sr-only">
+          {isUser ? t('chat.you') : t('chat.assistant')}
+        </span>
         <p className="whitespace-pre-wrap break-words">{message.content}</p>
       </div>
     </li>
@@ -49,10 +54,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 function TypingIndicator() {
+  const { t } = useTranslation();
+
   return (
     <div className="mt-4 flex justify-start" role="status">
       <div className="rounded-2xl rounded-bl-md border border-outline-variant bg-surface-container-high px-4 py-3">
-        <span className="sr-only">Ассистент печатает…</span>
+        <span className="sr-only">{t('chat.typing')}</span>
         <span aria-hidden="true" className="flex items-center gap-1">
           {[0, 150, 300].map((delay) => (
             <span
@@ -74,25 +81,30 @@ function SetupError({
   message: string;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
       role="alert"
       className="w-full max-w-md rounded-2xl border border-error/30 bg-error-container p-6 text-left text-on-error-container"
     >
-      <h2 className="font-display text-lg font-bold">Не удалось открыть чат</h2>
+      <h2 className="font-display text-lg font-bold">
+        {t('chat.setupErrorTitle')}
+      </h2>
       <p className="mt-2 text-sm leading-relaxed">{message}</p>
       <button
         type="button"
         onClick={onRetry}
         className="mt-4 inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
-        Повторить
+        {t('chat.retry')}
       </button>
     </div>
   );
 }
 
 export function ChatPage() {
+  const { t } = useTranslation();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
@@ -142,7 +154,7 @@ export function ChatPage() {
     <>
       <div className="flex h-svh overflow-hidden bg-surface text-on-surface">
         <aside
-          aria-label="Боковая панель"
+          aria-label={t('chat.sidebarLabel')}
           className="hidden w-72 shrink-0 flex-col border-r border-outline-variant bg-surface-container md:flex"
         >
           <div className="flex h-16 items-center border-b border-outline-variant px-5">
@@ -151,7 +163,7 @@ export function ChatPage() {
 
           <div className="flex-1 overflow-y-auto p-4">
             <h2 className="px-2 text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
-              Чаты
+              {t('chat.chatsTitle')}
             </h2>
 
             {conversationId !== null ? (
@@ -163,17 +175,24 @@ export function ChatPage() {
                   aria-hidden="true"
                   className="size-1.5 shrink-0 rounded-full bg-primary"
                 />
-                Новый диалог
+                {t('chat.newConversation')}
               </div>
             ) : (
               <p className="mt-4 rounded-xl border border-dashed border-outline px-4 py-8 text-center text-sm text-on-surface-variant">
-                Пока нет чатов
+                {t('chat.noChats')}
               </p>
             )}
           </div>
 
           <div className="border-t border-outline-variant p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-on-surface-variant">
+                {t('language.title')}
+              </span>
+              <LanguageSwitcher />
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
               <span
                 aria-hidden="true"
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-container text-sm font-semibold text-on-primary-container"
@@ -182,7 +201,7 @@ export function ChatPage() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-on-surface">
-                  {user?.email ?? 'Гость'}
+                  {user?.email ?? t('chat.guest')}
                 </p>
                 <p className="text-xs text-on-surface-variant">
                   {user?.role ?? '—'}
@@ -194,7 +213,7 @@ export function ChatPage() {
               onClick={handleLogout}
               className={`mt-4 w-full ${LOGOUT_BUTTON_CLASSES}`}
             >
-              Выйти
+              {t('chat.logout')}
             </button>
           </div>
         </aside>
@@ -203,30 +222,33 @@ export function ChatPage() {
           <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-surface/90 px-4 backdrop-blur sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <div className="md:hidden">
-                <Brand />
+                <Brand compact />
               </div>
               <div className="hidden min-w-0 md:block">
                 <h1 className="truncate text-sm font-semibold text-on-surface">
-                  Новый диалог
+                  {t('chat.newConversation')}
                 </h1>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-on-surface-variant">
                   <span
                     aria-hidden="true"
                     className={`size-1.5 rounded-full ${CONNECTION_DOT[status]}`}
                   />
-                  {CONNECTION_LABEL[status]}
+                  {t(CONNECTION_LABEL_KEY[status])}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
+              <div className="md:hidden">
+                <LanguageSwitcher />
+              </div>
               <ThemeToggle />
               <button
                 type="button"
                 onClick={handleLogout}
                 className={`md:hidden ${LOGOUT_BUTTON_CLASSES}`}
               >
-                Выйти
+                {t('chat.logout')}
               </button>
             </div>
           </header>
@@ -260,11 +282,10 @@ export function ChatPage() {
                         id="chat-welcome-title"
                         className="font-display text-2xl font-bold tracking-tight text-on-surface sm:text-3xl"
                       >
-                        Добро пожаловать в SkillWharf
+                        {t('chat.welcomeTitle')}
                       </h2>
                       <p className="max-w-md text-sm leading-relaxed text-on-surface-variant">
-                        Напишите первое сообщение — ассистент ответит здесь.
-                        Слева появятся ваши диалоги.
+                        {t('chat.welcomeSubtitle')}
                       </p>
                       {!isReady && (
                         <p className="flex items-center gap-2 text-xs text-on-surface-variant">
@@ -289,7 +310,7 @@ export function ChatPage() {
                               strokeLinecap="round"
                             />
                           </svg>
-                          Подключаемся к чату…
+                          {t('chat.connecting')}
                         </p>
                       )}
                     </>
@@ -297,7 +318,7 @@ export function ChatPage() {
                 </div>
               ) : (
                 <ol
-                  aria-label="Сообщения чата"
+                  aria-label={t('chat.messagesLabel')}
                   aria-live="polite"
                   aria-relevant="additions"
                   className="flex flex-col gap-4"
@@ -319,7 +340,7 @@ export function ChatPage() {
           >
             <div className="mx-auto flex max-w-3xl items-center gap-2">
               <label htmlFor="chat-message" className="sr-only">
-                Сообщение
+                {t('chat.messageLabel')}
               </label>
               <input
                 id="chat-message"
@@ -327,7 +348,7 @@ export function ChatPage() {
                 type="text"
                 autoComplete="off"
                 placeholder={
-                  isReady ? 'Напишите сообщение…' : 'Ожидание подключения…'
+                  isReady ? t('chat.inputPlaceholder') : t('chat.inputWaiting')
                 }
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -337,9 +358,7 @@ export function ChatPage() {
               <button
                 type="submit"
                 disabled={!isReady || isSending || draft.trim() === ''}
-                aria-label={
-                  isSending ? 'Отправка сообщения' : 'Отправить сообщение'
-                }
+                aria-label={isSending ? t('chat.sending') : t('chat.send')}
                 aria-busy={isSending}
                 className="grid size-12 shrink-0 place-items-center rounded-xl bg-primary text-on-primary shadow-lg shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:brightness-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
@@ -383,7 +402,7 @@ export function ChatPage() {
               </button>
             </div>
             <p className="mx-auto mt-2 max-w-3xl text-xs text-on-surface-variant">
-              Enter — отправить сообщение.
+              {t('chat.inputHint')}
             </p>
           </form>
         </main>

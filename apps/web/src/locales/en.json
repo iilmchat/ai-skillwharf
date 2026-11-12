@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "title": "SkillWharf — Workspace",
+    "description": "SkillWharf is a workspace for autonomous AI agents."
+  },
+  "common": {
+    "closeNotification": "Close notification"
+  },
+  "errors": {
+    "insufficient_funds": "Insufficient funds to run the agent. Top up your balance."
+  },
+  "theme": {
+    "toggleLabel": "Dark theme",
+    "switchToDark": "Switch to dark theme",
+    "switchToLight": "Switch to light theme"
+  },
+  "language": {
+    "title": "Language",
+    "label": "Interface language"
+  },
+  "login": {
+    "badge": "Autonomous AI agent platform",
+    "heroTitle": "One workspace for your AI agents",
+    "heroSubtitle": "Launch tasks, connect skills, and watch agents work in real time.",
+    "features": {
+      "tools": "Autonomous agents with tool access",
+      "sandbox": "Isolated sandbox for running code",
+      "workspace": "One space for chats and tasks"
+    },
+    "copyright": "© {{year}} SkillWharf",
+    "title": "Sign in to SkillWharf",
+    "subtitle": "Enter your account details to continue.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "••••••••",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "noAccount": "No account? Contact your platform administrator."
+  },
+  "auth": {
+    "errors": {
+      "network": "The server is unreachable. Make sure the API is running on localhost:3001.",
+      "invalidCredentials": "Invalid email or password.",
+      "loginFailed": "Could not sign in. Please try again."
+    }
+  },
+  "chat": {
+    "sidebarLabel": "Sidebar",
+    "chatsTitle": "Chats",
+    "newConversation": "New chat",
+    "noChats": "No chats yet",
+    "guest": "Guest",
+    "logout": "Sign out",
+    "status": {
+      "connecting": "Connecting…",
+      "online": "Online",
+      "offline": "Offline"
+    },
+    "setupErrorTitle": "Could not open the chat",
+    "retry": "Try again",
+    "welcomeTitle": "Welcome to SkillWharf",
+    "welcomeSubtitle": "Send your first message — the assistant will reply here. Your chats will appear on the left.",
+    "connecting": "Connecting to the chat…",
+    "messagesLabel": "Chat messages",
+    "you": "You:",
+    "assistant": "Assistant:",
+    "typing": "Assistant is typing…",
+    "messageLabel": "Message",
+    "inputPlaceholder": "Write a message…",
+    "inputWaiting": "Waiting for connection…",
+    "send": "Send message",
+    "sending": "Sending message",
+    "inputHint": "Press Enter to send.",
+    "errors": {
+      "network": "The server is unreachable. Make sure the API is running on localhost:3001.",
+      "expired": "Your session has expired. Please sign in again.",
+      "conversationFailed": "Could not start a new chat.",
+      "connectionRejected": "The server rejected the connection. Sign in again or try again.",
+      "connectionLost": "Connection to the chat was lost. Reconnecting…",
+      "connectionFailed": "Could not connect to the chat. Make sure the API is running on localhost:3001.",
+      "messageFailed": "Could not send the message. Please try again.",
+      "disconnected": "The chat connection was interrupted. Try again.",
+      "notReady": "The chat is not connected yet. Wait a moment and try again.",
+      "timeout": "The server did not respond in time. Try again.",
+      "invalidResponse": "The server returned an invalid response.",
+      "insufficientFunds": "Insufficient funds to run code. Top up your balance.",
+      "sendFailed": "Could not send the message."
+    }
+  }
+}
