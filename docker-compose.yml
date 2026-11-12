@@ -42,10 +42,31 @@ services:
         VITE_API_URL: /api/v1
         VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
     ports:
-      # UI на 8080, чтобы не занимать стандартный 80 на хосте.
+      # Caddy слушает 80 внутри контейнера; на хосте оставляем 8080.
       - "8080:80"
     depends_on:
       - api
+
+  # Production edge: Caddy сам получает сертификаты Let's Encrypt и
+  # терминирует TLS. Запуск:
+  # DOMAIN=skillwharf.example.com ACME_EMAIL=admin@example.com \
+  #   docker compose --profile production up -d
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["production"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-skillwharf.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
 
   # Локальная LLM для разработки. Профиль with-llm: сервис не поднимается
   # вместе с основным стеком и не тянет образ/RAM в CI.
@@ -61,3 +82,5 @@ services:
 volumes:
   postgres_data:
   ollama_data:
+  caddy_data:
+  caddy_config:

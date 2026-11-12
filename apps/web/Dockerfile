@@ -27,9 +27,9 @@ ENV VITE_API_URL=${VITE_API_URL} \
 RUN pnpm --filter web build
 
 # --- Stage 2: раздача статики и прокси на API ---
-FROM nginx:alpine AS runner
+FROM caddy:2-alpine AS runner
 
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+COPY apps/web/Caddyfile /etc/caddy/Caddyfile
+COPY --from=builder /app/apps/web/dist /usr/share/caddy
 
 EXPOSE 80

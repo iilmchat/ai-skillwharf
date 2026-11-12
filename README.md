@@ -2,7 +2,7 @@
 
 Российский self-hosted аналог OpenClaw для развёртывания автономных ИИ-агентов с долговременной памятью, выполнением сложных задач и взаимодействием через мессенджеры, веб и CLI.
 
-**Стек:** TypeScript (Node.js 24+) · NestJS · Fastify · LangGraph · PostgreSQL (pgvector) · React · Docker.
+**Стек:** TypeScript (Node.js 24+) · NestJS · Fastify · LangGraph · PostgreSQL (pgvector) · React · Caddy · Docker.
 
 ## Ключевые возможности
 
@@ -36,6 +36,11 @@ docker compose up -d --build
 | UI (web) | <http://localhost:8080> |
 | API Gateway | <http://localhost:3001/api/v1> |
 | Healthcheck API | <http://localhost:3001/api/v1/health> |
+
+Фронтенд раздаётся Caddy (`apps/web/Caddyfile`): статика SPA и reverse proxy
+`/api` и `/socket.io` на API. Для production TLS используйте профиль
+`production` — Caddy автоматически получит сертификат Let's Encrypt
+(см. [Runbook, раздел 10](docs/operations/Deployment-Runbook.md#10-production-https-с-caddy)).
 
 Остановить стек: `docker compose down` (с данными БД — `docker compose down -v`).
 

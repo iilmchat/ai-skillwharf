@@ -273,3 +273,54 @@ docker compose up -d api
 ```
 
 Непереведённые строки откатываются к русскому языку.
+
+## 10. Production: HTTPS с Caddy
+
+Локальный сервис `web` слушает HTTP `:80` (на хосте — `8080`) и проксирует
+`/api` и `/socket.io` на `api:3000`. Для production в compose добавлен
+отдельный edge-контейнер `caddy` под профилем `production`: он терминирует
+TLS, автоматически получает сертификаты Let's Encrypt и передаёт запросы на
+`web:80`.
+
+### Подготовка
+
+1. Направьте A/AAAA-запись домена (например, `skillwharf.example.com`) на
+   хост и откройте входящие порты `80` и `443`.
+2. Задайте домен и e-mail для ACME в `.env`:
+
+   ```text
+   DOMAIN=skillwharf.example.com
+   ACME_EMAIL=admin@example.com
+   ```
+
+3. Убедитесь, что наружу не опубликованы лишние порты. В production должны
+   быть доступны только `80` и `443`; `8080` (web) и `3001` (api) закройте
+   файрволом или не публикуйте в production-оверрайде.
+
+### Запуск
+
+```bash
+docker compose --profile production up -d --build
+```
+
+Caddy запустится вместе с базовым стеком, запросит сертификат для `DOMAIN` и
+включит автоматический редирект с HTTP на HTTPS.
+
+### Проверка
+
+```bash
+curl -I https://skillwharf.example.com
+curl -I http://skillwharf.example.com
+curl https://skillwharf.example.com/api/v1/health
+```
+
+Ожидаемо: HTTPS отвечает `200`, HTTP — редирект `308` на HTTPS, healthcheck
+возвращает `{"status":"ok","database":true}`.
+
+WebSocket (`/socket.io/`) идёт через тот же домен: edge-Caddy проксирует
+запрос на `web:80`, а `web` — на `api:3000` с сохранением заголовков
+`Upgrade`/`Connection`.
+
+> Сертификаты и ACME-аккаунт хранятся в volume `caddy_data`, конфигурация —
+> в `caddy_config`. Не удаляйте `caddy_data` при перезапуске, иначе Caddy
+> запросит сертификаты повторно и может упереться в лимиты Let's Encrypt.

@@ -1,0 +1,25 @@
+# Caddyfile для SkillWharf (локальный запуск, HTTP :80).
+# Статика React SPA + reverse proxy на API внутри compose-сети.
+
+:80 {
+	encode zstd gzip
+	root * /usr/share/caddy
+
+	# Socket.IO: и polling, и WebSocket. reverse_proxy сам пробрасывает
+	# заголовки Upgrade/Connection, поэтому отдельный matcher по заголовкам
+	# не нужен и сломал бы polling-транспорт.
+	handle /socket.io/* {
+		reverse_proxy http://api:3000
+	}
+
+	# REST API: путь /api/v1/... сохраняется.
+	handle /api/* {
+		reverse_proxy http://api:3000
+	}
+
+	# SPA fallback: только для остальных путей.
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

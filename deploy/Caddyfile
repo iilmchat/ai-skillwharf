@@ -1,0 +1,11 @@
+# Production edge: Caddy терминирует TLS и проксирует на web:80.
+# Сертификаты Let's Encrypt выпускаются автоматически при доступности
+# домена по портам 80/443.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
