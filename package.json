@@ -6,7 +6,8 @@
   "main": "index.js",
   "scripts": {
     "lint:docs": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\"",
-    "test": "pnpm -r --if-present test",
+    "build:api": "pnpm --filter api build",
+    "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "keywords": [],
@@ -22,6 +23,8 @@
   "packageManager": "pnpm@12.18.0",
   "type": "module",
   "devDependencies": {
-    "markdownlint-cli2": "^0.24.0"
+    "@vitest/coverage-v8": "^5.1.0",
+    "markdownlint-cli2": "^0.24.0",
+    "vitest": "^5.1.0"
   }
 }
