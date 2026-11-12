@@ -41,6 +41,7 @@
 - `BillingModule` подключает `YooKassaProvider`, если заданы `YOOKASSA_SHOP_ID`/`YOOKASSA_SECRET_KEY`, иначе остаётся mock; добавлена переменная `YOOKASSA_RETURN_URL`.
 - Прямое пополнение `POST /api/v1/billing/topup` оставлено только роли `admin` для dev-сценариев; обычные пользователи пополняют баланс через ЮKassa (`POST /api/v1/billing/create-payment`).
 - Cost Guardrails для LLM: `LlmService` списывает `0.01 ₽` за каждую 1000 токенов (`prompt_tokens + completion_tokens`) с описанием «Использование LLM» и отклоняет вызов до обращения к модели, если баланс меньше копейки.
+- Добавлена спецификация [Cost Guardrails](billing/Cost-Guardrails-Specification.md): тарификация токенов, минимальный баланс для запуска агента и ограничение ручного `topup` ролью `admin`.
 
 ### Content, HR & Legal
 

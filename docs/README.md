@@ -23,6 +23,8 @@
 ## 💳 Биллинг (`billing/`)
 
 - [Схемы взаимодействия](billing/Billing-Flows.md)
+- [Pay-per-Outcome и Эскроу](billing/Pay-Per-Outcome-Specification.md)
+- [Cost Guardrails (контроль затрат на LLM)](billing/Cost-Guardrails-Specification.md)
 
 ## 🔒 Безопасность (`security/`)
 
