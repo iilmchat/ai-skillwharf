@@ -35,7 +35,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
   DEFAULT_OFFICE_AGENT_ID,
-  OFFICE_TASKS,
+  officeTaskForTool,
   type ChatOfficeEvent,
   type OfficeEvent,
 } from './office-events.js';
@@ -55,6 +55,10 @@ const TOOL_LIMIT_REPLY =
 const DEFAULT_CONVERSATION_TITLE = 'Новый диалог';
 
 const ChatStateAnnotation = Annotation.Root({
+  conversationId: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
+  }),
   messages: Annotation<BaseMessage[]>({
     reducer: (_previous, next) => next,
     default: () => [],
@@ -231,22 +235,25 @@ function buildChatGraph(llmService: LlmService) {
       };
     })
     .addNode('tools', async (state: ChatState, config) => {
-      // AI-Офис показывает, что агент ушёл в песочницу. Событие уходит в
-      // custom-стрим до фактического запуска инструментов.
-      getWriter(config)?.({
-        type: 'office',
-        agentId: DEFAULT_OFFICE_AGENT_ID,
-        status: 'working',
-        task: OFFICE_TASKS.sandbox,
-      } satisfies ChatOfficeEvent);
+      const emit = getWriter(config);
+      const calls = toolCallsOf(lastMessage(state.messages));
+
+      // AI-Офис получает задачу по имени каждого инструмента, который
+      // запросила модель. События уходят до фактического запуска.
+      for (const call of calls) {
+        emit?.({
+          type: 'office',
+          conversationId: state.conversationId,
+          agentId: DEFAULT_OFFICE_AGENT_ID,
+          status: 'working',
+          task: officeTaskForTool(call.name),
+        } satisfies ChatOfficeEvent);
+      }
 
       return {
         messages: [
           ...state.messages,
-          ...(await executeToolCalls(
-            state.availableTools,
-            toolCallsOf(lastMessage(state.messages)),
-          )),
+          ...(await executeToolCalls(state.availableTools, calls)),
         ],
       };
     })
@@ -304,6 +311,7 @@ export class ChatService {
 
     try {
       const state = await this.graph.invoke({
+        conversationId,
         messages,
         availableTools: tools,
       });
@@ -345,7 +353,7 @@ export class ChatService {
 
     try {
       const stream = await this.graph.stream(
-        { messages, availableTools: tools },
+        { conversationId, messages, availableTools: tools },
         { streamMode: ['custom', 'values'] },
       );
 
@@ -367,6 +375,9 @@ export class ChatService {
               typeof officeEvent.task === 'string'
             ) {
               onOfficeEvent?.({
+                // Контекст диалога берём из аргумента метода: событие
+                // инструмента не должно потерять привязку к чату.
+                conversationId,
                 agentId: officeEvent.agentId,
                 status: officeEvent.status,
                 task: officeEvent.task,

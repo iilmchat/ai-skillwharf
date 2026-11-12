@@ -564,9 +564,10 @@ describe('ChatService', () => {
 
       expect(officeEvents).toEqual([
         {
+          conversationId: CONVERSATION_ID,
           agentId: 'default',
           status: 'working',
-          task: 'Выполнение кода в песочнице',
+          task: 'Выполнение кода',
         },
       ]);
       expect(result.reply).toBe('Готово: hi');

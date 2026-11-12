@@ -22,6 +22,11 @@ export interface SendMessagePayload {
   content: string;
 }
 
+export interface ApproveActionPayload {
+  conversationId: string;
+  approved?: boolean;
+}
+
 @WebSocketGateway({ cors: true })
 export class ChatGateway implements OnGatewayConnection {
   private readonly logger = new Logger(ChatGateway.name);
@@ -67,9 +72,11 @@ export class ChatGateway implements OnGatewayConnection {
    */
   sendWaitingApproval(
     client: Socket,
+    conversationId: string,
     task: string = OFFICE_TASKS.waitingApproval,
   ): void {
     this.sendOfficeEvent(client, {
+      conversationId,
       agentId: DEFAULT_OFFICE_AGENT_ID,
       status: 'waiting_approval',
       task,
@@ -97,6 +104,7 @@ export class ChatGateway implements OnGatewayConnection {
     }
 
     this.sendOfficeEvent(client, {
+      conversationId: payload.conversationId,
       agentId: DEFAULT_OFFICE_AGENT_ID,
       status: 'working',
       task: OFFICE_TASKS.analyzing,
@@ -131,5 +139,40 @@ export class ChatGateway implements OnGatewayConnection {
 
       throw error;
     }
+  }
+
+  /**
+   * Подтверждение действия, которое агент пометил как `waiting_approval`.
+   * Пока это имитация: логируем решение и возвращаем агента в `working`.
+   */
+  @SubscribeMessage('approve_action')
+  handleApproveAction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: ApproveActionPayload,
+  ): void {
+    const userId = (client.data as { userId?: string }).userId;
+
+    if (!userId) {
+      throw new WsException('Пользователь не аутентифицирован');
+    }
+
+    if (
+      !payload ||
+      typeof payload.conversationId !== 'string' ||
+      payload.conversationId.trim() === ''
+    ) {
+      throw new WsException('Ожидается { conversationId }');
+    }
+
+    this.logger.log(
+      `Действие одобрено: conversationId=${payload.conversationId}, userId=${userId}, approved=${payload.approved !== false}`,
+    );
+
+    this.sendOfficeEvent(client, {
+      conversationId: payload.conversationId,
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      status: 'working',
+      task: OFFICE_TASKS.resumingAfterApproval,
+    });
   }
 }

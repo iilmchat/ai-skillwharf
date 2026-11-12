@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import type { Socket } from 'socket.io';
@@ -116,6 +116,7 @@ describe('ChatGateway', () => {
         expect.any(Function),
       );
       expect(socket.emit).toHaveBeenNthCalledWith(1, 'office_event', {
+        conversationId: CONVERSATION_ID,
         agentId: 'default',
         status: 'working',
         task: 'Анализ запроса',
@@ -143,15 +144,17 @@ describe('ChatGateway', () => {
           _content: string,
           _onDelta: (text: string) => void,
           onOfficeEvent: (event: {
+            conversationId: string;
             agentId: string;
             status: string;
             task: string;
           }) => void,
         ) => {
           onOfficeEvent({
+            conversationId,
             agentId: 'default',
             status: 'working',
-            task: 'Выполнение кода в песочнице',
+            task: 'Веб-поиск',
           });
 
           return { conversationId, reply: 'Готово' };
@@ -160,7 +163,7 @@ describe('ChatGateway', () => {
 
       await gateway.handleSendMessage(socket as unknown as Socket, {
         conversationId: CONVERSATION_ID,
-        content: 'запусти код',
+        content: 'найди новости',
       });
 
       const officeEvents = socket.emit.mock.calls
@@ -169,14 +172,16 @@ describe('ChatGateway', () => {
 
       expect(officeEvents).toEqual([
         {
+          conversationId: CONVERSATION_ID,
           agentId: 'default',
           status: 'working',
           task: 'Анализ запроса',
         },
         {
+          conversationId: CONVERSATION_ID,
           agentId: 'default',
           status: 'working',
-          task: 'Выполнение кода в песочнице',
+          task: 'Веб-поиск',
         },
       ]);
     });
@@ -184,9 +189,10 @@ describe('ChatGateway', () => {
     it('умеет отправлять статус waiting_approval вручную', () => {
       const socket = createSocket();
 
-      gateway.sendWaitingApproval(socket as unknown as Socket);
+      gateway.sendWaitingApproval(socket as unknown as Socket, CONVERSATION_ID);
 
       expect(socket.emit).toHaveBeenCalledWith('office_event', {
+        conversationId: CONVERSATION_ID,
         agentId: 'default',
         status: 'waiting_approval',
         task: 'Ожидание подтверждения',
@@ -235,6 +241,44 @@ describe('ChatGateway', () => {
           message: 'Диалог принадлежит другому пользователю',
         },
       });
+    });
+  });
+
+  describe('handleApproveAction', () => {
+    it('логирует одобрение и отправляет office_event', () => {
+      const socket = createSocket();
+      socket.data.userId = USER_ID;
+      const log = vi
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => {});
+
+      gateway.handleApproveAction(socket as unknown as Socket, {
+        conversationId: CONVERSATION_ID,
+        approved: true,
+      });
+
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining(CONVERSATION_ID),
+      );
+      expect(socket.emit).toHaveBeenCalledWith('office_event', {
+        conversationId: CONVERSATION_ID,
+        agentId: 'default',
+        status: 'working',
+        task: 'Продолжение после одобрения',
+      });
+
+      log.mockRestore();
+    });
+
+    it('запрещает одобрение без аутентификации', () => {
+      const socket = createSocket();
+
+      expect(() =>
+        gateway.handleApproveAction(socket as unknown as Socket, {
+          conversationId: CONVERSATION_ID,
+        }),
+      ).toThrow(WsException);
+      expect(socket.emit).not.toHaveBeenCalled();
     });
   });
 });
