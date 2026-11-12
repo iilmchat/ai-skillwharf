@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { LlmProviderBadge } from '../LlmProviderBadge';
 import {
   adminQueryKeys,
   createLlmRoute,
@@ -13,6 +14,7 @@ import {
   type LlmProviderType,
   type LlmRoute,
 } from '../../lib/admin';
+import { normalizeProvider } from '../../lib/llm';
 
 const INPUT_CLASSES =
   'mt-2 block w-full rounded-xl border border-outline bg-surface-container px-4 py-2.5 text-sm text-on-surface outline-none transition placeholder:text-on-surface-variant/60 hover:border-primary/40 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60';
@@ -21,25 +23,15 @@ const PROVIDERS: readonly LlmProviderType[] = [
   'OpenAI',
   'YandexGPT',
   'GigaChat',
+  'Ollama',
 ];
 
 const MODEL_PLACEHOLDERS: Record<LlmProviderType, string> = {
   OpenAI: 'gpt-4o-mini',
   YandexGPT: 'gpt://<folder-id>/yandexgpt-lite',
   GigaChat: 'GigaChat-Pro',
+  Ollama: 'qwen2.5-coder-7b-instruct',
 };
-
-function providerBadgeClasses(provider: LlmProviderType): string {
-  if (provider === 'YandexGPT') {
-    return 'bg-warning-container text-on-warning-container';
-  }
-
-  if (provider === 'GigaChat') {
-    return 'bg-success/10 text-success';
-  }
-
-  return 'bg-primary-container text-on-primary-container';
-}
 
 function RouteSkeleton() {
   return (
@@ -360,11 +352,10 @@ function RouteRow({ route }: { route: LlmRoute }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <span
-          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${providerBadgeClasses(provider)}`}
-        >
-          {provider}
-        </span>
+        <LlmProviderBadge
+          provider={normalizeProvider(provider)}
+          title={getLlmRouteModel(route)}
+        />
       </td>
       <td className="px-4 py-3">
         <span className="rounded-md bg-surface-container-high px-2 py-1 font-mono text-xs text-on-surface">

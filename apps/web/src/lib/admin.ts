@@ -25,7 +25,7 @@ export interface PromptVersion {
   createdAt?: string;
 }
 
-export type LlmProviderType = 'OpenAI' | 'YandexGPT' | 'GigaChat';
+export type LlmProviderType = 'OpenAI' | 'YandexGPT' | 'GigaChat' | 'Ollama';
 
 export interface LlmRoute {
   id: string;

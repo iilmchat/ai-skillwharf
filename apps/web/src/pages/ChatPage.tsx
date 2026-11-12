@@ -18,6 +18,7 @@ import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
+import { LlmProviderBadge } from '../components/LlmProviderBadge';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TopUpModal } from '../components/TopUpModal';
@@ -27,7 +28,9 @@ import {
   type ConnectionState,
 } from '../hooks/useChatSession';
 import { useBalance } from '../hooks/useBalance';
+import { useActiveLlm } from '../hooks/useActiveLlm';
 import { ledgerQueryKey } from '../lib/billing';
+import { normalizeProvider } from '../lib/llm';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
 
@@ -168,6 +171,8 @@ export function ChatPage() {
   } = useChatSession();
 
   const balanceQuery = useBalance();
+  const activeLlmQuery = useActiveLlm();
+  const activeLlm = activeLlmQuery.data;
   const { refetch: refetchBalance } = balanceQuery;
   const [draft, setDraft] = useState('');
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
@@ -430,6 +435,14 @@ export function ChatPage() {
                   {t(CONNECTION_LABEL_KEY[status])}
                 </p>
               </div>
+              {activeLlm !== null && activeLlm !== undefined && (
+                <LlmProviderBadge
+                  provider={normalizeProvider(activeLlm.providerType)}
+                  modelName={activeLlm.modelName}
+                  size="sm"
+                  title={activeLlm.modelName}
+                />
+              )}
             </div>
 
             <div className="flex items-center gap-2">

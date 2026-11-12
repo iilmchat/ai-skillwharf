@@ -16,6 +16,7 @@ export interface LlmRouteSelection {
   id: string;
   name: string;
   modelName: string;
+  providerType: string;
   baseUrl: string;
   apiKeyEnvVar: string | null;
 }
@@ -51,6 +52,7 @@ export class LlmRouterService {
         id: route.id,
         name: route.name,
         modelName: route.modelName,
+        providerType: route.providerType,
         baseUrl: route.baseUrl,
         apiKeyEnvVar: route.apiKeyEnvVar,
       };

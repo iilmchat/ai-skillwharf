@@ -27,6 +27,43 @@ export interface ApproveActionPayload {
   approved?: boolean;
 }
 
+/** Текст ошибки авторизации у LLM-провайдера: его распознаёт UI. */
+export const LLM_AUTH_ERROR_MESSAGE = 'LLM Error: Unauthorized';
+
+/** Ошибка 401 или незаданный ключ провайдера (OpenAI SDK, LangChain, axios). */
+function isLlmAuthError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    name?: unknown;
+    code?: unknown;
+    lc_error_code?: unknown;
+    message?: unknown;
+  };
+
+  const message =
+    typeof candidate.message === 'string'
+      ? candidate.message.toLowerCase()
+      : '';
+
+  return (
+    candidate.status === 401 ||
+    candidate.statusCode === 401 ||
+    candidate.name === 'AuthenticationError' ||
+    candidate.code === 'MODEL_AUTHENTICATION' ||
+    candidate.lc_error_code === 'MODEL_AUTHENTICATION' ||
+    message.includes('unauthorized') ||
+    message.includes('iam_token') ||
+    message.includes('api key') ||
+    message.includes('credential') ||
+    message.includes('не настроен')
+  );
+}
+
 @WebSocketGateway({ cors: true })
 export class ChatGateway implements OnGatewayConnection {
   private readonly logger = new Logger(ChatGateway.name);
@@ -135,6 +172,15 @@ export class ChatGateway implements OnGatewayConnection {
         throw new WsException({
           statusCode: error.getStatus(),
           message: error.message,
+        });
+      }
+
+      // LLM-провайдер ответил 401 (истёк IAM-токен, неверный ключ): UI
+      // показывает подсказку «проверьте ключи в Пульте управления».
+      if (isLlmAuthError(error)) {
+        throw new WsException({
+          statusCode: 401,
+          message: LLM_AUTH_ERROR_MESSAGE,
         });
       }
 

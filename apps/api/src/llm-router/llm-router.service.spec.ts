@@ -48,6 +48,7 @@ describe('LlmRouterService', () => {
       id: 'route-1',
       name: 'local',
       modelName: 'llama3',
+      providerType: 'Ollama',
       baseUrl: 'http://localhost:11435/v1',
       apiKeyEnvVar: null,
       priority: 0,
@@ -58,6 +59,7 @@ describe('LlmRouterService', () => {
       id: 'route-1',
       name: 'local',
       modelName: 'llama3',
+      providerType: 'Ollama',
       baseUrl: 'http://localhost:11435/v1',
       apiKeyEnvVar: null,
     });

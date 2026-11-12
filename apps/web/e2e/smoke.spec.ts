@@ -464,7 +464,8 @@ test.describe('Дымовые сценарии UI', () => {
 
     const provider = dialog.locator('#admin-route-provider');
     await expect(provider).toHaveValue('OpenAI');
-    await expect(provider.locator('option')).toHaveCount(3);
+    await expect(provider.locator('option')).toHaveCount(4);
+    await expect(provider.locator('option[value="Ollama"]')).toHaveCount(1);
 
     await provider.selectOption('YandexGPT');
     await expect(dialog).toContainText('gpt://');

@@ -53,7 +53,8 @@
   },
   "errors": {
     "insufficient_funds": "Insufficient funds to run the agent. Top up your balance.",
-    "rateLimit": "Too many attempts. Please wait a minute."
+    "rateLimit": "Too many attempts. Please wait a minute.",
+    "llmAuth": "LLM authorization failed. Check the keys in the Control plane."
   },
   "nav": {
     "primary": "Primary navigation",

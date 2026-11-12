@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import i18n from '../i18n';
 import { api } from '../lib/api';
+import { isLlmAuthError, llmAuthErrorMessage } from '../lib/llm';
 import { parseOfficeEvent } from '../lib/office-events';
 import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
@@ -161,6 +162,14 @@ function isInsufficientFundsPayload(payload: unknown): boolean {
 
 function normalizeAssistantReply(reply: string): NormalizedReply {
   const needsTopUp = hasInsufficientFundsMessage(reply);
+
+  // Провайдер LLM ответил 401 (например, истёк IAM-токен Яндекса):
+  // подсказываем, где чинить ключи, вместо сырого текста ошибки.
+  if (isLlmAuthError(reply)) {
+    const message = llmAuthErrorMessage();
+
+    return { content: message, notice: message, needsTopUp };
+  }
 
   if (reply.startsWith(ERROR_KEY_PREFIX)) {
     const content = i18n.exists(reply)
@@ -342,10 +351,13 @@ export function useChatSession(): ChatSession {
     };
 
     const handleException = (payload: unknown) => {
-      const message = getErrorMessage(
+      const rawMessage = getErrorMessage(
         payload,
         i18n.t('chat.errors.messageFailed'),
       );
+      const message = isLlmAuthError(rawMessage)
+        ? llmAuthErrorMessage()
+        : rawMessage;
       const needsTopUp = isInsufficientFundsPayload(payload);
       const pending = pendingRef.current;
 

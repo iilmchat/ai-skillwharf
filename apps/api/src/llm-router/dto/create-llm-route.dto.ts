@@ -13,6 +13,7 @@ export const LLM_PROVIDER_TYPES = [
   'OpenAI',
   'YandexGPT',
   'GigaChat',
+  'Ollama',
 ] as const;
 
 export type LlmProviderType = (typeof LLM_PROVIDER_TYPES)[number];
