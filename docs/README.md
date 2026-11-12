@@ -36,6 +36,7 @@
 
 - [Правила разработки](development/RULES.md)
 - [Текущий Roadmap](development/ROADMAP.md)
+- [План перехода в Production (Post-MVP)](development/POST-MVP-TODO.md)
 - [Промпт для AI-агентов](development/PROMPT_CURRENT.md)
 
 ## 📣 Маркетинг и презентации (`marketing/`)
@@ -46,3 +47,4 @@
 
 - [Changelog](CHANGELOG.md)
 - [Известные проблемы](KNOWN_ISSUES.md)
+
