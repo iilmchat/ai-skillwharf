@@ -6,6 +6,9 @@ import {
   HumanMessage,
   SystemMessage,
 } from '@langchain/core/messages';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AuditService } from '../audit/audit.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
@@ -15,9 +18,9 @@ import {
 } from '../sandbox/sandbox.service.js';
 import {
   EXEC_TOOL_NAME,
-  GENERATE_ARTICLE_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
+  PUBLISH_TO_DZEN_TOOL_NAME,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
   SEND_MESSAGE_TOOL_NAME,
@@ -428,16 +431,54 @@ describe('LlmService', () => {
     });
   });
 
-  describe('createGenerateArticleTool', () => {
-    it('возвращает текст с указанной темой', async () => {
-      const service = createService();
+  describe('createPublishToDzenTool', () => {
+    it('создаёт Markdown-файл с текстом статьи', async () => {
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockImplementation(
+        async (_command: string, env: Record<string, string>) => {
+          const content = Buffer.from(
+            env.DZEN_CONTENT_B64 ?? '',
+            'base64',
+          ).toString('utf8');
 
-      const tool = service.createGenerateArticleTool();
-
-      expect(tool.name).toBe(GENERATE_ARTICLE_TOOL_NAME);
-      await expect(tool.invoke({ topic: 'Как выбрать CRM' })).resolves.toBe(
-        "Статья на тему 'Как выбрать CRM' успешно сгенерирована.",
+          return Buffer.from(content, 'utf8').toString('base64');
+        },
       );
+      const outputDir = await mkdtemp(join(tmpdir(), 'dzen-'));
+
+      try {
+        const service = createService(sandbox);
+        const tool = service.createPublishToDzenTool({ outputDir });
+
+        await expect(
+          tool.invoke({
+            title: 'Заголовок статьи',
+            text: 'Текст статьи для Дзена',
+            imageUrl: 'https://example.com/cover.png',
+          }),
+        ).resolves.toContain('Черновик статьи');
+
+        const files = await readdir(outputDir);
+
+        expect(files).toHaveLength(1);
+
+        const content = await readFile(join(outputDir, files[0]!), 'utf8');
+
+        expect(content).toContain('# Заголовок статьи');
+        expect(content).toContain('Текст статьи для Дзена');
+        expect(content).toContain('https://example.com/cover.png');
+
+        const [command, env] = sandbox.runCommand.mock.calls[0] as [
+          string,
+          Record<string, string>,
+        ];
+
+        expect(tool.name).toBe(PUBLISH_TO_DZEN_TOOL_NAME);
+        expect(command).toContain('/tmp/dzen-output');
+        expect(env.DZEN_FILENAME).toMatch(/^dzen-.*\.md$/);
+      } finally {
+        await rm(outputDir, { recursive: true, force: true });
+      }
     });
   });
 

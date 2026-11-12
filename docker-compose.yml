@@ -32,6 +32,9 @@ services:
       # Доступ к LM Studio и другим сервисам на хосте из контейнера.
       # host-gateway нужен на Linux; на Windows и macOS работает из коробки.
       - "host.docker.internal:host-gateway"
+    volumes:
+      # Черновики Дзен, которые API пишет в ./dzen-output, видны на хосте.
+      - ./dzen-output:/app/dzen-output
     depends_on:
       postgres:
         condition: service_healthy

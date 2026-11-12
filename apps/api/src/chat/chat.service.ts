@@ -28,12 +28,12 @@ import {
   CHECK_FACTS_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
-  GENERATE_ARTICLE_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
+  PUBLISH_TO_DZEN_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
   SCREEN_RESUME_TOOL_NAME,
@@ -890,10 +890,10 @@ export class ChatService {
       );
     }
 
-    if (skillDeclaresTool(skills, GENERATE_ARTICLE_TOOL_NAME)) {
+    if (skillDeclaresTool(skills, PUBLISH_TO_DZEN_TOOL_NAME)) {
       tools.push(
-        this.llmService.createGenerateArticleTool({
-          beforeExecute: beforeExecuteFor(GENERATE_ARTICLE_TOOL_NAME),
+        this.llmService.createPublishToDzenTool({
+          beforeExecute: beforeExecuteFor(PUBLISH_TO_DZEN_TOOL_NAME),
         }),
       );
     }

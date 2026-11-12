@@ -17,12 +17,12 @@ import {
   CHECK_FACTS_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
-  GENERATE_ARTICLE_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
+  PUBLISH_TO_DZEN_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
   SCREEN_RESUME_TOOL_NAME,
@@ -371,7 +371,7 @@ describe('ChatService', () => {
 
     it('подключает content, HR и legal mock-инструменты', async () => {
       skills.getEnabledSkills.mockResolvedValue([
-        createSkill('dzen-article', GENERATE_ARTICLE_TOOL_NAME, {
+        createSkill('dzen-article', PUBLISH_TO_DZEN_TOOL_NAME, {
           model: 'Pay-per-Outcome',
           price: 100,
         }),
@@ -397,7 +397,7 @@ describe('ChatService', () => {
 
       expect(tools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
-          GENERATE_ARTICLE_TOOL_NAME,
+          PUBLISH_TO_DZEN_TOOL_NAME,
           CHECK_FACTS_TOOL_NAME,
           SCREEN_RESUME_TOOL_NAME,
           EXTRACT_DOCUMENT_DATA_TOOL_NAME,

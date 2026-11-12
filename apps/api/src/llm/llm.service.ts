@@ -11,6 +11,9 @@ import {
   type StructuredToolInterface,
 } from '@langchain/core/tools';
 import { ChatOpenAI } from '@langchain/openai';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
@@ -152,16 +155,18 @@ export const RunWorkflowToolSchema = z.object({
   steps: z.array(z.string()).describe('Шаги цепочки задач'),
 });
 
-/** Имя mock-инструмента генерации статьи. */
-export const GENERATE_ARTICLE_TOOL_NAME = 'generate_article';
+/** Имя инструмента экспорта статьи для Дзен. */
+export const PUBLISH_TO_DZEN_TOOL_NAME = 'publish_to_dzen';
 
-/** Описание mock-инструмента генерации статьи. */
-export const GENERATE_ARTICLE_TOOL_DESCRIPTION =
-  'Генерирует статью для Дзен по теме (заглушка)';
+/** Описание инструмента экспорта статьи для Дзен. */
+export const PUBLISH_TO_DZEN_TOOL_DESCRIPTION =
+  'Сохраняет черновик статьи для Дзен в Markdown и возвращает путь к файлу';
 
-/** Схема аргументов `generate_article`. */
-export const GenerateArticleToolSchema = z.object({
-  topic: z.string().describe('Тема статьи'),
+/** Схема аргументов `publish_to_dzen`. */
+export const PublishToDzenToolSchema = z.object({
+  title: z.string().describe('Заголовок статьи'),
+  text: z.string().describe('Текст статьи'),
+  imageUrl: z.string().describe('URL обложки статьи'),
 });
 
 /** Имя mock-инструмента проверки фактов. */
@@ -225,6 +230,11 @@ export interface SandboxToolOptions {
    * код в песочнице не запускается.
    */
   beforeExecute?: () => Promise<void>;
+}
+
+export interface DzenPublishOptions extends SandboxToolOptions {
+  /** Каталог для готовых Markdown-черновиков (по умолчанию `./dzen-output`). */
+  outputDir?: string;
 }
 
 /**
@@ -460,18 +470,53 @@ export class LlmService {
     });
   }
 
-  /** Mock-инструмент генерации статьи для Дзен. */
-  createGenerateArticleTool(
-    options: SandboxToolOptions = {},
+  /**
+   * Экспортирует черновик статьи для Дзен в Markdown. Файл создаётся в
+   * песочнице (`/tmp/dzen-output`) и переносится на хост через stdout,
+   * потому что rootfs контейнера доступен только для чтения.
+   */
+  createPublishToDzenTool(
+    options: DzenPublishOptions = {},
   ): DynamicStructuredTool {
     return new DynamicStructuredTool({
-      name: GENERATE_ARTICLE_TOOL_NAME,
-      description: GENERATE_ARTICLE_TOOL_DESCRIPTION,
-      schema: GenerateArticleToolSchema,
-      func: async ({ topic }) => {
+      name: PUBLISH_TO_DZEN_TOOL_NAME,
+      description: PUBLISH_TO_DZEN_TOOL_DESCRIPTION,
+      schema: PublishToDzenToolSchema,
+      func: async ({ title, text, imageUrl }) => {
         await options.beforeExecute?.();
 
-        return `Статья на тему '${topic}' успешно сгенерирована.`;
+        const filename = `dzen-${randomUUID()}.md`;
+        const markdown = [
+          `# ${title}`,
+          '',
+          `![Обложка](${imageUrl})`,
+          '',
+          text,
+          '',
+        ].join('\n');
+        const encoded = Buffer.from(markdown, 'utf8').toString('base64');
+        const script = [
+          'set -eu',
+          'mkdir -p /tmp/dzen-output',
+          `python3 -c 'import base64,os,pathlib; p=pathlib.Path("/tmp/dzen-output")/os.environ["DZEN_FILENAME"]; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(os.environ["DZEN_CONTENT_B64"])); print(base64.b64encode(p.read_bytes()).decode())'`,
+        ].join('\n');
+        const output = await this.sandboxService.runCommand(script, {
+          DZEN_FILENAME: filename,
+          DZEN_CONTENT_B64: encoded,
+        });
+        const encodedResult = output.trim();
+
+        if (encodedResult === '') {
+          throw new Error('Песочница не вернула содержимое статьи');
+        }
+
+        const decoded = Buffer.from(encodedResult, 'base64').toString('utf8');
+        const outputDir = options.outputDir ?? './dzen-output';
+        await mkdir(outputDir, { recursive: true });
+        const hostPath = join(outputDir, filename);
+        await writeFile(hostPath, decoded, 'utf8');
+
+        return `Черновик статьи «${title}» сохранён: ${hostPath}`;
       },
     });
   }
