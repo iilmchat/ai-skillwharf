@@ -11,10 +11,19 @@ export function SkillPricingBadge({
   const { t, i18n } = useTranslation();
   const isPayPerCall =
     pricing?.model === 'Pay-per-Call' && typeof pricing.price === 'number';
+  const isPayPerOutcome =
+    pricing?.model === 'Pay-per-Outcome' &&
+    typeof pricing.price === 'number';
+  const isPaid = isPayPerCall || isPayPerOutcome;
   let label: string = t('skills.pricing.free');
 
   if (isPayPerCall) {
     label = t('skills.pricing.payPerCall', {
+      price: formatMoney(String(pricing.price), i18n.language),
+      currency: getCurrencySymbol(pricing.currency),
+    });
+  } else if (isPayPerOutcome) {
+    label = t('skills.pricing.payPerOutcome', {
       price: formatMoney(String(pricing.price), i18n.language),
       currency: getCurrencySymbol(pricing.currency),
     });
@@ -27,7 +36,7 @@ export function SkillPricingBadge({
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-        isPayPerCall
+        isPaid
           ? 'bg-tertiary-container text-on-tertiary-container'
           : 'bg-surface-container-high text-on-surface-variant'
       }`}

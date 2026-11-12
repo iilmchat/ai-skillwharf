@@ -77,7 +77,8 @@
       "free": "Бесплатно",
       "subscription": "Подписка",
       "freemium": "Freemium",
-      "payPerCall": "{{price}} {{currency}} / вызов"
+      "payPerCall": "{{price}} {{currency}} / вызов",
+      "payPerOutcome": "{{price}} {{currency}} / результат"
     },
     "errors": {
       "load": "Не удалось загрузить навыки. Попробуйте ещё раз.",
@@ -99,6 +100,9 @@
       "dev": "Разработка",
       "communication": "Коммуникации",
       "productivity": "Продуктивность",
+      "content": "Контент",
+      "hr": "HR",
+      "documents": "Документы",
       "emptyTitle": "В этой категории пока нет навыков",
       "emptyBody": "Выберите другую категорию или покажите все навыки.",
       "reset": "Показать все"

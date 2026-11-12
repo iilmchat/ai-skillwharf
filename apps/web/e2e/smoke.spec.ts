@@ -319,7 +319,7 @@ test.describe('Дымовые сценарии UI', () => {
 
     await page.locator('a[href="/app/store"]:visible').first().click();
     await expect(page).toHaveURL(/\/app\/store$/);
-    await expect(page.getByRole('tab')).toHaveCount(5);
+    await expect(page.getByRole('tab')).toHaveCount(8);
 
     await page.getByRole('tab', { name: /Поиск/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(2);

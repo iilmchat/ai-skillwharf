@@ -77,7 +77,8 @@
       "free": "Free",
       "subscription": "Subscription",
       "freemium": "Freemium",
-      "payPerCall": "{{price}} {{currency}} per call"
+      "payPerCall": "{{price}} {{currency}} per call",
+      "payPerOutcome": "{{price}} {{currency}} per result"
     },
     "errors": {
       "load": "Could not load skills. Please try again.",
@@ -99,6 +100,9 @@
       "dev": "Development",
       "communication": "Communication",
       "productivity": "Productivity",
+      "content": "Content",
+      "hr": "HR",
+      "documents": "Documents",
       "emptyTitle": "No skills in this category yet",
       "emptyBody": "Choose another category or show all skills.",
       "reset": "Show all"

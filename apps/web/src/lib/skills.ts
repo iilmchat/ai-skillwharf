@@ -3,7 +3,11 @@ import i18n from '../i18n';
 import { api } from './api';
 
 export type PricingModel =
-  'Free' | 'Pay-per-Call' | 'Subscription' | 'Freemium';
+  | 'Free'
+  | 'Pay-per-Call'
+  | 'Pay-per-Outcome'
+  | 'Subscription'
+  | 'Freemium';
 
 export type SkillCurrency = 'RUB' | 'USD';
 

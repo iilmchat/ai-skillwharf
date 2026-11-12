@@ -8,12 +8,27 @@ export type StoreCategory =
   | 'search'
   | 'dev'
   | 'communication'
-  | 'productivity';
+  | 'productivity'
+  | 'content'
+  | 'hr'
+  | 'documents';
 
 interface CategoryRule {
   category: Exclude<StoreCategory, 'all'>;
   keywords: readonly string[];
 }
+
+interface CategoryPrefixRule {
+  category: Exclude<StoreCategory, 'all'>;
+  prefixes: readonly string[];
+}
+
+/** Специфичные новые направления: dzen/fact → Контент, resume → HR, document → Документы. */
+const CATEGORY_PREFIX_RULES: readonly CategoryPrefixRule[] = [
+  { category: 'content', prefixes: ['dzen', 'fact'] },
+  { category: 'hr', prefixes: ['resume'] },
+  { category: 'documents', prefixes: ['document'] },
+];
 
 /** Порядок важен: поиск должен сработать раньше разработки. */
 const CATEGORY_RULES: readonly CategoryRule[] = [
@@ -70,6 +85,12 @@ const CATEGORY_RULES: readonly CategoryRule[] = [
 /** Простой маппинг категории по имени навыка (ТЗ магазина). */
 export function getSkillCategory(name: string): StoreCategory {
   const normalized = name.toLowerCase();
+
+  for (const rule of CATEGORY_PREFIX_RULES) {
+    if (rule.prefixes.some((prefix) => normalized.startsWith(prefix))) {
+      return rule.category;
+    }
+  }
 
   for (const rule of CATEGORY_RULES) {
     if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
@@ -275,9 +296,20 @@ export function getRegistryPricing(
     return undefined;
   }
 
-  return skill.price <= 0
-    ? { model: 'Free' }
-    : { model: 'Pay-per-Call', price: skill.price, currency: 'RUB' };
+  if (skill.price <= 0) {
+    return { model: 'Free' };
+  }
+
+  // dzen-article продаётся за результат, даже если реестр отдал только price.
+  if (skill.name.toLowerCase().startsWith('dzen')) {
+    return {
+      model: 'Pay-per-Outcome',
+      price: skill.price,
+      currency: 'RUB',
+    };
+  }
+
+  return { model: 'Pay-per-Call', price: skill.price, currency: 'RUB' };
 }
 
 /**

@@ -39,6 +39,9 @@ const STORE_CATEGORIES: readonly StoreCategory[] = [
   'dev',
   'communication',
   'productivity',
+  'content',
+  'hr',
+  'documents',
 ];
 
 interface InstallVariables {
@@ -312,6 +315,9 @@ export function StorePage() {
       dev: 0,
       communication: 0,
       productivity: 0,
+      content: 0,
+      hr: 0,
+      documents: 0,
     };
 
     for (const skill of allSkills) {
