@@ -4,7 +4,7 @@ import { skillManifestSchema, type SkillManifest } from "./skill-manifest";
 
 /**
  * Пример валидного SKILL.md из
- * `docs/02-ecosystem/Manifest-Specification.md` (frontmatter, разобранный в объект).
+ * `docs/ecosystem/Manifest-Specification.md` (frontmatter, разобранный в объект).
  */
 const documentedManifest: SkillManifest = {
   name: "web-researcher-pro",

@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Zod-схема манифеста Skill (frontmatter файла `SKILL.md`).
  *
- * Источник истины — JSON Schema из `docs/02-ecosystem/Manifest-Specification.md`.
+ * Источник истины — JSON Schema из `docs/ecosystem/Manifest-Specification.md`.
  * Схема повторяет её один в один:
  * - `additionalProperties` в JSON Schema не задан, поэтому лишние ключи не
  *   запрещены (Zod по умолчанию отбрасывает неописанные поля, а не отклоняет их);
