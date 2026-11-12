@@ -20,6 +20,7 @@ import { ToggleSkillDto } from './dto/toggle-skill.dto.js';
 import { ValidateSkillDto } from './dto/validate-skill.dto.js';
 import {
   SkillsService,
+  type SkillInstallResult,
   type SkillValidationResult,
 } from './skills.service.js';
 
@@ -46,7 +47,7 @@ export class SkillsController {
   @Post('install')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  install(@Body() dto: InstallSkillDto): Promise<InstalledSkill> {
+  install(@Body() dto: InstallSkillDto): Promise<SkillInstallResult> {
     return this.skillsService.installSkill(dto.fileContent);
   }
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AIMessage,
+  AIMessageChunk,
   type BaseMessage,
   HumanMessage,
   SystemMessage,
@@ -20,6 +21,13 @@ export interface ChatHistoryMessage {
   role: string;
   content: string;
 }
+
+/**
+ * Элемент стрима ответа модели: `delta` — очередной фрагмент текста,
+ * `message` — готовое сообщение с `tool_calls` (последний элемент итератора).
+ */
+export type ChatStreamChunk =
+  { type: 'delta'; text: string } | { type: 'message'; message: AIMessage };
 
 /** Имя инструмента песочницы, которым LLM может вызвать выполнение кода. */
 export const SANDBOX_TOOL_NAME = 'execute_sandbox_code';
@@ -73,7 +81,10 @@ const TAVILY_SEARCH_COMMAND =
  * Секреты из окружения Gateway, которые разрешено передавать в песочницу.
  * Список ограничен: произвольные переменные процесса в контейнер не попадают.
  */
-export const SANDBOX_ENV_ALLOWLIST = ['TAVILY_API_KEY', 'GITHUB_TOKEN'] as const;
+export const SANDBOX_ENV_ALLOWLIST = [
+  'TAVILY_API_KEY',
+  'GITHUB_TOKEN',
+] as const;
 
 export interface SandboxToolOptions {
   /**
@@ -141,9 +152,7 @@ export class LlmService {
    * Инструмент `web_search`: ищет через Tavily API в песочнице. Тело запроса
    * сериализуется в JSON здесь, а ключ берётся из `TAVILY_API_KEY`.
    */
-  createWebSearchTool(
-    options: SandboxToolOptions = {},
-  ): DynamicStructuredTool {
+  createWebSearchTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
     return new DynamicStructuredTool({
       name: WEB_SEARCH_TOOL_NAME,
       description: WEB_SEARCH_TOOL_DESCRIPTION,
@@ -221,10 +230,54 @@ export class LlmService {
       );
     }
 
-    const model =
-      tools.length > 0 ? this.client.bindTools(tools) : this.client;
+    const model = tools.length > 0 ? this.client.bindTools(tools) : this.client;
 
     return model.invoke(withLanguageInstruction(messages));
+  }
+
+  /**
+   * Стриминговый вариант `chatWithTools`: отдаёт текст по мере генерации.
+   * Последним элементом итератора приходит собранное сообщение модели —
+   * по нему граф решает, нужно ли запускать инструменты.
+   */
+  async *chatWithToolsStream(
+    messages: BaseMessage[],
+    tools: StructuredToolInterface[],
+  ): AsyncGenerator<ChatStreamChunk, void, unknown> {
+    if (!this.client) {
+      const lastUserMessage = [...messages]
+        .reverse()
+        .find((message) => message instanceof HumanMessage);
+      const text = `LLM not configured: ${messageContentToText(lastUserMessage?.content ?? '')}`;
+
+      yield { type: 'delta', text };
+      yield { type: 'message', message: new AIMessage(text) };
+      return;
+    }
+
+    const model = tools.length > 0 ? this.client.bindTools(tools) : this.client;
+    let accumulated: AIMessageChunk | undefined;
+
+    for await (const chunk of await model.stream(
+      withLanguageInstruction(messages),
+    )) {
+      accumulated = accumulated ? accumulated.concat(chunk) : chunk;
+
+      if (chunk.text) {
+        yield { type: 'delta', text: chunk.text };
+      }
+    }
+
+    const message = accumulated
+      ? new AIMessage({
+          content: accumulated.content,
+          tool_calls: accumulated.tool_calls,
+          invalid_tool_calls: accumulated.invalid_tool_calls,
+          usage_metadata: accumulated.usage_metadata,
+        })
+      : new AIMessage('');
+
+    yield { type: 'message', message };
   }
 }
 

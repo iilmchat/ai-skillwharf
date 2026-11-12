@@ -18,6 +18,8 @@ import {
   LlmService,
   SANDBOX_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
+  messageContentToText,
+  type ChatStreamChunk,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -68,6 +70,19 @@ function toolCallMessage(
   });
 }
 
+/** Стрим, который отдаёт текст сообщения одним чанком и финальное сообщение. */
+function streamOf(message: AIMessage): AsyncGenerator<ChatStreamChunk> {
+  return (async function* () {
+    const text = messageContentToText(message.content);
+
+    if (text) {
+      yield { type: 'delta', text };
+    }
+
+    yield { type: 'message', message };
+  })();
+}
+
 function createSkill(
   name: string,
   tool: string,
@@ -99,7 +114,7 @@ describe('ChatService', () => {
   let billing: BillingMock;
   let skills: SkillsMock;
   let llm: LlmService;
-  let chatWithTools: ReturnType<typeof vi.spyOn>;
+  let chatWithToolsStream: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     prisma = {
@@ -117,7 +132,7 @@ describe('ChatService', () => {
     // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
     // сам вызов модели подменяем.
     llm = new LlmService(sandbox as unknown as SandboxService);
-    chatWithTools = vi.spyOn(llm, 'chatWithTools');
+    chatWithToolsStream = vi.spyOn(llm, 'chatWithToolsStream');
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -177,7 +192,9 @@ describe('ChatService', () => {
         { role: 'assistant', content: 'предыдущий ответ' },
         { role: 'user', content: 'привет' },
       ]);
-      chatWithTools.mockResolvedValue(new AIMessage('ответ ассистента'));
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('ответ ассистента')),
+      );
 
       const result = await service.handleMessage(
         USER_ID,
@@ -213,7 +230,7 @@ describe('ChatService', () => {
         }),
       );
 
-      const [messages, tools] = chatWithTools.mock.calls[0] as [
+      const [messages, tools] = chatWithToolsStream.mock.calls[0] as [
         BaseMessage[],
         { name: string }[],
       ];
@@ -239,18 +256,14 @@ describe('ChatService', () => {
     it('не запускает агента при балансе ниже минимального', async () => {
       billing.getBalance.mockResolvedValue({ balance: '0.49' });
 
-      const attempt = service.handleMessage(
-        USER_ID,
-        CONVERSATION_ID,
-        'привет',
-      );
+      const attempt = service.handleMessage(USER_ID, CONVERSATION_ID, 'привет');
 
       await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
       await expect(attempt).rejects.toThrow(ERROR_KEYS.insufficientFunds);
 
       expect(prisma.message.create).not.toHaveBeenCalled();
       expect(skills.getEnabledSkills).not.toHaveBeenCalled();
-      expect(chatWithTools).not.toHaveBeenCalled();
+      expect(chatWithToolsStream).not.toHaveBeenCalled();
       expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
     });
 
@@ -259,7 +272,7 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'привет' },
       ]);
-      chatWithTools.mockResolvedValue(new AIMessage('ответ'));
+      chatWithToolsStream.mockReturnValueOnce(streamOf(new AIMessage('ответ')));
 
       await expect(
         service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
@@ -281,11 +294,11 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'найди новости' },
       ]);
-      chatWithTools
-        .mockResolvedValueOnce(
-          toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' })),
         )
-        .mockResolvedValueOnce(new AIMessage('Готово'));
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
       billing.checkAndChargeSkill.mockResolvedValue({
         balance: '9.95',
         entryId: 'entry-1',
@@ -322,8 +335,8 @@ describe('ChatService', () => {
       ).toBeLessThan(sandbox.runCommand.mock.invocationCallOrder[0]);
 
       // Результат инструмента вернулся в LLM вторым вызовом.
-      expect(chatWithTools).toHaveBeenCalledTimes(2);
-      const [secondCallMessages] = chatWithTools.mock.calls[1] as [
+      expect(chatWithToolsStream).toHaveBeenCalledTimes(2);
+      const [secondCallMessages] = chatWithToolsStream.mock.calls[1] as [
         BaseMessage[],
         unknown[],
       ];
@@ -345,11 +358,13 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'gh --version' },
       ]);
-      chatWithTools
-        .mockResolvedValueOnce(
-          toolCallMessage(EXEC_TOOL_NAME, { command: 'gh --version' }),
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(EXEC_TOOL_NAME, { command: 'gh --version' }),
+          ),
         )
-        .mockResolvedValueOnce(new AIMessage('Готово'));
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
       billing.checkAndChargeSkill.mockResolvedValue(null);
       sandbox.runCommand.mockResolvedValue('gh version 2.0.0\n');
 
@@ -377,11 +392,11 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'найди новости' },
       ]);
-      chatWithTools
-        .mockResolvedValueOnce(
-          toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' })),
         )
-        .mockResolvedValueOnce(new AIMessage('Готово'));
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
       sandbox.runCommand.mockResolvedValue('{"results":[]}');
 
       await expect(
@@ -396,11 +411,11 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'запусти echo hi' },
       ]);
-      chatWithTools
-        .mockResolvedValueOnce(
-          toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' }),
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
         )
-        .mockResolvedValueOnce(new AIMessage('Готово: hi'));
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово: hi')));
       sandbox.runCommand.mockResolvedValue('hi\n');
 
       const result = await service.handleMessage(
@@ -425,8 +440,8 @@ describe('ChatService', () => {
       prisma.message.findMany.mockResolvedValue([
         { role: 'user', content: 'найди новости' },
       ]);
-      chatWithTools.mockResolvedValueOnce(
-        toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' }),
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' })),
       );
       billing.checkAndChargeSkill.mockRejectedValue(
         new BadRequestException(ERROR_KEYS.insufficientFunds),
@@ -445,7 +460,7 @@ describe('ChatService', () => {
 
       // Песочница не запускалась, второй вызов LLM не состоялся.
       expect(sandbox.runCommand).not.toHaveBeenCalled();
-      expect(chatWithTools).toHaveBeenCalledTimes(1);
+      expect(chatWithToolsStream).toHaveBeenCalledTimes(1);
 
       expect(prisma.message.create).toHaveBeenNthCalledWith(2, {
         data: {
@@ -466,7 +481,7 @@ describe('ChatService', () => {
         service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.message.create).not.toHaveBeenCalled();
-      expect(chatWithTools).not.toHaveBeenCalled();
+      expect(chatWithToolsStream).not.toHaveBeenCalled();
       expect(billing.getBalance).not.toHaveBeenCalled();
     });
 
@@ -477,7 +492,91 @@ describe('ChatService', () => {
         service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.message.create).not.toHaveBeenCalled();
-      expect(chatWithTools).not.toHaveBeenCalled();
+      expect(chatWithToolsStream).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('streamMessage', () => {
+    beforeEach(() => {
+      prisma.conversation.findUnique.mockResolvedValue({
+        id: CONVERSATION_ID,
+        userId: USER_ID,
+      });
+      prisma.message.create.mockResolvedValue({});
+      prisma.conversation.update.mockResolvedValue({});
+      billing.getBalance.mockResolvedValue({ balance: '10.00' });
+    });
+
+    it('отдаёт чанки в onDelta и сохраняет полный ответ', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'привет' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        (async function* () {
+          yield { type: 'delta', text: 'При' };
+          yield { type: 'delta', text: 'вет' };
+          yield { type: 'message', message: new AIMessage('Привет') };
+        })(),
+      );
+
+      const deltas: string[] = [];
+      const result = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'привет',
+        (text) => deltas.push(text),
+      );
+
+      expect(deltas).toEqual(['При', 'вет']);
+      expect(result).toEqual({
+        conversationId: CONVERSATION_ID,
+        reply: 'Привет',
+      });
+      expect(prisma.message.create).toHaveBeenNthCalledWith(2, {
+        data: {
+          conversationId: CONVERSATION_ID,
+          role: 'assistant',
+          content: 'Привет',
+        },
+      });
+    });
+
+    it('отправляет ошибку paywall в стрим и сохраняет её', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME, {
+          model: 'Pay-per-Call',
+          price: 0.05,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'найди новости' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'новости' })),
+      );
+      billing.checkAndChargeSkill.mockRejectedValue(
+        new BadRequestException(ERROR_KEYS.insufficientFunds),
+      );
+
+      const deltas: string[] = [];
+      const result = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'найди новости',
+        (text) => deltas.push(text),
+      );
+
+      expect(deltas).toEqual([ERROR_KEYS.insufficientFunds]);
+      expect(result.reply).toBe(ERROR_KEYS.insufficientFunds);
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+      expect(prisma.message.create).toHaveBeenNthCalledWith(2, {
+        data: {
+          conversationId: CONVERSATION_ID,
+          role: 'assistant',
+          content: ERROR_KEYS.insufficientFunds,
+        },
+      });
     });
   });
 });

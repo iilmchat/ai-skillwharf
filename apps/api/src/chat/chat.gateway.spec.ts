@@ -15,17 +15,23 @@ interface JwtMock {
 }
 
 interface ChatServiceMock {
-  handleMessage: MockFn;
+  streamMessage: MockFn;
 }
 
 interface SocketMock {
   handshake: { auth: Record<string, unknown> };
   data: Record<string, unknown>;
   disconnect: MockFn;
+  emit: MockFn;
 }
 
 function createSocket(auth: Record<string, unknown> = {}): SocketMock {
-  return { handshake: { auth }, data: {}, disconnect: vi.fn() };
+  return {
+    handshake: { auth },
+    data: {},
+    disconnect: vi.fn(),
+    emit: vi.fn(),
+  };
 }
 
 describe('ChatGateway', () => {
@@ -35,7 +41,7 @@ describe('ChatGateway', () => {
 
   beforeEach(() => {
     jwt = { verifyAsync: vi.fn() };
-    chatService = { handleMessage: vi.fn() };
+    chatService = { streamMessage: vi.fn() };
 
     gateway = new ChatGateway(
       jwt as unknown as JwtService,
@@ -76,13 +82,22 @@ describe('ChatGateway', () => {
   });
 
   describe('handleSendMessage', () => {
-    it('передаёт userId из сокета в сервис', async () => {
+    it('отправляет stream_delta на каждый чанк и stream_end в конце', async () => {
       const socket = createSocket();
       socket.data.userId = USER_ID;
-      chatService.handleMessage.mockResolvedValue({
-        conversationId: CONVERSATION_ID,
-        reply: 'ответ',
-      });
+      chatService.streamMessage.mockImplementation(
+        async (
+          _userId: string,
+          conversationId: string,
+          _content: string,
+          onDelta: (text: string) => void,
+        ) => {
+          onDelta('При');
+          onDelta('вет');
+
+          return { conversationId, reply: 'Привет' };
+        },
+      );
 
       const result = await gateway.handleSendMessage(
         socket as unknown as Socket,
@@ -91,13 +106,25 @@ describe('ChatGateway', () => {
 
       expect(result).toEqual({
         conversationId: CONVERSATION_ID,
-        reply: 'ответ',
+        reply: 'Привет',
       });
-      expect(chatService.handleMessage).toHaveBeenCalledWith(
+      expect(chatService.streamMessage).toHaveBeenCalledWith(
         USER_ID,
         CONVERSATION_ID,
         'привет',
+        expect.any(Function),
       );
+      expect(socket.emit).toHaveBeenNthCalledWith(1, 'stream_delta', {
+        conversationId: CONVERSATION_ID,
+        text: 'При',
+      });
+      expect(socket.emit).toHaveBeenNthCalledWith(2, 'stream_delta', {
+        conversationId: CONVERSATION_ID,
+        text: 'вет',
+      });
+      expect(socket.emit).toHaveBeenLastCalledWith('stream_end', {
+        conversationId: CONVERSATION_ID,
+      });
     });
 
     it('запрещает отправку без аутентификации', async () => {
@@ -109,7 +136,7 @@ describe('ChatGateway', () => {
           content: 'привет',
         }),
       ).rejects.toBeInstanceOf(WsException);
-      expect(chatService.handleMessage).not.toHaveBeenCalled();
+      expect(chatService.streamMessage).not.toHaveBeenCalled();
     });
 
     it('отклоняет пустой payload', async () => {
@@ -117,17 +144,17 @@ describe('ChatGateway', () => {
       socket.data.userId = USER_ID;
 
       await expect(
-        gateway.handleSendMessage(
-          socket as unknown as Socket,
-          { conversationId: '', content: '   ' },
-        ),
+        gateway.handleSendMessage(socket as unknown as Socket, {
+          conversationId: '',
+          content: '   ',
+        }),
       ).rejects.toBeInstanceOf(WsException);
     });
 
     it('передаёт клиенту осмысленную ошибку прав из сервиса', async () => {
       const socket = createSocket();
       socket.data.userId = USER_ID;
-      chatService.handleMessage.mockRejectedValue(
+      chatService.streamMessage.mockRejectedValue(
         new ForbiddenException('Диалог принадлежит другому пользователю'),
       );
 

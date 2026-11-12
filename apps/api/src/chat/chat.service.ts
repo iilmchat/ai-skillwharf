@@ -11,7 +11,13 @@ import {
   type ToolCall,
 } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
-import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import {
+  Annotation,
+  END,
+  getWriter,
+  START,
+  StateGraph,
+} from '@langchain/langgraph';
 import type { InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
@@ -62,6 +68,12 @@ type ChatState = typeof ChatStateAnnotation.State;
 export interface ChatReply {
   conversationId: string;
   reply: string;
+}
+
+/** Событие чанка текста, которое граф отдаёт в custom-стрим. */
+export interface ChatStreamDelta {
+  type: 'delta';
+  text: string;
 }
 
 interface ToolPrice {
@@ -153,8 +165,7 @@ async function executeToolCalls(
       return new ToolMessage({
         tool_call_id: call.id ?? '',
         name: call.name,
-        content:
-          typeof result === 'string' ? result : JSON.stringify(result),
+        content: typeof result === 'string' ? result : JSON.stringify(result),
       });
     }),
   );
@@ -170,21 +181,44 @@ async function executeToolCalls(
  */
 function buildChatGraph(llmService: LlmService) {
   return new StateGraph(ChatStateAnnotation)
-    .addNode('llm', async (state: ChatState) => {
-      const response = await llmService.chatWithTools(
+    .addNode('llm', async (state: ChatState, config) => {
+      const emit = getWriter(config);
+      let text = '';
+      let response: AIMessage | undefined;
+
+      for await (const chunk of llmService.chatWithToolsStream(
         state.messages,
         state.availableTools,
-      );
+      )) {
+        if (chunk.type === 'delta') {
+          text += chunk.text;
+          emit?.({ type: 'delta', text: chunk.text } satisfies ChatStreamDelta);
+        } else {
+          response = chunk.message;
+        }
+      }
+
+      if (!response) {
+        throw new Error('LLM не вернул финальное сообщение');
+      }
+
       const calls = response.tool_calls ?? [];
       const limitReached = toolRounds(state.messages) >= MAX_TOOL_ROUNDS;
-      const text = messageContentToText(response.content);
+      const answer = text || messageContentToText(response.content);
+      const reply =
+        calls.length > 0 && !limitReached
+          ? ''
+          : answer || (limitReached ? TOOL_LIMIT_REPLY : '');
+
+      // Служебный ответ (например, лимит инструментов) тоже должен дойти
+      // до клиента, хотя модель его не генерировала.
+      if (reply && reply !== text) {
+        emit?.({ type: 'delta', text: reply } satisfies ChatStreamDelta);
+      }
 
       return {
         messages: [...state.messages, response],
-        reply:
-          calls.length > 0 && !limitReached
-            ? ''
-            : text || (limitReached ? TOOL_LIMIT_REPLY : ''),
+        reply,
       };
     })
     .addNode('tools', async (state: ChatState) => ({
@@ -240,6 +274,96 @@ export class ChatService {
     conversationId: string,
     content: string,
   ): Promise<ChatReply> {
+    const { messages, tools } = await this.prepareMessage(
+      userId,
+      conversationId,
+      content,
+    );
+
+    let reply: string;
+
+    try {
+      const state = await this.graph.invoke({
+        messages,
+        availableTools: tools,
+      });
+      reply = state.reply;
+    } catch (error) {
+      // Paywall: списание не удалось — песочница не запускалась,
+      // прерываем граф и отдаём клиенту ключ ошибки для перевода.
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+
+      reply = ERROR_KEYS.insufficientFunds;
+    }
+
+    await this.persistReply(conversationId, reply);
+
+    return { conversationId, reply };
+  }
+
+  /**
+   * Стриминговый ответ: граф запускается в режиме `custom`, а каждый
+   * сгенерированный фрагмент текста уходит в `onDelta`. Полный ответ
+   * сохраняется в БД после завершения стрима.
+   */
+  async streamMessage(
+    userId: string,
+    conversationId: string,
+    content: string,
+    onDelta: (text: string) => void,
+  ): Promise<ChatReply> {
+    const { messages, tools } = await this.prepareMessage(
+      userId,
+      conversationId,
+      content,
+    );
+
+    let reply = '';
+
+    try {
+      const stream = await this.graph.stream(
+        { messages, availableTools: tools },
+        { streamMode: ['custom', 'values'] },
+      );
+
+      for await (const event of stream) {
+        const [mode, chunk] = event as [string, unknown];
+
+        if (mode === 'custom') {
+          const delta = chunk as Partial<ChatStreamDelta>;
+
+          if (delta.type === 'delta' && typeof delta.text === 'string') {
+            onDelta(delta.text);
+          }
+        } else if (mode === 'values') {
+          reply = (chunk as ChatState).reply;
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+
+      reply = ERROR_KEYS.insufficientFunds;
+      onDelta(reply);
+    }
+
+    await this.persistReply(conversationId, reply);
+
+    return { conversationId, reply };
+  }
+
+  /** Проверяет диалог, баланс, сохраняет вопрос и собирает контекст. */
+  private async prepareMessage(
+    userId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<{
+    messages: BaseMessage[];
+    tools: StructuredToolInterface[];
+  }> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       select: { id: true, userId: true },
@@ -273,21 +397,14 @@ export class ChatService {
 
     const tools = await this.buildTools(userId);
 
-    let reply: string;
+    return { messages, tools };
+  }
 
-    try {
-      const state = await this.graph.invoke({ messages, availableTools: tools });
-      reply = state.reply;
-    } catch (error) {
-      // Paywall: списание не удалось — песочница не запускалась,
-      // прерываем граф и отдаём клиенту ключ ошибки для перевода.
-      if (!(error instanceof BadRequestException)) {
-        throw error;
-      }
-
-      reply = ERROR_KEYS.insufficientFunds;
-    }
-
+  /** Сохраняет ответ ассистента и обновляет время диалога. */
+  private async persistReply(
+    conversationId: string,
+    reply: string,
+  ): Promise<void> {
     await this.prisma.message.create({
       data: { conversationId, role: 'assistant', content: reply },
     });
@@ -295,8 +412,6 @@ export class ChatService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
-
-    return { conversationId, reply };
   }
 
   /** Проверяет минимальный баланс перед запуском графа. */
@@ -312,9 +427,7 @@ export class ChatService {
    * Инструменты, доступные агенту. Цена каждого берётся из манифеста
    * включённого навыка, объявившего инструмент; если цены нет — бесплатно.
    */
-  private async buildTools(
-    userId: string,
-  ): Promise<StructuredToolInterface[]> {
+  private async buildTools(userId: string): Promise<StructuredToolInterface[]> {
     const skills = await this.skillsService.getEnabledSkills();
 
     const beforeExecuteFor = (

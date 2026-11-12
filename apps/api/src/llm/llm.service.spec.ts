@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  AIMessageChunk,
+  HumanMessage,
+  SystemMessage,
+} from '@langchain/core/messages';
 import {
   SANDBOX_NETWORK_FLAG,
   type SandboxService,
@@ -71,6 +76,62 @@ describe('LlmService', () => {
     ).resolves.toBe('LLM not configured: второе сообщение');
   });
 
+  describe('chatWithToolsStream', () => {
+    it('стримит эхо-заглушку, если LLM не настроен', async () => {
+      const service = createService();
+      const chunks = [];
+
+      for await (const chunk of service.chatWithToolsStream(
+        [new HumanMessage('тест')],
+        [],
+      )) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(2);
+      expect(chunks[0]).toEqual({
+        type: 'delta',
+        text: 'LLM not configured: тест',
+      });
+      expect(chunks[1]).toMatchObject({ type: 'message' });
+      expect((chunks[1] as { message: AIMessage }).message.content).toBe(
+        'LLM not configured: тест',
+      );
+    });
+
+    it('отдаёт текст чанками и собирает финальное сообщение', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const service = createService();
+      Object.assign(service, {
+        client: {
+          stream: async function* () {
+            yield new AIMessageChunk({ content: 'При' });
+            yield new AIMessageChunk({ content: 'вет' });
+          },
+        },
+      });
+
+      const deltas: string[] = [];
+      let message: AIMessage | undefined;
+
+      for await (const chunk of service.chatWithToolsStream(
+        [new HumanMessage('привет')],
+        [],
+      )) {
+        if (chunk.type === 'delta') {
+          deltas.push(chunk.text);
+        } else {
+          message = chunk.message;
+        }
+      }
+
+      expect(deltas).toEqual(['При', 'вет']);
+      expect(message?.content).toBe('Привет');
+    });
+  });
+
   it('считается настроенным при заданных LLM_BASE_URL и LLM_MODEL', () => {
     process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
     process.env.LLM_MODEL = 'llama3';
@@ -86,9 +147,9 @@ describe('LlmService', () => {
     const service = createService();
 
     expect(service.isConfigured()).toBe(false);
-    await expect(service.chat([{ role: 'user', content: 'тест' }])).resolves.toBe(
-      'LLM not configured: тест',
-    );
+    await expect(
+      service.chat([{ role: 'user', content: 'тест' }]),
+    ).resolves.toBe('LLM not configured: тест');
   });
 
   describe('createSandboxTool', () => {

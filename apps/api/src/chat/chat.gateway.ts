@@ -69,11 +69,21 @@ export class ChatGateway implements OnGatewayConnection {
     }
 
     try {
-      return await this.chatService.handleMessage(
+      const reply = await this.chatService.streamMessage(
         userId,
         payload.conversationId,
         payload.content,
+        (text) => {
+          client.emit('stream_delta', {
+            conversationId: payload.conversationId,
+            text,
+          });
+        },
       );
+
+      client.emit('stream_end', { conversationId: payload.conversationId });
+
+      return reply;
     } catch (error) {
       // HttpException (404/403) по умолчанию превращается в "Internal server error";
       // передаём клиенту осмысленный статус и сообщение.

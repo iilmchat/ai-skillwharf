@@ -6,6 +6,7 @@ import { BillingModule } from './billing/billing.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { RegistryModule } from './registry/registry.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
 import { SkillsModule } from './skills/skills.module.js';
 
@@ -16,6 +17,7 @@ import { SkillsModule } from './skills/skills.module.js';
     AuthModule,
     ChatModule,
     SkillsModule,
+    RegistryModule,
     SandboxModule,
     BillingModule,
   ],

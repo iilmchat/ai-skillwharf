@@ -17,8 +17,30 @@ export interface SkillValidationResult {
   errors: string[];
 }
 
+/** Результат установки: запись каталога плюс предупреждения skill-vetter. */
+export type SkillInstallResult = InstalledSkill & {
+  warning?: string;
+  danger?: string;
+};
+
+/** Предупреждение о разрешениях, которые дают доступ к сети или терминалу. */
+export const SKILL_PERMISSION_WARNING = 'Навык требует доступ к сети/терминалу';
+
+/** Предупреждение об опасных конструкциях в коде навыка. */
+export const SKILL_CODE_DANGER = 'Навык содержит потенциально опасный код';
+
+/** Разрешения, требующие отдельного внимания пользователя. */
+const DANGEROUS_PERMISSIONS = new Set(['shell', 'network']);
+
+/** Паттерны потенциально опасного кода в манифесте. */
+const DANGEROUS_CODE_PATTERNS = [
+  /\brm\s+-rf\b/,
+  /\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/,
+  /\beval\s*\(/,
+];
+
 type ManifestParseResult =
-  | { success: true; manifest: SkillManifest }
+  | { success: true; manifest: SkillManifest; raw: Record<string, unknown> }
   | { success: false; errors: string[] };
 
 /** YAML frontmatter: блок между первыми строками `---`. */
@@ -64,8 +86,9 @@ export class SkillsService implements OnModuleInit {
   /**
    * Устанавливает навык в каталог: манифест перечитывается и валидируется,
    * повторная установка навыка с тем же именем обновляет запись.
+   * Перед сохранением выполняется проверка skill-vetter.
    */
-  async installSkill(fileContent: string): Promise<InstalledSkill> {
+  async installSkill(fileContent: string): Promise<SkillInstallResult> {
     const result = this.parseManifest(fileContent);
 
     if (!result.success) {
@@ -75,7 +98,10 @@ export class SkillsService implements OnModuleInit {
       });
     }
 
-    return this.persistSkillManifest(result.manifest, true);
+    const vetting = this.vetManifest(result.raw);
+    const installed = await this.persistSkillManifest(result.manifest, true);
+
+    return { ...installed, ...vetting };
   }
 
   /** Список всех установленных навыков (каталог). */
@@ -195,6 +221,29 @@ export class SkillsService implements OnModuleInit {
     }
   }
 
+  /**
+   * Skill-vetter: проверяет разрешения и код из манифеста. Не блокирует
+   * установку, а возвращает флаги, которые клиент показывает пользователю.
+   */
+  private vetManifest(
+    raw: Record<string, unknown>,
+  ): Pick<SkillInstallResult, 'warning' | 'danger'> {
+    const permissions = Array.isArray(raw.permissions) ? raw.permissions : [];
+    const needsAttention = permissions.some((permission) =>
+      DANGEROUS_PERMISSIONS.has(String(permission)),
+    );
+
+    const code = manifestCode(raw);
+    const hasDangerousCode =
+      code.length > 0 &&
+      DANGEROUS_CODE_PATTERNS.some((pattern) => pattern.test(code));
+
+    return {
+      ...(needsAttention ? { warning: SKILL_PERMISSION_WARNING } : {}),
+      ...(hasDangerousCode ? { danger: SKILL_CODE_DANGER } : {}),
+    };
+  }
+
   private parseManifest(fileContent: string): ManifestParseResult {
     const content = fileContent.replace(/^\uFEFF/, '');
     const frontmatter = FRONTMATTER_PATTERN.exec(content);
@@ -224,7 +273,13 @@ export class SkillsService implements OnModuleInit {
     const result = SkillManifestSchema.safeParse(parsed);
 
     if (result.success) {
-      return { success: true, manifest: result.data };
+      return {
+        success: true,
+        manifest: result.data,
+        // Zod отбрасывает неописанные поля (`code`), а skill-vetter
+        // проверяет сырой манифест — поэтому храним его отдельно.
+        raw: parsed as Record<string, unknown>,
+      };
     }
 
     return {
@@ -236,6 +291,24 @@ export class SkillsService implements OnModuleInit {
       }),
     };
   }
+}
+
+/**
+ * Достаёт код из сырого манифеста. Поддерживается `code` строкой
+ * (YAML block scalar) или объектом/массивом — тогда он сериализуется.
+ */
+function manifestCode(raw: Record<string, unknown>): string {
+  const code = raw.code;
+
+  if (typeof code === 'string') {
+    return code;
+  }
+
+  if (code === undefined || code === null) {
+    return '';
+  }
+
+  return JSON.stringify(code);
 }
 
 /**
