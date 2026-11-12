@@ -8,8 +8,14 @@ hardened Docker-контейнер; целевой бэкенд — Firecracker 
 
 | Путь | Назначение |
 | --- | --- |
+| `Dockerfile` | Образ `skillwharf-sandbox` с `curl`, `jq`, `gh` и `bash` |
 | `docker-compose.sandbox.yml` | Описание сервиса `sandbox-runner` (лимиты и изоляция) |
 | `scripts/test-sandbox.sh` | Скрипт проверки изоляции |
+
+Образ собирается из `sandbox/Dockerfile` на базе `alpine:3.20`. Утилиты нужны
+навыкам, которые обращаются к внешним API (например, `tavily-search` и
+`github`). API запускает контейнеры с образом `skillwharf-sandbox:latest`;
+переопределить образ можно переменной `SANDBOX_IMAGE`.
 
 ## Требования
 
@@ -26,6 +32,12 @@ bash scripts/test-sandbox.sh
 
 На Windows скрипт запускается через Git Bash. Если Docker недоступен,
 скрипт завершится с ошибкой `FAIL: Docker недоступен`.
+
+Сборка образа:
+
+```bash
+docker compose -f docker-compose.sandbox.yml build
+```
 
 Ручной запуск контейнера:
 
@@ -52,6 +64,7 @@ docker compose -f docker-compose.sandbox.yml run --rm sandbox-runner sh
 - non-root пользователя и собственного seccomp-профиля (сейчас действует
   профиль Docker по умолчанию) — добавим, когда в песочнице начнёт
   выполняться недоверенный код;
-- Firecracker/gVisor и таймаутов выполнения — это следующий этап;
-- запуска из CI: скрипт можно вызывать на раннере с Docker, но в
-  `.github/workflows/ci.yml` он пока не подключён.
+- Firecracker/gVisor и таймаутов выполнения — это следующий этап.
+
+В CI шаг `Test Sandbox Isolation` запускает `scripts/test-sandbox.sh` и
+проверяет изоляцию контейнера.

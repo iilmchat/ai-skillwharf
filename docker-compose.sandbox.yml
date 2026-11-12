@@ -1,6 +1,7 @@
 services:
   sandbox-runner:
-    image: alpine:3.20
+    build: ./sandbox
+    image: skillwharf-sandbox:latest
     user: "65534:65534"
     read_only: true
     cap_drop:

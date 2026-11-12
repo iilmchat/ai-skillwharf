@@ -6,7 +6,13 @@ import {
   SANDBOX_TOOL_NAME,
 } from './llm.service.js';
 
-const ENV_KEYS = ['LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODEL'] as const;
+const ENV_KEYS = [
+  'LLM_BASE_URL',
+  'LLM_API_KEY',
+  'LLM_MODEL',
+  'TAVILY_API_KEY',
+  'GITHUB_TOKEN',
+] as const;
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -90,7 +96,25 @@ describe('LlmService', () => {
       await expect(tool.invoke({ code: 'echo hello' })).resolves.toBe(
         'hello\n',
       );
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello');
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello', {});
+    });
+
+    it('передаёт в песочницу только разрешённые секреты', async () => {
+      process.env.TAVILY_API_KEY = 'tavily-key';
+      process.env.GITHUB_TOKEN = 'gh-token';
+      // Не входит в allowlist и не должно попасть в контейнер.
+      process.env.LLM_API_KEY = 'llm-key';
+
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('ok');
+      const service = createService(sandbox);
+
+      await service.createSandboxTool().invoke({ code: 'echo ok' });
+
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo ok', {
+        TAVILY_API_KEY: 'tavily-key',
+        GITHUB_TOKEN: 'gh-token',
+      });
     });
 
     it('вызывает paywall-хук до запуска кода', async () => {

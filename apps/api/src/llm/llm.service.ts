@@ -30,6 +30,12 @@ export const SandboxToolSchema = z.object({
   code: z.string().describe('Код для выполнения'),
 });
 
+/**
+ * Секреты из окружения Gateway, которые разрешено передавать в песочницу.
+ * Список ограничен: произвольные переменные процесса в контейнер не попадают.
+ */
+export const SANDBOX_ENV_ALLOWLIST = ['TAVILY_API_KEY', 'GITHUB_TOKEN'] as const;
+
 export interface SandboxToolOptions {
   /**
    * Хук перед выполнением кода (paywall). Если он выбрасывает исключение,
@@ -87,7 +93,7 @@ export class LlmService {
       func: async ({ code }) => {
         await options.beforeExecute?.();
 
-        return this.sandboxService.runCommand(code);
+        return this.sandboxService.runCommand(code, sandboxEnv());
       },
     });
   }
@@ -124,6 +130,21 @@ export class LlmService {
 
     return model.invoke(messages);
   }
+}
+
+/** Собирает разрешённые секреты из окружения Gateway для песочницы. */
+function sandboxEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of SANDBOX_ENV_ALLOWLIST) {
+    const value = process.env[key];
+
+    if (value) {
+      env[key] = value;
+    }
+  }
+
+  return env;
 }
 
 /** Приводит контент сообщения LangChain к строке. */

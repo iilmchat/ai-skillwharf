@@ -204,7 +204,7 @@ describe('ChatService', () => {
         SANDBOX_CALL_DESCRIPTION,
         expect.any(String),
       );
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi');
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
 
       // Сначала деньги, потом выполнение кода.
       expect(

@@ -6,7 +6,7 @@ import { Writable } from 'node:stream';
  * Ограничения повторяют docker-compose.sandbox.yml: сеть выключена, корневая
  * файловая система только для чтения, сброшены capabilities, лимит 128 МБ и 0.5 CPU.
  */
-const SANDBOX_IMAGE = 'alpine:3.20';
+const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE ?? 'skillwharf-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_MEMORY_LIMIT_BYTES = 128 * 1024 * 1024;
 const SANDBOX_NANO_CPUS = 500_000_000;
@@ -19,8 +19,15 @@ export class SandboxService {
   /**
    * Выполняет shell-команду в одноразовом контейнере и возвращает stdout.
    * Контейнер удаляется в любом случае; при превышении таймаута kill.
+   *
+   * `env` передаётся в контейнер как переменные окружения (например, ключи
+   * внешних API для навыков). Значения видны в `docker inspect` — передавайте
+   * только те секреты, которые нужны выполняемому коду.
    */
-  async runCommand(code: string): Promise<string> {
+  async runCommand(
+    code: string,
+    env: Record<string, string> = {},
+  ): Promise<string> {
     const container = await this.docker.createContainer({
       Image: SANDBOX_IMAGE,
       Cmd: ['sh', '-c', code],
@@ -28,6 +35,7 @@ export class SandboxService {
       Tty: false,
       AttachStdout: true,
       AttachStderr: true,
+      Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
       HostConfig: {
         NetworkMode: 'none',
         ReadonlyRootfs: true,
