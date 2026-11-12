@@ -37,6 +37,8 @@
 - Манифесты поддерживают `pricing.model: Pay-per-Outcome`; миграция `add_escrow_support`.
 - `GET /api/v1/billing/balance` возвращает `heldBalance` — сумму незавершённых `PENDING`-записей Ledger.
 - Событие `office_event` со статусом `waiting_approval` содержит `reason`: `payment` для Pay-per-Outcome и `approval` для остальных инструментов.
+- ЮKassa: реальный провайдер `YooKassaProvider` (REST `POST /v3/payments`, Basic Auth, `Idempotence-Key`), `POST /api/v1/billing/create-payment` возвращает ссылку на оплату, публичный `POST /api/v1/billing/webhook` зачисляет средства по `payment.succeeded` с идемпотентностью по `paymentId`.
+- `BillingModule` подключает `YooKassaProvider`, если заданы `YOOKASSA_SHOP_ID`/`YOOKASSA_SECRET_KEY`, иначе остаётся mock; добавлена переменная `YOOKASSA_RETURN_URL`.
 
 ### Content, HR & Legal
 

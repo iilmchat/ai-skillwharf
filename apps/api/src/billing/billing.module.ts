@@ -4,6 +4,7 @@ import { BILLING_PROVIDER } from './billing.constants.js';
 import { BillingController } from './billing.controller.js';
 import { BillingService } from './billing.service.js';
 import { MockYooKassaProvider } from './providers/mock-yookassa.provider.js';
+import { YooKassaProvider } from './providers/yookassa.provider.js';
 
 @Module({
   imports: [AuthModule],
@@ -11,10 +12,21 @@ import { MockYooKassaProvider } from './providers/mock-yookassa.provider.js';
   providers: [
     BillingService,
     MockYooKassaProvider,
-    // По умолчанию BAL использует mock-провайдер; реальный адаптер ЮKassa
-    // подключается заменой этого провайдера.
-    { provide: BILLING_PROVIDER, useExisting: MockYooKassaProvider },
+    YooKassaProvider,
+    // Если заданы ключи ЮKassa, BAL работает с реальным провайдером,
+    // иначе остаётся mock для локальной разработки и тестов.
+    {
+      provide: BILLING_PROVIDER,
+      inject: [YooKassaProvider, MockYooKassaProvider],
+      useFactory: (yooKassa: YooKassaProvider, mock: MockYooKassaProvider) =>
+        yooKassa.isConfigured() ? yooKassa : mock,
+    },
   ],
-  exports: [BillingService, MockYooKassaProvider, BILLING_PROVIDER],
+  exports: [
+    BillingService,
+    MockYooKassaProvider,
+    YooKassaProvider,
+    BILLING_PROVIDER,
+  ],
 })
 export class BillingModule {}

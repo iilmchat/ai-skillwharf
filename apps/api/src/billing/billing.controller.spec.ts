@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator.js';
 import { BillingController } from './billing.controller.js';
 import { BillingService } from './billing.service.js';
+import { YooKassaProvider } from './providers/yookassa.provider.js';
 import type { TopUpDto } from './dto/topup.dto.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
@@ -15,6 +16,11 @@ interface BillingMock {
   addFunds: MockFn;
   getBalance: MockFn;
   getTransactionHistory: MockFn;
+}
+
+interface YooKassaMock {
+  createPayment: MockFn;
+  parsePaymentSucceeded: MockFn;
 }
 
 type ControllerRequest = Parameters<BillingController['topup']>[0];
@@ -40,6 +46,7 @@ function createDto(userId?: string): TopUpDto {
 describe('BillingController', () => {
   let controller: BillingController;
   let billing: BillingMock;
+  let yooKassa: YooKassaMock;
 
   beforeEach(async () => {
     billing = {
@@ -51,10 +58,14 @@ describe('BillingController', () => {
       balance: '500.00',
       entryId: 'entry-1',
     });
+    yooKassa = { createPayment: vi.fn(), parsePaymentSucceeded: vi.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [BillingController],
-      providers: [{ provide: BillingService, useValue: billing }],
+      providers: [
+        { provide: BillingService, useValue: billing },
+        { provide: YooKassaProvider, useValue: yooKassa },
+      ],
     }).compile();
 
     controller = moduleRef.get(BillingController);
@@ -85,6 +96,91 @@ describe('BillingController', () => {
       expect(() => controller.getBalance(request)).toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('createPayment', () => {
+    it('возвращает ссылку на оплату от ЮKassa', async () => {
+      const request = createRequest({
+        userId: USER_ID,
+        email: 'user@example.com',
+        role: 'user',
+      });
+      yooKassa.createPayment.mockResolvedValue(
+        'https://yoomoney.ru/checkout/abc',
+      );
+
+      await expect(
+        controller.createPayment(request, { amount: 500 }),
+      ).resolves.toEqual({ url: 'https://yoomoney.ru/checkout/abc' });
+      expect(yooKassa.createPayment).toHaveBeenCalledWith(
+        USER_ID,
+        500,
+        expect.any(String),
+      );
+    });
+
+    it('использует переданный returnUrl', async () => {
+      const request = createRequest({
+        userId: USER_ID,
+        email: 'user@example.com',
+        role: 'user',
+      });
+      yooKassa.createPayment.mockResolvedValue('https://pay.example/1');
+
+      await controller.createPayment(request, {
+        amount: 100,
+        returnUrl: 'http://localhost:8080/app/chat?payment=success',
+      });
+
+      expect(yooKassa.createPayment).toHaveBeenCalledWith(
+        USER_ID,
+        100,
+        'http://localhost:8080/app/chat?payment=success',
+      );
+    });
+
+    it('требует аутентификации', async () => {
+      const request = createRequest();
+
+      await expect(
+        controller.createPayment(request, { amount: 500 }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(yooKassa.createPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('webhook', () => {
+    it('зачисляет средства по payment.succeeded', async () => {
+      yooKassa.parsePaymentSucceeded.mockReturnValue({
+        paymentId: 'payment-1',
+        userId: USER_ID,
+        amount: 500,
+      });
+
+      await expect(
+        controller.webhook({
+          event: 'payment.succeeded',
+          object: { id: 'payment-1' },
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      expect(billing.addFunds).toHaveBeenCalledWith(
+        USER_ID,
+        500,
+        'Пополнение через ЮKassa',
+        'yookassa:payment-1',
+      );
+    });
+
+    it('игнорирует прочие события и отвечает 200', async () => {
+      yooKassa.parsePaymentSucceeded.mockReturnValue(null);
+
+      await expect(
+        controller.webhook({ event: 'payment.canceled' }),
+      ).resolves.toEqual({ ok: true });
+
+      expect(billing.addFunds).not.toHaveBeenCalled();
     });
   });
 
