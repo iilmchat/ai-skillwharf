@@ -1,0 +1,25 @@
+{
+  "name": "ai-skillwharf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SkillWharf — монорепозиторий (NestJS + pnpm workspaces)",
+  "main": "index.js",
+  "scripts": {
+    "lint:docs": "markdownlint-cli2 \"docs/**/*.md\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.18.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.18.0",
+  "type": "module",
+  "devDependencies": {
+    "markdownlint-cli2": "^0.24.0"
+  }
+}
