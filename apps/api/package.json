@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm --filter @skillwharf/shared build && prisma generate && nest build",
     "db:migrate": "prisma migrate deploy",
+    "db:seed:demo": "prisma generate && pnpm --filter @skillwharf/shared build && node --env-file-if-exists=../../.env --experimental-transform-types prisma/seed-demo.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
