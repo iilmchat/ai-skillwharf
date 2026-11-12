@@ -31,9 +31,16 @@
 * [x] Интеграция с Sandbox Provider (Docker API для запуска плагинов).
 * [x] Тестовый запуск простого Skill в изолированной среде.
 
-## Спринт 5: Биллинг и Ledger — Текущий
+## Спринт 5: Биллинг и Ledger
 
 * [x] Реализация Billing Abstraction Layer (интерфейсы).
-* [ ] Модуль ЮKassa (адаптер).
-* [ ] Внедрение Paywall (блокировка вызова Skill без баланса).
+* [x] Модуль ЮKassa (адаптер).
+* [x] Внедрение Paywall (блокировка вызова Skill без баланса).
 * [x] Запись транзакций в Append-only Ledger.
+
+## Спринт 6: Система расширений / Интеграция LLM — Текущий
+
+* [ ] Хранение и установка Skills через REST API (каталог навыков в БД).
+* [ ] Реальные LLM-провайдеры: GigaChat, YandexGPT, Ollama через OpenAI-совместимый фасад.
+* [ ] E2E-тесты сквозных сценариев (auth → chat → skill → billing).
+* [ ] Remote Sandbox Provider (Firecracker/gVisor) вместо docker-сокета.

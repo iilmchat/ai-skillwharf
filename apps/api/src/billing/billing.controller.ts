@@ -15,9 +15,10 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import {
   BillingService,
-  type TopUpResult,
+  type LedgerOperationResult,
   type WalletBalance,
 } from './billing.service.js';
+import { ChargeDto } from './dto/charge.dto.js';
 import { TopUpDto } from './dto/topup.dto.js';
 
 interface AuthenticatedRequest extends Request {
@@ -44,11 +45,25 @@ export class BillingController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.OK)
-  topup(@Body() dto: TopUpDto): Promise<TopUpResult> {
+  topup(@Body() dto: TopUpDto): Promise<LedgerOperationResult> {
     return this.billingService.addFunds(
       dto.userId,
       dto.amount,
       dto.description ?? 'Пополнение баланса',
+      dto.idempotencyKey,
+    );
+  }
+
+  @Post('charge')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @HttpCode(HttpStatus.OK)
+  charge(@Body() dto: ChargeDto): Promise<LedgerOperationResult> {
+    return this.billingService.chargeForSkill(
+      dto.userId,
+      dto.amount,
+      dto.description ?? 'Списание за вызов Skill',
+      dto.idempotencyKey,
     );
   }
 }

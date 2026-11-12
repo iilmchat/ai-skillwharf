@@ -12,4 +12,8 @@ export class TopUpDto {
   @IsString()
   @MaxLength(256)
   description?: string;
+
+  @IsString()
+  @MaxLength(128)
+  idempotencyKey: string;
 }

@@ -27,6 +27,10 @@
 - Валидация `SKILL.md`: парсинг YAML frontmatter и Zod-схема `@skillwharf/shared`, эндпоинт `POST /api/v1/skills/validate` (только `admin`).
 - Sandbox: эндпоинт `POST /api/v1/sandbox/execute` (только `admin`) для запуска команд в изолированном Docker-контейнере.
 - Биллинг: модели `Wallet` и append-only `LedgerEntry`, `GET /api/v1/billing/balance` и `POST /api/v1/billing/topup` (только `admin`) с атомарным начислением через `prisma.$transaction`.
+- Точность денег `DECIMAL(18,2)` для `Wallet.balance` / `LedgerEntry.amount` и триггеры PostgreSQL, запрещающие `UPDATE`/`DELETE` в Ledger.
+- Идемпотентность биллинга: `LedgerEntry.idempotencyKey @unique`, повторные запросы возвращают текущий баланс без дублей.
+- Paywall: `BillingService.chargeForSkill` и `POST /api/v1/billing/charge` (только `admin`, для тестов).
+- BAL: интерфейс `IBillingProvider` (`createPayment`, `handleWebhook`) и заглушка `MockYooKassaProvider`.
 - Сборка `packages/shared` в ESM-`dist` (пакет импортируется в API рантайме).
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 

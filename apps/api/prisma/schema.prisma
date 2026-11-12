@@ -68,7 +68,7 @@ model Message {
 model Wallet {
   id        String        @id @default(uuid())
   userId    String        @unique
-  balance   Decimal       @default(0)
+  balance   Decimal       @default(0) @db.Decimal(18, 2)
   updatedAt DateTime      @updatedAt
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   entries   LedgerEntry[]
@@ -76,13 +76,14 @@ model Wallet {
 
 /// Append-only ledger: записи только создаются, не обновляются и не удаляются.
 model LedgerEntry {
-  id          String   @id @default(uuid())
-  walletId    String
-  amount      Decimal
-  type        String
-  description String
-  createdAt   DateTime @default(now())
-  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid())
+  walletId       String
+  amount         Decimal  @db.Decimal(18, 2)
+  type           String
+  description    String
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  wallet         Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId, createdAt])
 }
