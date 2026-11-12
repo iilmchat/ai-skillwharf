@@ -16,6 +16,19 @@ export interface LedgerOperationResult extends WalletBalance {
   entryId: string;
 }
 
+/** Запись истории операций для отдачи в API. */
+export interface LedgerHistoryEntry {
+  id: string;
+  amount: string;
+  balanceAfter: string;
+  type: string;
+  description: string;
+  createdAt: Date;
+}
+
+/** Сколько последних операций отдаём в истории. */
+const LEDGER_HISTORY_LIMIT = 50;
+
 interface ExistingLedgerEntry {
   id: string;
   wallet: { userId: string; balance: Prisma.Decimal };
@@ -34,6 +47,35 @@ export class BillingService {
     });
 
     return { balance: formatBalance(wallet.balance) };
+  }
+
+  /**
+   * Последние 50 операций по кошельку пользователя (append-only Ledger).
+   * Если кошелька ещё нет, возвращает пустой список.
+   */
+  async getTransactionHistory(userId: string): Promise<LedgerHistoryEntry[]> {
+    const entries = await this.prisma.ledgerEntry.findMany({
+      where: { wallet: { userId } },
+      orderBy: { createdAt: 'desc' },
+      take: LEDGER_HISTORY_LIMIT,
+      select: {
+        id: true,
+        amount: true,
+        balanceAfter: true,
+        type: true,
+        description: true,
+        createdAt: true,
+      },
+    });
+
+    return entries.map((entry) => ({
+      id: entry.id,
+      amount: formatBalance(entry.amount),
+      balanceAfter: formatBalance(entry.balanceAfter),
+      type: entry.type,
+      description: entry.description,
+      createdAt: entry.createdAt,
+    }));
   }
 
   /**

@@ -15,6 +15,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import {
   BillingService,
+  type LedgerHistoryEntry,
   type LedgerOperationResult,
   type WalletBalance,
 } from './billing.service.js';
@@ -41,13 +42,41 @@ export class BillingController {
     return this.billingService.getBalance(userId);
   }
 
+  @Get('ledger')
+  @UseGuards(JwtAuthGuard)
+  getLedger(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<LedgerHistoryEntry[]> {
+    const userId = request.user?.userId;
+
+    if (!userId) {
+      throw new UnauthorizedException('Пользователь не аутентифицирован');
+    }
+
+    return this.billingService.getTransactionHistory(userId);
+  }
+
   @Post('topup')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('user', 'admin')
   @HttpCode(HttpStatus.OK)
-  topup(@Body() dto: TopUpDto): Promise<LedgerOperationResult> {
+  topup(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: TopUpDto,
+  ): Promise<LedgerOperationResult> {
+    const currentUser = request.user;
+
+    if (!currentUser) {
+      throw new UnauthorizedException('Пользователь не аутентифицирован');
+    }
+
+    // Обычный пользователь пополняет только свой кошелёк, даже если в теле
+    // запроса подставлен чужой userId. Админ может пополнить любой.
+    const userId =
+      currentUser.role === 'admin' ? dto.userId : currentUser.userId;
+
     return this.billingService.addFunds(
-      dto.userId,
+      userId,
       dto.amount,
       dto.description ?? 'Пополнение баланса',
       dto.idempotencyKey,

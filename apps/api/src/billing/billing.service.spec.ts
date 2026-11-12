@@ -19,7 +19,7 @@ interface TxMock {
 
 interface PrismaMock {
   wallet: { upsert: MockFn };
-  ledgerEntry: { findUnique: MockFn };
+  ledgerEntry: { findUnique: MockFn; findMany: MockFn };
   skillUsage: { updateMany: MockFn; findUnique: MockFn; create: MockFn };
   $transaction: MockFn;
 }
@@ -52,7 +52,7 @@ describe('BillingService', () => {
   beforeEach(async () => {
     prisma = {
       wallet: { upsert: vi.fn() },
-      ledgerEntry: { findUnique: vi.fn() },
+      ledgerEntry: { findUnique: vi.fn(), findMany: vi.fn() },
       skillUsage: {
         updateMany: vi.fn(),
         findUnique: vi.fn(),
@@ -103,6 +103,55 @@ describe('BillingService', () => {
       await expect(service.getBalance(USER_ID)).resolves.toEqual({
         balance: '0.00',
       });
+    });
+  });
+
+  describe('getTransactionHistory', () => {
+    it('возвращает последние 50 операций пользователя', async () => {
+      const createdAt = new Date('2026-11-12T10:00:00.000Z');
+      prisma.ledgerEntry.findMany.mockResolvedValue([
+        {
+          id: 'entry-1',
+          amount: new Prisma.Decimal('100.00'),
+          balanceAfter: new Prisma.Decimal('150.00'),
+          type: 'credit',
+          description: 'Пополнение баланса',
+          createdAt,
+        },
+      ]);
+
+      await expect(service.getTransactionHistory(USER_ID)).resolves.toEqual([
+        {
+          id: 'entry-1',
+          amount: '100.00',
+          balanceAfter: '150.00',
+          type: 'credit',
+          description: 'Пополнение баланса',
+          createdAt,
+        },
+      ]);
+
+      expect(prisma.ledgerEntry.findMany).toHaveBeenCalledWith({
+        where: { wallet: { userId: USER_ID } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          amount: true,
+          balanceAfter: true,
+          type: true,
+          description: true,
+          createdAt: true,
+        },
+      });
+    });
+
+    it('возвращает пустую историю, если операций нет', async () => {
+      prisma.ledgerEntry.findMany.mockResolvedValue([]);
+
+      await expect(service.getTransactionHistory(USER_ID)).resolves.toEqual(
+        [],
+      );
     });
   });
 
