@@ -98,6 +98,68 @@ LLM_MODEL=llama3
 docker compose up -d api
 ```
 
+### Настройка LM Studio через Control Plane
+
+LM Studio запускается на хосте и отдаёт OpenAI-совместимый API. Маршрут
+хранится в БД (`LlmRoute`), поэтому модель, адрес и приоритет можно менять
+без перезапуска API.
+
+1. В LM Studio откройте вкладку **Developer**, загрузите модель
+   `qwen2.5-coder-7b-instruct` и нажмите **Start Server**. Порт — `8034`,
+   доступ по сети должен быть разрешён.
+2. Добавьте в `.env` адрес и ключ LM Studio:
+
+   ```text
+   LLM_BASE_URL=http://host.docker.internal:8034/v1
+   LLM_API_KEY=<ключ из настроек LM Studio>
+   LLM_MODEL=qwen2.5-coder-7b-instruct
+   ```
+
+3. Перезапустите API:
+
+   ```bash
+   docker compose up -d api
+   ```
+
+   В `docker-compose.yml` у сервиса `api` уже объявлен `extra_hosts` с
+   `host.docker.internal:host-gateway`: на Linux это открывает доступ к хосту,
+   на Windows и macOS `host.docker.internal` работает из коробки.
+
+4. Получите JWT администратора (`POST /api/v1/auth/login`) и создайте маршрут
+   через Control Plane:
+
+   ```bash
+   curl -X POST http://localhost:3001/api/v1/admin/llm-routes \
+     -H "Authorization: Bearer <JWT_АДМИНА>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "local-qwen-coder",
+       "modelName": "qwen2.5-coder-7b-instruct",
+       "baseUrl": "http://host.docker.internal:8034/v1",
+       "apiKeyEnvVar": "LLM_API_KEY",
+       "priority": 1,
+       "isActive": true
+     }'
+   ```
+
+   `apiKeyEnvVar` хранит только имя переменной окружения: сам ключ остаётся
+   в `.env` и не попадает в БД. Маршрут с наименьшим `priority` среди активных
+   используется первым; env-переменные `LLM_*` остаются fallback-вариантом.
+
+5. Проверьте маршрут и чат:
+
+   ```bash
+   curl -s http://localhost:3001/api/v1/admin/llm-routes \
+     -H "Authorization: Bearer <JWT_АДМИНА>"
+   ```
+
+   Затем отправьте сообщение в чат: ответ должен прийти от Qwen, а не от
+   заглушки.
+
+> Если контейнер не видит `host.docker.internal`, укажите IP хоста вручную:
+> на Linux это обычно `http://172.17.0.1:8034/v1` (проверьте
+> `ip addr show docker0`). Тот же адрес используйте в `baseUrl` маршрута.
+
 ### Внешняя модель (GigaChat / YandexGPT и др.)
 
 Укажите в `.env` OpenAI-совместимый эндпоинт провайдера (или прокси перед ним),

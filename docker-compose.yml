@@ -28,6 +28,10 @@ services:
     environment:
       # Внутри compose-сети API ходит в postgres по имени сервиса, а не localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    extra_hosts:
+      # Доступ к LM Studio и другим сервисам на хосте из контейнера.
+      # host-gateway нужен на Linux; на Windows и macOS работает из коробки.
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
