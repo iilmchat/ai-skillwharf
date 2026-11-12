@@ -47,4 +47,3 @@
 
 - [Changelog](CHANGELOG.md)
 - [Известные проблемы](KNOWN_ISSUES.md)
-
