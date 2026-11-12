@@ -61,15 +61,21 @@ Inter/Manrope заданы в `src/index.css`. Светлая и тёмная т
 
 ## Маршруты и чат
 
+- `/` и `/welcome` — публичный лендинг;
+- `/office` и `/app/office` — AI-Офис (демо);
 - `/login` — вход по email и паролю (JWT access-токен в Zustand);
-- `/chat` — защищённый маршрут: создаёт диалог через
+- `/app/chat` — защищённый маршрут: создаёт диалог через
   `POST /api/v1/chat/conversations`, подключает Socket.IO с токеном в
   `handshake.auth` и отправляет сообщения событием `send_message`;
-- `/skills` — защищённый каталог навыков.
+- `/app/skills` — защищённый каталог навыков;
+- `/app/store` — защищённый магазин навыков.
+
+Старые пути `/chat`, `/skills`, `/store` перенаправляют на `/app/*`, чтобы
+сохранённые ссылки продолжали работать.
 
 ## Навыки
 
-Страница `/skills` использует TanStack Query (`GET /api/v1/skills`, ключ
+Страница `/app/skills` использует TanStack Query (`GET /api/v1/skills`, ключ
 `['skills']`) и показывает карточки с названием, версией, автором,
 описанием и ценой Pay-per-Call. Переключатель включения вызывает
 `PATCH /api/v1/skills/:id/toggle` с `{ isEnabled }`, оптимистично обновляет

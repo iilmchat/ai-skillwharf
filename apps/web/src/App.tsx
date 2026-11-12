@@ -61,8 +61,10 @@ function App() {
         <Route path="/welcome" element={<LandingPage />} />
         <Route path="/office" element={<OfficePage />} />
         <Route path="/login" element={<LoginPage />} />
+
+        <Route path="/app" element={<Navigate to="/app/chat" replace />} />
         <Route
-          path="/chat"
+          path="/app/chat"
           element={
             <ProtectedRoute>
               <ChatPage />
@@ -70,7 +72,7 @@ function App() {
           }
         />
         <Route
-          path="/skills"
+          path="/app/skills"
           element={
             <ProtectedRoute>
               <SkillsPage />
@@ -78,13 +80,20 @@ function App() {
           }
         />
         <Route
-          path="/store"
+          path="/app/store"
           element={
             <ProtectedRoute>
               <StorePage />
             </ProtectedRoute>
           }
         />
+        <Route path="/app/office" element={<OfficePage />} />
+
+        {/* Старые пути остаются рабочими для сохранённых ссылок. */}
+        <Route path="/chat" element={<Navigate to="/app/chat" replace />} />
+        <Route path="/skills" element={<Navigate to="/app/skills" replace />} />
+        <Route path="/store" element={<Navigate to="/app/store" replace />} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

@@ -131,7 +131,7 @@ export function LandingPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const shouldReduceMotion = useReducedMotion();
   const isAuthenticated = accessToken !== null;
-  const primaryHref = isAuthenticated ? '/chat' : '/login';
+  const primaryHref = isAuthenticated ? '/app/chat' : '/login';
   const primaryLabel = isAuthenticated
     ? t('landing.goToChat')
     : t('landing.primaryCta');
@@ -169,7 +169,7 @@ export function LandingPage() {
                   {t('landing.nav.features')}
                 </a>
                 <Link
-                  to="/office"
+                  to="/app/office"
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   {t('landing.nav.office')}
@@ -267,7 +267,7 @@ export function LandingPage() {
                     </svg>
                   </Link>
                   <Link
-                    to="/office"
+                    to="/app/office"
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface-container px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <span
@@ -408,7 +408,7 @@ export function LandingPage() {
                   </ul>
 
                   <Link
-                    to="/office"
+                    to="/app/office"
                     className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-primary-container/60 px-3 py-2.5 text-xs font-medium text-on-primary-container transition hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <span>
@@ -544,7 +544,7 @@ export function LandingPage() {
                       {primaryLabel}
                     </Link>
                     <Link
-                      to="/office"
+                      to="/app/office"
                       className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface/80 px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                     >
                       {t('landing.cta.secondary')}

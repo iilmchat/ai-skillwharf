@@ -527,7 +527,7 @@ export function OfficePage() {
               <LanguageSwitcher />
               <ThemeToggle />
               <Link
-                to={isAuthenticated ? '/chat' : '/login'}
+                to={isAuthenticated ? '/app/chat' : '/login'}
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 {isAuthenticated ? t('office.backToChat') : t('office.login')}

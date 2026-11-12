@@ -5,6 +5,15 @@
 	encode zstd gzip
 	root * /usr/share/caddy
 
+	# CSP. Скрипты — только свои: для inline-скрипта темы в index.html разрешён
+	# конкретный SHA-256. Inline-стили нужны Tailwind и Framer Motion, шрифты
+	# подключаются напрямую с Google Fonts (см. apps/web/index.html).
+	# Если меняете inline-скрипт темы, пересчитайте хеш из собранного
+	# dist/index.html и обновите значение ниже.
+	header {
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-iz/bF5fKtrglaZ55SsnG7SlzwL45/hNvOxuZz7sc+iw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
+	}
+
 	# Socket.IO: и polling, и WebSocket. reverse_proxy сам пробрасывает
 	# заголовки Upgrade/Connection, поэтому отдельный matcher по заголовкам
 	# не нужен и сломал бы polling-транспорт.
@@ -17,7 +26,8 @@
 		reverse_proxy http://api:3000
 	}
 
-	# SPA fallback: только для остальных путей.
+	# SPA fallback: любой путь без файла (/, /welcome, /office, /app/chat и
+	# т. п.) отдаёт index.html, а маршрут выбирает React Router.
 	handle {
 		try_files {path} /index.html
 		file_server

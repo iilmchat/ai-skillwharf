@@ -211,7 +211,7 @@ export function ChatPage() {
             aria-label={t('nav.primary')}
             className="space-y-1 border-b border-outline-variant p-3"
           >
-            <NavLink to="/chat" className={navItemClasses}>
+            <NavLink to="/app/chat" className={navItemClasses}>
               <svg
                 aria-hidden="true"
                 viewBox="0 0 24 24"
@@ -227,7 +227,7 @@ export function ChatPage() {
               {t('nav.chat')}
             </NavLink>
 
-            <NavLink to="/skills" className={navItemClasses}>
+            <NavLink to="/app/skills" className={navItemClasses}>
               <svg
                 aria-hidden="true"
                 viewBox="0 0 24 24"
@@ -246,7 +246,7 @@ export function ChatPage() {
               {t('nav.skills')}
             </NavLink>
 
-            <NavLink to="/store" className={navItemClasses}>
+            <NavLink to="/app/store" className={navItemClasses}>
               <svg
                 aria-hidden="true"
                 viewBox="0 0 24 24"
@@ -357,7 +357,7 @@ export function ChatPage() {
                 <LanguageSwitcher />
               </div>
               <Link
-                to="/skills"
+                to="/app/skills"
                 aria-label={t('nav.skills')}
                 title={t('nav.skills')}
                 className="inline-flex size-10 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
@@ -379,7 +379,7 @@ export function ChatPage() {
                 </svg>
               </Link>
               <Link
-                to="/store"
+                to="/app/store"
                 aria-label={t('nav.store')}
                 title={t('nav.store')}
                 className="inline-flex size-10 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"

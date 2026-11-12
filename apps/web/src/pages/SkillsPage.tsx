@@ -220,7 +220,7 @@ export function SkillsPage() {
             </span>
 
             <Link
-              to="/chat"
+              to="/app/chat"
               aria-label={t('skills.backToChat')}
               title={t('skills.backToChat')}
               className="inline-flex size-10 items-center justify-center rounded-full border border-outline text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
@@ -243,13 +243,13 @@ export function SkillsPage() {
               aria-label={t('nav.primary')}
               className="hidden items-center gap-1 sm:flex"
             >
-              <NavLink to="/chat" className={navLinkClasses}>
+              <NavLink to="/app/chat" className={navLinkClasses}>
                 {t('nav.chat')}
               </NavLink>
-              <NavLink to="/skills" className={navLinkClasses}>
+              <NavLink to="/app/skills" className={navLinkClasses}>
                 {t('nav.skills')}
               </NavLink>
-              <NavLink to="/store" className={navLinkClasses}>
+              <NavLink to="/app/store" className={navLinkClasses}>
                 {t('nav.store')}
               </NavLink>
             </nav>
@@ -257,7 +257,7 @@ export function SkillsPage() {
 
           <div className="flex items-center gap-2">
             <Link
-              to="/store"
+              to="/app/store"
               aria-label={t('nav.store')}
               title={t('nav.store')}
               className="inline-flex size-10 items-center justify-center rounded-full border border-outline text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"

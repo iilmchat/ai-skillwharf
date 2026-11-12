@@ -37,14 +37,14 @@ export function LoginPage() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
   if (accessToken !== null) {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to="/app/chat" replace />;
   }
 
   const requestedPath = (location.state as LoginLocationState | null)?.from;
   const redirectTo =
     requestedPath !== undefined && requestedPath !== '/login'
       ? requestedPath
-      : '/chat';
+      : '/app/chat';
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

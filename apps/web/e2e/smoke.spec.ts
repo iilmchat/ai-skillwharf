@@ -167,7 +167,7 @@ async function loginViaUi(page: Page): Promise<void> {
   await page.locator('#password').fill(TEST_USER.password);
   await page.locator('form button[type="submit"]').click();
 
-  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page).toHaveURL(/\/app\/chat$/);
   // Поле ввода активируется, когда создан диалог и подключён Socket.IO.
   await expect(page.locator('#chat-message')).toBeEnabled();
 }
@@ -223,8 +223,8 @@ test.describe('Дымовые сценарии UI', () => {
 
     // Полный переход (`page.goto`) сбросил бы in-memory auth-стор и вернул на
     // /login, поэтому в магазин переходим по ссылке внутри SPA.
-    await page.locator('a[href="/store"]:visible').first().click();
-    await expect(page).toHaveURL(/\/store$/);
+    await page.locator('a[href="/app/store"]:visible').first().click();
+    await expect(page).toHaveURL(/\/app\/store$/);
 
     const cards = page.locator('main ul > li > article');
 
