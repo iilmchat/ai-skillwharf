@@ -133,3 +133,54 @@ docker compose exec -T postgres pg_restore -U skillwharf_admin -d skillwharf_db 
   * *Решение:* Убедитесь, что хост-система поддерживает виртуализацию (`egrep -c '(vmx|svm)' /proc/cpuinfo` > 0) и модуль KVM загружен (`lsmod | grep kvm`). Если развертывание в облаке, используйте инстансы с поддержкой вложенной виртуализации.
 * **Ошибка: `Connection refused` при вызове LLM.**
   * *Решение:* Проверьте доступность API LLM-провайдера из контейнера (`docker compose exec api curl ...`).
+
+## 7. Безопасность Sandbox
+
+`SandboxService` запускает код в одноразовых контейнерах через `dockerode`, поэтому
+ему нужен доступ к Docker daemon. В базовом `docker-compose.yml` этот доступ
+намеренно не выдан: сокет подключается отдельным оверрайд-файлом только для
+локальной разработки.
+
+### Production
+
+Монтировать `/var/run/docker.sock` в API в production **запрещено**: доступ к
+сокету эквивалентен root-доступу к хосту, а компрометация API означает
+компрометацию хоста и обход изоляции песочницы.
+
+В production должен использоваться **удалённый Sandbox Provider** — отдельный
+микросервис на базе Firecracker или gVisor, который общается с Gateway по gRPC
+и не требует доступа к Docker daemon со стороны API.
+
+### Локальная разработка
+
+Для запуска стека с песочницей используйте оверрайд
+`docker-compose.sandbox-dev.yml`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
+```
+
+Остановка стека выполняется с тем же набором файлов:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml down
+```
+
+На Windows/macOS с Docker Desktop путь к сокету отличается. Задайте его через
+переменную `DOCKER_SOCKET` перед запуском:
+
+```powershell
+$env:DOCKER_SOCKET = '//var/run/docker.sock'
+docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
+```
+
+На Linux по умолчанию используется `/var/run/docker.sock`, переменную можно не
+задавать.
+
+> **Внимание:** Монтирование сокета дает контейнеру root-доступ к хосту.
+> Используйте только на локальной машине разработчика. Не переносите этот
+> оверрайд в базовый `docker-compose.yml` и не применяйте его на общих или
+> публичных стендах.
+
+CI собирает только базовый образ (`docker compose build api`) и не использует
+`docker-compose.sandbox-dev.yml`, поэтому оверрайд не влияет на пайплайн.
