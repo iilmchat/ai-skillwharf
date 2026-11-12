@@ -372,6 +372,7 @@ function buildChatGraph(
         state.messages,
         state.availableTools,
         state.llmRoute ?? undefined,
+        { userId: state.userId },
       )) {
         if (chunk.type === 'delta') {
           text += chunk.text;

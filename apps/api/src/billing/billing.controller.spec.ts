@@ -185,63 +185,14 @@ describe('BillingController', () => {
   });
 
   describe('topup', () => {
-    it('позволяет пользователю пополнить свой баланс', async () => {
-      const request = createRequest({
-        userId: USER_ID,
-        email: 'user@example.com',
-        role: 'user',
-      });
-
-      await expect(
-        controller.topup(request, createDto(USER_ID)),
-      ).resolves.toEqual({ balance: '500.00', entryId: 'entry-1' });
-
-      expect(billing.addFunds).toHaveBeenCalledWith(
-        USER_ID,
-        500,
-        'Пополнение баланса',
-        'topup-key-1',
+    it('доступен только роли admin', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        BillingController.prototype,
+        'topup',
       );
-    });
+      const handler = descriptor?.value as object;
 
-    it('позволяет пользователю не передавать userId', async () => {
-      const request = createRequest({
-        userId: USER_ID,
-        email: 'user@example.com',
-        role: 'user',
-      });
-
-      await controller.topup(request, createDto());
-
-      expect(billing.addFunds).toHaveBeenCalledWith(
-        USER_ID,
-        500,
-        'Пополнение баланса',
-        'topup-key-1',
-      );
-    });
-
-    it('игнорирует чужой userId в теле запроса для роли user', async () => {
-      const request = createRequest({
-        userId: USER_ID,
-        email: 'user@example.com',
-        role: 'user',
-      });
-
-      await controller.topup(request, createDto(OTHER_USER_ID));
-
-      expect(billing.addFunds).toHaveBeenCalledWith(
-        USER_ID,
-        500,
-        'Пополнение баланса',
-        'topup-key-1',
-      );
-      expect(billing.addFunds).not.toHaveBeenCalledWith(
-        OTHER_USER_ID,
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-      );
+      expect(Reflect.getMetadata(ROLES_KEY, handler)).toEqual(['admin']);
     });
 
     it('разрешает админу пополнить любой кошелёк', async () => {
@@ -276,19 +227,6 @@ describe('BillingController', () => {
         'Пополнение баланса',
         'topup-key-1',
       );
-    });
-
-    it('разрешён ролям user и admin', () => {
-      const descriptor = Object.getOwnPropertyDescriptor(
-        BillingController.prototype,
-        'topup',
-      );
-      const handler = descriptor?.value as object;
-
-      expect(Reflect.getMetadata(ROLES_KEY, handler)).toEqual([
-        'user',
-        'admin',
-      ]);
     });
 
     it('требует аутентификации', () => {

@@ -10,6 +10,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuditService } from '../audit/audit.service.js';
+import { BillingService } from '../billing/billing.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
 import {
@@ -20,6 +21,7 @@ import {
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   LlmService,
+  MIN_LLM_BALANCE,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
   SANDBOX_TOOL_DESCRIPTION,
@@ -27,6 +29,7 @@ import {
   SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
+  calculateLlmCost,
   withLanguageInstruction,
 } from './llm.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
@@ -51,6 +54,47 @@ function createSandbox(): SandboxMock {
 
 function createService(sandbox: SandboxMock = createSandbox()): LlmService {
   return new LlmService(sandbox as unknown as SandboxService);
+}
+
+interface BillingMock {
+  getBalance: MockFn;
+  chargeForSkill: MockFn;
+}
+
+function createBilling(balance = '100.00'): BillingMock {
+  return {
+    getBalance: vi.fn().mockResolvedValue({ balance, heldBalance: '0.00' }),
+    chargeForSkill: vi.fn().mockResolvedValue({
+      balance: '99.98',
+      entryId: 'entry-1',
+    }),
+  };
+}
+
+/** Клиент модели, который вернёт заданный расход токенов. */
+function clientWithUsage(inputTokens: number, outputTokens: number) {
+  return {
+    invoke: vi.fn().mockResolvedValue(
+      new AIMessage({
+        content: 'готово',
+        usage_metadata: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+        },
+      }),
+    ),
+    stream: async function* () {
+      yield new AIMessageChunk({
+        content: 'готово',
+        usage_metadata: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+        },
+      });
+    },
+  };
 }
 
 describe('LlmService', () => {
@@ -187,6 +231,129 @@ describe('LlmService', () => {
           where: { name: 'default_system_prompt', isActive: true },
         }),
       );
+    });
+  });
+
+  describe('списание за LLM', () => {
+    const userId = '11111111-1111-1111-1111-111111111111';
+
+    it('списывает деньги за токены после ответа модели', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+      );
+      const client = clientWithUsage(1000, 500);
+
+      Object.assign(service, { client });
+
+      await expect(
+        service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+          userId,
+        }),
+      ).resolves.toBeInstanceOf(AIMessage);
+
+      // 1500 токенов × 0.01 ₽/1000 = 0.015 ₽, округление вверх до 0.02 ₽.
+      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+        userId,
+        0.02,
+        'Использование LLM',
+        expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        ),
+      );
+    });
+
+    it('списывает деньги и в стриминговом режиме', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+      );
+
+      Object.assign(service, { client: clientWithUsage(2000, 1000) });
+
+      for await (const _chunk of service.chatWithToolsStream(
+        [new HumanMessage('привет')],
+        [],
+        undefined,
+        { userId },
+      )) {
+        // Итератор нужен только ради побочного эффекта — списания.
+      }
+
+      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+        userId,
+        0.03,
+        'Использование LLM',
+        expect.any(String),
+      );
+    });
+
+    it('не обращается к модели, если баланса не хватает', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const billing = createBilling('0.00');
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+      );
+      const client = clientWithUsage(1000, 1000);
+
+      Object.assign(service, { client });
+
+      await expect(
+        service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+          userId,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(client.invoke).not.toHaveBeenCalled();
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+
+    it('не списывает деньги без контекста пользователя', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+      );
+
+      Object.assign(service, { client: clientWithUsage(1000, 1000) });
+
+      await service.chatWithTools([new HumanMessage('привет')], []);
+
+      expect(billing.getBalance).not.toHaveBeenCalled();
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('calculateLlmCost', () => {
+    it('считает 0.01 ₽ за 1000 токенов', () => {
+      expect(calculateLlmCost(1000, 0)).toBe(0.01);
+      expect(calculateLlmCost(0, 2000)).toBe(0.02);
+    });
+
+    it('округляет вверх до копейки и берёт минимум за вызов', () => {
+      expect(calculateLlmCost(10, 5)).toBe(MIN_LLM_BALANCE);
+      expect(calculateLlmCost(1500, 0)).toBe(0.02);
+    });
+
+    it('ничего не берёт за нулевой расход токенов', () => {
+      expect(calculateLlmCost(0, 0)).toBe(0);
     });
   });
 

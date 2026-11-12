@@ -138,9 +138,14 @@ export class BillingController {
     return { ok: true };
   }
 
+  /**
+   * Прямое пополнение без оплаты. Доступно только админу и только для
+   * тестовых/dev-сценариев: обычные пользователи пополняют баланс через
+   * `POST /create-payment` (ЮKassa).
+   */
   @Post('topup')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('user', 'admin')
+  @Roles('admin')
   @HttpCode(HttpStatus.OK)
   topup(
     @Req() request: AuthenticatedRequest,
@@ -152,12 +157,8 @@ export class BillingController {
       throw new UnauthorizedException('Пользователь не аутентифицирован');
     }
 
-    // `userId` из тела учитывается только для админа. Обычный пользователь
-    // пополняет свой кошелёк, даже если подставил чужой или не передал его.
-    const userId =
-      currentUser.role === 'admin' && dto.userId !== undefined
-        ? dto.userId
-        : currentUser.userId;
+    // Админ может пополнить любой кошелёк; без `userId` — свой.
+    const userId = dto.userId ?? currentUser.userId;
 
     return this.billingService.addFunds(
       userId,

@@ -39,6 +39,8 @@
 - Событие `office_event` со статусом `waiting_approval` содержит `reason`: `payment` для Pay-per-Outcome и `approval` для остальных инструментов.
 - ЮKassa: реальный провайдер `YooKassaProvider` (REST `POST /v3/payments`, Basic Auth, `Idempotence-Key`), `POST /api/v1/billing/create-payment` возвращает ссылку на оплату, публичный `POST /api/v1/billing/webhook` зачисляет средства по `payment.succeeded` с идемпотентностью по `paymentId`.
 - `BillingModule` подключает `YooKassaProvider`, если заданы `YOOKASSA_SHOP_ID`/`YOOKASSA_SECRET_KEY`, иначе остаётся mock; добавлена переменная `YOOKASSA_RETURN_URL`.
+- Прямое пополнение `POST /api/v1/billing/topup` оставлено только роли `admin` для dev-сценариев; обычные пользователи пополняют баланс через ЮKassa (`POST /api/v1/billing/create-payment`).
+- Cost Guardrails для LLM: `LlmService` списывает `0.01 ₽` за каждую 1000 токенов (`prompt_tokens + completion_tokens`) с описанием «Использование LLM» и отклоняет вызов до обращения к модели, если баланс меньше копейки.
 
 ### Content, HR & Legal
 

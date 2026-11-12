@@ -1,4 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
@@ -15,6 +20,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { BillingService } from '../billing/billing.service.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
@@ -26,6 +33,38 @@ import {
 export interface ChatHistoryMessage {
   role: string;
   content: string;
+}
+
+/** Условная стоимость 1000 токенов LLM в рублях. */
+export const LLM_COST_PER_1K_TOKENS = 0.01;
+
+/** Минимальная стоимость одного вызова LLM: копейка. */
+export const MIN_LLM_BALANCE = 0.01;
+
+/**
+ * Стоимость вызова LLM: `LLM_COST_PER_1K_TOKENS` за каждую 1000 токенов.
+ * Сумма округляется вверх до копейки, чтобы каждый вызов стоил хотя бы
+ * `MIN_LLM_BALANCE`. При нулевом расходе токенов списания нет.
+ */
+export function calculateLlmCost(
+  promptTokens: number,
+  completionTokens: number,
+): number {
+  const total =
+    Math.max(0, promptTokens || 0) + Math.max(0, completionTokens || 0);
+
+  if (total === 0) {
+    return 0;
+  }
+
+  const raw = (total / 1000) * LLM_COST_PER_1K_TOKENS;
+
+  return Math.max(MIN_LLM_BALANCE, Math.ceil(raw * 100) / 100);
+}
+
+/** Контекст вызова LLM: чей баланс списывать за токены. */
+export interface LlmCallOptions {
+  userId?: string;
 }
 
 /**
@@ -300,6 +339,7 @@ export class LlmService {
   constructor(
     private readonly sandboxService: SandboxService,
     @Optional() private readonly promptsService?: PromptsService,
+    @Optional() private readonly billingService?: BillingService,
   ) {
     const baseURL = process.env.LLM_BASE_URL;
     const model = process.env.LLM_MODEL;
@@ -699,6 +739,7 @@ export class LlmService {
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
     route?: LlmRouteSelection,
+    options: LlmCallOptions = {},
   ): Promise<AIMessage> {
     const client = this.resolveClient(route);
 
@@ -712,6 +753,8 @@ export class LlmService {
       );
     }
 
+    await this.assertCanAffordLlm(options.userId);
+
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt();
     const response = await model.invoke(
@@ -719,6 +762,7 @@ export class LlmService {
     );
 
     this.logGenAiUsage(route, response.usage_metadata);
+    await this.chargeLlmUsage(options.userId, response.usage_metadata);
 
     return response;
   }
@@ -732,6 +776,7 @@ export class LlmService {
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
     route?: LlmRouteSelection,
+    options: LlmCallOptions = {},
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
     const client = this.resolveClient(route);
 
@@ -745,6 +790,8 @@ export class LlmService {
       yield { type: 'message', message: new AIMessage(text) };
       return;
     }
+
+    await this.assertCanAffordLlm(options.userId);
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt();
@@ -770,8 +817,64 @@ export class LlmService {
       : new AIMessage('');
 
     this.logGenAiUsage(route, message.usage_metadata);
+    await this.chargeLlmUsage(options.userId, message.usage_metadata);
 
     yield { type: 'message', message };
+  }
+
+  /**
+   * Проверяет, что на балансе хватает денег на минимальный вызов LLM.
+   * Вызывается до обращения к модели: без этого пользователь с нулевым
+   * балансом мог бы жечь токены бесплатно.
+   */
+  private async assertCanAffordLlm(userId?: string): Promise<void> {
+    if (!userId || !this.billingService) {
+      return;
+    }
+
+    const { balance } = await this.billingService.getBalance(userId);
+
+    if (Number.parseFloat(balance) < MIN_LLM_BALANCE) {
+      throw new BadRequestException(ERROR_KEYS.insufficientFunds);
+    }
+  }
+
+  /**
+   * Списывает стоимость токенов с баланса пользователя. Ошибку списания
+   * только логируем: ответ модели уже получен, и ронять запрос из-за
+   * биллинга хуже, чем недополучить копейку.
+   */
+  private async chargeLlmUsage(
+    userId: string | undefined,
+    usage: AIMessage['usage_metadata'],
+  ): Promise<void> {
+    if (!userId || !this.billingService) {
+      return;
+    }
+
+    const cost = calculateLlmCost(
+      usage?.input_tokens ?? 0,
+      usage?.output_tokens ?? 0,
+    );
+
+    if (cost === 0) {
+      return;
+    }
+
+    try {
+      await this.billingService.chargeForSkill(
+        userId,
+        cost,
+        'Использование LLM',
+        randomUUID(),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось списать ${cost} ₽ за LLM у ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
