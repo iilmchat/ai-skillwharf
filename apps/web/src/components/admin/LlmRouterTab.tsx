@@ -8,12 +8,38 @@ import {
   getAdminErrorMessage,
   getLlmRouteBaseUrl,
   getLlmRouteModel,
+  getLlmRouteProvider,
   type CreateLlmRouteInput,
+  type LlmProviderType,
   type LlmRoute,
 } from '../../lib/admin';
 
 const INPUT_CLASSES =
   'mt-2 block w-full rounded-xl border border-outline bg-surface-container px-4 py-2.5 text-sm text-on-surface outline-none transition placeholder:text-on-surface-variant/60 hover:border-primary/40 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60';
+
+const PROVIDERS: readonly LlmProviderType[] = [
+  'OpenAI',
+  'YandexGPT',
+  'GigaChat',
+];
+
+const MODEL_PLACEHOLDERS: Record<LlmProviderType, string> = {
+  OpenAI: 'gpt-4o-mini',
+  YandexGPT: 'gpt://<folder-id>/yandexgpt-lite',
+  GigaChat: 'GigaChat-Pro',
+};
+
+function providerBadgeClasses(provider: LlmProviderType): string {
+  if (provider === 'YandexGPT') {
+    return 'bg-warning-container text-on-warning-container';
+  }
+
+  if (provider === 'GigaChat') {
+    return 'bg-success/10 text-success';
+  }
+
+  return 'bg-primary-container text-on-primary-container';
+}
 
 function RouteSkeleton() {
   return (
@@ -43,6 +69,8 @@ function AddRouteModal({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
+  const [providerType, setProviderType] =
+    useState<LlmProviderType>('OpenAI');
   const [modelName, setModelName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [priority, setPriority] = useState('100');
@@ -98,6 +126,7 @@ function AddRouteModal({
     onSubmit({
       name: name.trim(),
       modelName: modelName.trim(),
+      providerType,
       baseUrl: baseUrl.trim(),
       priority: parsedPriority,
     });
@@ -153,6 +182,32 @@ function AddRouteModal({
 
           <div>
             <label
+              htmlFor="admin-route-provider"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t('admin.router.modal.provider')}
+            </label>
+            <select
+              id="admin-route-provider"
+              name="providerType"
+              value={providerType}
+              onChange={(event) => {
+                setProviderType(event.target.value as LlmProviderType);
+                setValidationError(null);
+              }}
+              disabled={isSaving}
+              className={INPUT_CLASSES}
+            >
+              {PROVIDERS.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
               htmlFor="admin-route-model"
               className="block text-sm font-medium text-on-surface"
             >
@@ -168,10 +223,20 @@ function AddRouteModal({
                 setModelName(event.target.value);
                 setValidationError(null);
               }}
-              placeholder={t('admin.router.modal.modelPlaceholder')}
+              placeholder={MODEL_PLACEHOLDERS[providerType]}
               disabled={isSaving}
               className={INPUT_CLASSES}
             />
+            {providerType === 'YandexGPT' && (
+              <p className="mt-2 rounded-xl border border-warning/30 bg-warning-container/40 px-3 py-2 text-xs leading-relaxed text-on-warning-container">
+                {t('admin.router.modal.yandexHint')}
+              </p>
+            )}
+            {providerType === 'GigaChat' && (
+              <p className="mt-2 rounded-xl border border-warning/30 bg-warning-container/40 px-3 py-2 text-xs leading-relaxed text-on-warning-container">
+                {t('admin.router.modal.gigachatHint')}
+              </p>
+            )}
           </div>
 
           <div>
@@ -280,6 +345,8 @@ function AddRouteModal({
 }
 
 function RouteRow({ route }: { route: LlmRoute }) {
+  const provider = getLlmRouteProvider(route);
+
   return (
     <tr className="transition hover:bg-surface-container/60">
       <td className="px-4 py-3">
@@ -291,6 +358,13 @@ function RouteRow({ route }: { route: LlmRoute }) {
             </span>
           )}
         </div>
+      </td>
+      <td className="px-4 py-3">
+        <span
+          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${providerBadgeClasses(provider)}`}
+        >
+          {provider}
+        </span>
       </td>
       <td className="px-4 py-3">
         <span className="rounded-md bg-surface-container-high px-2 py-1 font-mono text-xs text-on-surface">
@@ -432,11 +506,14 @@ export function LlmRouterTab() {
         </div>
       ) : (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-outline-variant bg-surface-container">
-          <table className="w-full min-w-[680px] text-left text-sm">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="border-b border-outline-variant bg-surface-container-high text-[11px] uppercase tracking-wider text-on-surface-variant">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">
                   {t('admin.router.columns.name')}
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  {t('admin.router.columns.provider')}
                 </th>
                 <th scope="col" className="px-4 py-3 font-semibold">
                   {t('admin.router.columns.model')}

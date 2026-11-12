@@ -429,6 +429,7 @@
       "emptyBody": "Добавьте первое правило маршрутизации.",
       "columns": {
         "name": "Название",
+        "provider": "Провайдер",
         "model": "Модель",
         "baseUrl": "Base URL",
         "priority": "Приоритет"
@@ -438,8 +439,11 @@
         "subtitle": "Правило определяет, какая модель обслуживает запросы.",
         "name": "Название",
         "namePlaceholder": "Например, classification",
+        "provider": "Провайдер",
         "model": "Модель",
         "modelPlaceholder": "deepseek-chat",
+        "yandexHint": "Для YandexGPT модель задаётся URI: gpt://<идентификатор_каталога>/<имя_модели>.",
+        "gigachatHint": "Для GigaChat понадобится OAuth-токен. Поле для токена добавим позже.",
         "baseUrl": "Base URL",
         "baseUrlPlaceholder": "https://api.example.com/v1",
         "priority": "Приоритет",

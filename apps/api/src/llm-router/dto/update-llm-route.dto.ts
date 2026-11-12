@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -7,6 +8,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  LLM_PROVIDER_TYPES,
+  type LlmProviderType,
+} from './create-llm-route.dto.js';
 
 export class UpdateLlmRouteDto {
   @IsOptional()
@@ -26,6 +31,10 @@ export class UpdateLlmRouteDto {
   @IsNotEmpty()
   @MaxLength(128)
   model?: string;
+
+  @IsOptional()
+  @IsIn(LLM_PROVIDER_TYPES)
+  providerType?: LlmProviderType;
 
   @IsOptional()
   @IsString()

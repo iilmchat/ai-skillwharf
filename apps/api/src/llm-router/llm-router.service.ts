@@ -87,6 +87,9 @@ export class LlmRouterService {
         data: {
           name: dto.name,
           modelName,
+          ...(dto.providerType === undefined
+            ? {}
+            : { providerType: dto.providerType }),
           baseUrl: dto.baseUrl,
           ...(dto.apiKeyEnvVar === undefined
             ? {}
@@ -104,6 +107,7 @@ export class LlmRouterService {
         metadata: {
           name: route.name,
           modelName: route.modelName,
+          providerType: route.providerType,
           baseUrl: route.baseUrl,
           priority: route.priority,
         },
@@ -132,6 +136,10 @@ export class LlmRouterService {
 
     if (modelName !== undefined) {
       data.modelName = modelName;
+    }
+
+    if (dto.providerType !== undefined) {
+      data.providerType = dto.providerType;
     }
 
     if (dto.baseUrl !== undefined) {

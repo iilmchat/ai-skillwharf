@@ -429,6 +429,7 @@
       "emptyBody": "Add the first routing rule.",
       "columns": {
         "name": "Name",
+        "provider": "Provider",
         "model": "Model",
         "baseUrl": "Base URL",
         "priority": "Priority"
@@ -438,8 +439,11 @@
         "subtitle": "A rule defines which model serves requests.",
         "name": "Name",
         "namePlaceholder": "For example, classification",
+        "provider": "Provider",
         "model": "Model",
         "modelPlaceholder": "deepseek-chat",
+        "yandexHint": "YandexGPT models use a URI: gpt://<folder-id>/<model-name>.",
+        "gigachatHint": "GigaChat requires an OAuth token. A token field will be added later.",
         "baseUrl": "Base URL",
         "baseUrlPlaceholder": "https://api.example.com/v1",
         "priority": "Priority",

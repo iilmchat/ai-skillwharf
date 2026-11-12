@@ -84,6 +84,7 @@ describe('LlmRouterService', () => {
       id: 'route-1',
       name: 'local',
       modelName: 'llama3',
+      providerType: 'YandexGPT',
       baseUrl: 'http://localhost:11435/v1',
       apiKeyEnvVar: null,
       priority: 0,
@@ -95,13 +96,17 @@ describe('LlmRouterService', () => {
         {
           name: 'local',
           model: 'llama3',
+          providerType: 'YandexGPT',
           baseUrl: 'http://localhost:11435/v1',
         },
         'admin-1',
       ),
     ).resolves.toMatchObject({ id: 'route-1', model: 'llama3' });
     expect(prisma.llmRoute.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ modelName: 'llama3' }),
+      data: expect.objectContaining({
+        modelName: 'llama3',
+        providerType: 'YandexGPT',
+      }),
     });
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -109,6 +114,7 @@ describe('LlmRouterService', () => {
         action: 'llm_route.create',
         entityType: 'LlmRoute',
         entityId: 'route-1',
+        metadata: expect.objectContaining({ providerType: 'YandexGPT' }),
       }),
     );
   });

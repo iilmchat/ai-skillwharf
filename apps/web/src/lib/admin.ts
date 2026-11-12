@@ -25,11 +25,14 @@ export interface PromptVersion {
   createdAt?: string;
 }
 
+export type LlmProviderType = 'OpenAI' | 'YandexGPT' | 'GigaChat';
+
 export interface LlmRoute {
   id: string;
   name: string;
   modelName: string;
   model?: string;
+  providerType?: LlmProviderType;
   baseUrl?: string;
   baseURL?: string;
   apiKeyEnvVar?: string | null;
@@ -40,6 +43,7 @@ export interface LlmRoute {
 export interface CreateLlmRouteInput {
   name: string;
   modelName: string;
+  providerType: LlmProviderType;
   baseUrl: string;
   priority: number;
 }
@@ -266,6 +270,10 @@ export function getPromptVersionLabel(prompt: PromptTemplate): string {
 
 export function getLlmRouteModel(route: LlmRoute): string {
   return route.modelName ?? route.model ?? '—';
+}
+
+export function getLlmRouteProvider(route: LlmRoute): LlmProviderType {
+  return route.providerType ?? 'OpenAI';
 }
 
 export function getLlmRouteBaseUrl(route: LlmRoute): string {

@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -7,6 +8,14 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+
+export const LLM_PROVIDER_TYPES = [
+  'OpenAI',
+  'YandexGPT',
+  'GigaChat',
+] as const;
+
+export type LlmProviderType = (typeof LLM_PROVIDER_TYPES)[number];
 
 export class CreateLlmRouteDto {
   @IsString()
@@ -29,6 +38,10 @@ export class CreateLlmRouteDto {
   @IsNotEmpty()
   @MaxLength(128)
   model?: string;
+
+  @IsOptional()
+  @IsIn(LLM_PROVIDER_TYPES)
+  providerType?: LlmProviderType;
 
   @IsString()
   @IsNotEmpty()

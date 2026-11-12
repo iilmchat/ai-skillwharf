@@ -144,6 +144,8 @@ model LlmRoute {
   id           String   @id @default(uuid())
   name         String   @unique
   modelName    String
+  /// OpenAI | YandexGPT | GigaChat
+  providerType String   @default("OpenAI")
   baseUrl      String
   apiKeyEnvVar String?
   priority     Int      @default(0)
