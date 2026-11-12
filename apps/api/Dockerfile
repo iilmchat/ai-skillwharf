@@ -33,19 +33,29 @@ RUN pnpm --filter api deploy --prod /prod/api
 # генерируем Prisma Client ещё раз уже в изолированной папке.
 RUN cd /prod/api && /app/apps/api/node_modules/.bin/prisma generate --schema prisma/schema.prisma
 
-# --- Stage 2: рантайм ---
-FROM node:24-alpine AS runner
+# --- Stage 2: Prisma CLI для миграций ---
+# В рантайм нужен только `prisma migrate deploy`; pnpm и npm туда не попадают.
+FROM node:24-alpine AS tools
+
+# openssl нужен и здесь: без него Prisma CLI скачает движок под libssl1.1
+# и в рантайме попытается перекачать его под openssl-3 (нужна запись в node_modules).
+RUN apk add --no-cache openssl \
+  && npm install --global --no-fund --no-audit prisma@5.22.0 \
+  && npm cache clean --force
+
+# --- Stage 3: рантайм ---
+FROM alpine:3.24 AS runner
 
 ENV NODE_ENV=production
 
-# Prisma-движку нужен OpenSSL: без пакета openssl alpine-образ не определяет
-# версию OpenSSL и Prisma пытается загрузить движок под libssl.so.1.1.
-RUN apk add --no-cache openssl
+# openssl нужен Prisma-движку, libstdc++/libgcc — самому бинарнику node.
+RUN apk add --no-cache openssl libstdc++ ca-certificates
 
-# pnpm — для `pnpm run db:migrate` из Runbook, prisma CLI — для самого `migrate deploy`.
-# Кеш npm чистим в том же слое: иначе он добавляет сотни мегабайт к образу.
-RUN npm install --global --no-fund --no-audit pnpm@12.18.0 prisma@5.22.0 \
-  && npm cache clean --force
+# Берём только node из официального образа: npm, yarn и corepack в рантайме не нужны.
+COPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/node
+COPY --from=tools /usr/local/lib/node_modules/prisma /usr/local/lib/node_modules/prisma
+RUN ln -s ../lib/node_modules/prisma/build/index.js /usr/local/bin/prisma
+
 WORKDIR /app
 
 # Только production-зависимости + собранное приложение + схема и миграции Prisma.

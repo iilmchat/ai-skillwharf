@@ -47,7 +47,7 @@
 4. **Применение миграций БД (при первом запуске):**
 
    ```bash
-   docker compose exec api pnpm run db:migrate
+   docker compose exec api prisma migrate deploy
    ```
 
 5. **Проверка статуса:**
