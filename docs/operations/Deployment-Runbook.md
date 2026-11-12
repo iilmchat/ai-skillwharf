@@ -18,6 +18,7 @@
 * `POSTGRES_PASSWORD`: Надежный пароль для БД.
 * `DATABASE_URL`: Строка подключения Prisma к PostgreSQL (по умолчанию порт хоста `5435`, см. `.env.example`).
 * `JWT_SECRET`: Секрет для подписи токенов (минимум 32 символа).
+* `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`: Подключение к LLM по OpenAI-совместимому API (по умолчанию — локальный Ollama, см. раздел 4).
 * `GIGACHAT_CLIENT_ID` / `GIGACHAT_CLIENT_SECRET`: Ключи для российских LLM (опционально).
 * `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY`: Ключи для биллинга (если включен).
 * `KVM_DEVICE_PATH`: Путь к устройству KVM (обычно `/dev/kvm`).
@@ -60,7 +61,57 @@
    > Порты `3000` и `5432` на хосте заняты другими проектами, поэтому API
    > проброшен на `3001`, а PostgreSQL — на `5435` (см. `docker-compose.yml`).
 
-## 4. Бэкап и восстановление (Ledger и БД)
+## 4. Настройка LLM
+
+API общается с моделями по OpenAI-совместимому API: адрес, ключ и имя модели
+задаются в `.env` переменными `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+(значения по умолчанию — из `.env.example`).
+
+### Локальная модель (Ollama)
+
+Сервис `ollama` вынесен в профиль `with-llm`, поэтому не запускается вместе с
+основным стеком и не расходует RAM:
+
+```bash
+docker compose --profile with-llm up -d ollama
+docker compose exec ollama ollama run llama3
+```
+
+Сервис `api` в compose-сети видит Ollama по имени `ollama`:
+
+```text
+LLM_BASE_URL=http://ollama:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL=llama3
+```
+
+> Порт `11434` на хосте обычно занят локальным Ollama, поэтому контейнер
+> проброшен на `11435`: с хоста (`pnpm start:dev`) используйте
+> `LLM_BASE_URL=http://localhost:11435/v1`. Если Ollama установлен на хосте, а
+> не в контейнере, оставьте `LLM_BASE_URL=http://localhost:11434/v1`.
+
+После изменения переменных перезапустите API:
+
+```bash
+docker compose up -d api
+```
+
+### Внешняя модель (GigaChat / YandexGPT и др.)
+
+Укажите в `.env` OpenAI-совместимый эндпоинт провайдера (или прокси перед ним),
+ключ и имя модели:
+
+```text
+LLM_BASE_URL=https://llm.example.ru/v1
+LLM_API_KEY=<ключ провайдера>
+LLM_MODEL=<имя модели>
+```
+
+Для GigaChat клиентские ключи `GIGACHAT_CLIENT_ID` / `GIGACHAT_CLIENT_SECRET`
+описаны в разделе 2. После изменения переменных перезапустите API
+(`docker compose up -d api`).
+
+## 5. Бэкап и восстановление (Ledger и БД)
 
 Для предотвращения потери данных биллинга (Ledger) необходимо регулярно делать бэкап PostgreSQL.
 
@@ -76,7 +127,7 @@ docker compose exec -T postgres pg_dump -U skillwharf_admin -d skillwharf_db -Fc
 docker compose exec -T postgres pg_restore -U skillwharf_admin -d skillwharf_db --clean < backup_20261112.dump
 ```
 
-## 5. Диагностика проблем
+## 6. Диагностика проблем
 
 * **Ошибка: `KVM device not found`**
   * *Решение:* Убедитесь, что хост-система поддерживает виртуализацию (`egrep -c '(vmx|svm)' /proc/cpuinfo` > 0) и модуль KVM загружен (`lsmod | grep kvm`). Если развертывание в облаке, используйте инстансы с поддержкой вложенной виртуализации.

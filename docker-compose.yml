@@ -32,5 +32,17 @@ services:
       postgres:
         condition: service_healthy
 
+  # Локальная LLM для разработки. Профиль with-llm: сервис не поднимается
+  # вместе с основным стеком и не тянет образ/RAM в CI.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["with-llm"]
+    ports:
+      # 11434 обычно занят Ollama, установленным на хосте, пробрасываем 11435.
+      - "11435:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   postgres_data:
+  ollama_data:
