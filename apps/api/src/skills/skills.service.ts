@@ -75,26 +75,7 @@ export class SkillsService implements OnModuleInit {
       });
     }
 
-    const { manifest } = result;
-    const manifestJson = manifest as unknown as Prisma.InputJsonValue;
-    const version = manifest.version;
-    const author = manifest.author.name;
-
-    return this.prisma.installedSkill.upsert({
-      where: { name: manifest.name },
-      create: {
-        name: manifest.name,
-        version,
-        author,
-        manifest: manifestJson,
-      },
-      update: {
-        version,
-        author,
-        manifest: manifestJson,
-        isEnabled: true,
-      },
-    });
+    return this.persistSkillManifest(result.manifest, true);
   }
 
   /** Список всех установленных навыков (каталог). */
@@ -123,22 +104,56 @@ export class SkillsService implements OnModuleInit {
     let seeded = 0;
 
     for (const file of files) {
-      try {
-        await this.installSkill(readFileSync(join(directory, file), 'utf8'));
-        seeded += 1;
-      } catch (error) {
-        // Битый манифест логируем, но не блокируем старт API.
-        if (!(error instanceof BadRequestException)) {
-          throw error;
-        }
+      const result = this.parseManifest(
+        readFileSync(join(directory, file), 'utf8'),
+      );
 
-        this.logger.error(`Не удалось загрузить ${file}: ${String(error)}`);
+      if (!result.success) {
+        // Битый манифест логируем, но не блокируем старт API.
+        this.logger.error(
+          `Не удалось загрузить ${file}: ${result.errors.join('; ')}`,
+        );
+        continue;
       }
+
+      // isEnabled не сбрасываем: админ мог выключить навык в каталоге.
+      await this.persistSkillManifest(result.manifest, false);
+      seeded += 1;
     }
 
     this.logger.log(`Стартовые навыки загружены: ${seeded}/${files.length}`);
 
     return seeded;
+  }
+
+  /**
+   * Upsert навыка по имени. При ручной установке навык включается, а при
+   * сидинге флаг `isEnabled` не трогаем — иначе рестарт сбрасывал бы выбор
+   * администратора.
+   */
+  private persistSkillManifest(
+    manifest: SkillManifest,
+    enableOnUpdate: boolean,
+  ): Promise<InstalledSkill> {
+    const manifestJson = manifest as unknown as Prisma.InputJsonValue;
+    const version = manifest.version;
+    const author = manifest.author.name;
+
+    return this.prisma.installedSkill.upsert({
+      where: { name: manifest.name },
+      create: {
+        name: manifest.name,
+        version,
+        author,
+        manifest: manifestJson,
+      },
+      update: {
+        version,
+        author,
+        manifest: manifestJson,
+        ...(enableOnUpdate ? { isEnabled: true } : {}),
+      },
+    });
   }
 
   /** Включает или выключает установленный навык. */

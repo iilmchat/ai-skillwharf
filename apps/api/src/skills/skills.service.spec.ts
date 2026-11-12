@@ -54,7 +54,7 @@ interface UpsertArgs {
     version: string;
     author: string;
     manifest: Record<string, unknown>;
-    isEnabled: boolean;
+    isEnabled?: boolean;
   };
 }
 
@@ -227,6 +227,12 @@ version: 1
         'skill-vetter',
         'tavily-search',
       ]);
+
+      // Сидинг не должен включать навыки, выключенные администратором.
+      for (const [args] of prisma.installedSkill.upsert.mock
+        .calls as [UpsertArgs][]) {
+        expect(args.update).not.toHaveProperty('isEnabled');
+      }
     });
   });
 
