@@ -7,7 +7,12 @@ import { BillingService } from './billing.service.js';
 type MockFn = ReturnType<typeof vi.fn>;
 
 interface TxMock {
-  wallet: { upsert: MockFn; findUnique: MockFn; update: MockFn };
+  wallet: {
+    upsert: MockFn;
+    updateMany: MockFn;
+    findUniqueOrThrow: MockFn;
+    update: MockFn;
+  };
   ledgerEntry: { create: MockFn };
 }
 
@@ -21,9 +26,21 @@ const USER_ID = '11111111-1111-1111-1111-111111111111';
 
 function createTx(): TxMock {
   return {
-    wallet: { upsert: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    wallet: {
+      upsert: vi.fn(),
+      updateMany: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      update: vi.fn(),
+    },
     ledgerEntry: { create: vi.fn() },
   };
+}
+
+function asTransactionCallback(
+  callback: (client: unknown) => unknown,
+  tx: TxMock,
+): unknown {
+  return callback(tx);
 }
 
 describe('BillingService', () => {
@@ -46,6 +63,12 @@ describe('BillingService', () => {
 
     service = moduleRef.get(BillingService);
   });
+
+  function useTx(tx: TxMock): void {
+    prisma.$transaction.mockImplementation((callback: (client: unknown) => unknown) =>
+      asTransactionCallback(callback, tx),
+    );
+  }
 
   describe('getBalance', () => {
     it('возвращает баланс существующего кошелька', async () => {
@@ -77,7 +100,7 @@ describe('BillingService', () => {
   });
 
   describe('addFunds', () => {
-    it('атомарно начисляет средства и пишет credit с idempotencyKey', async () => {
+    it('атомарно начисляет средства и пишет credit с balanceAfter', async () => {
       const tx = createTx();
       tx.wallet.upsert.mockResolvedValue({
         id: 'wallet-1',
@@ -85,9 +108,7 @@ describe('BillingService', () => {
       });
       tx.ledgerEntry.create.mockResolvedValue({ id: 'entry-1' });
       prisma.ledgerEntry.findUnique.mockResolvedValue(null);
-      prisma.$transaction.mockImplementation(
-        async (callback: (client: TxMock) => unknown) => callback(tx),
-      );
+      useTx(tx);
 
       const result = await service.addFunds(
         USER_ID,
@@ -104,6 +125,7 @@ describe('BillingService', () => {
           data: {
             walletId: string;
             amount: Prisma.Decimal;
+            balanceAfter: Prisma.Decimal;
             type: string;
             description: string;
             idempotencyKey: string;
@@ -117,6 +139,7 @@ describe('BillingService', () => {
         idempotencyKey: 'topup-key-1',
       });
       expect(createArgs.data.amount.toFixed(2)).toBe('100.50');
+      expect(createArgs.data.balanceAfter.toFixed(2)).toBe('150.25');
     });
 
     it('не создаёт дубль при повторном idempotencyKey', async () => {
@@ -183,20 +206,16 @@ describe('BillingService', () => {
   });
 
   describe('chargeForSkill', () => {
-    it('списывает средства и пишет debit в Ledger', async () => {
+    it('атомарно списывает средства и пишет debit с balanceAfter', async () => {
       const tx = createTx();
-      tx.wallet.findUnique.mockResolvedValue({
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
         id: 'wallet-1',
-        balance: new Prisma.Decimal('200.00'),
-      });
-      tx.wallet.update.mockResolvedValue({
         balance: new Prisma.Decimal('150.00'),
       });
       tx.ledgerEntry.create.mockResolvedValue({ id: 'entry-debit-1' });
       prisma.ledgerEntry.findUnique.mockResolvedValue(null);
-      prisma.$transaction.mockImplementation(
-        async (callback: (client: TxMock) => unknown) => callback(tx),
-      );
+      useTx(tx);
 
       const result = await service.chargeForSkill(
         USER_ID,
@@ -211,10 +230,14 @@ describe('BillingService', () => {
       });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
 
-      const [updateArgs] = tx.wallet.update.mock.calls[0] as [
-        { where: { userId: string }; data: { balance: { decrement: Prisma.Decimal } } },
+      const [updateArgs] = tx.wallet.updateMany.mock.calls[0] as [
+        {
+          where: { userId: string; balance: { gte: Prisma.Decimal } };
+          data: { balance: { decrement: Prisma.Decimal } };
+        },
       ];
-      expect(updateArgs.where).toEqual({ userId: USER_ID });
+      expect(updateArgs.where.userId).toBe(USER_ID);
+      expect(updateArgs.where.balance.gte.toFixed(2)).toBe('50.00');
       expect(updateArgs.data.balance.decrement.toFixed(2)).toBe('50.00');
 
       const [createArgs] = tx.ledgerEntry.create.mock.calls[0] as [
@@ -222,6 +245,7 @@ describe('BillingService', () => {
           data: {
             walletId: string;
             amount: Prisma.Decimal;
+            balanceAfter: Prisma.Decimal;
             type: string;
             description: string;
             idempotencyKey: string;
@@ -235,37 +259,20 @@ describe('BillingService', () => {
         idempotencyKey: 'charge-key-1',
       });
       expect(createArgs.data.amount.toFixed(2)).toBe('50.00');
+      expect(createArgs.data.balanceAfter.toFixed(2)).toBe('150.00');
     });
 
     it('выбрасывает Insufficient funds при нехватке средств', async () => {
       const tx = createTx();
-      tx.wallet.findUnique.mockResolvedValue({
-        id: 'wallet-1',
-        balance: new Prisma.Decimal('10.00'),
-      });
+      tx.wallet.updateMany.mockResolvedValue({ count: 0 });
       prisma.ledgerEntry.findUnique.mockResolvedValue(null);
-      prisma.$transaction.mockImplementation(
-        async (callback: (client: TxMock) => unknown) => callback(tx),
-      );
+      useTx(tx);
 
       await expect(
         service.chargeForSkill(USER_ID, 50, 'Дорогой Skill', 'charge-key-2'),
-      ).rejects.toThrow('Insufficient funds');
-      expect(tx.wallet.update).not.toHaveBeenCalled();
+      ).rejects.toThrow('Insufficient funds or wallet not found');
+      expect(tx.wallet.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
-    });
-
-    it('считает отсутствующий кошелёк нулевым балансом', async () => {
-      const tx = createTx();
-      tx.wallet.findUnique.mockResolvedValue(null);
-      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
-      prisma.$transaction.mockImplementation(
-        async (callback: (client: TxMock) => unknown) => callback(tx),
-      );
-
-      await expect(
-        service.chargeForSkill(USER_ID, 1, 'Skill', 'charge-key-3'),
-      ).rejects.toThrow('Insufficient funds');
     });
 
     it('не списывает повторно при том же idempotencyKey', async () => {
@@ -286,6 +293,49 @@ describe('BillingService', () => {
         entryId: 'entry-debit-1',
       });
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('не допускает отрицательный баланс при параллельных списаниях', async () => {
+      let balance = new Prisma.Decimal('100.00');
+      const tx = createTx();
+
+      tx.wallet.updateMany.mockImplementation(
+        async (args: {
+          where: { userId: string; balance: { gte: Prisma.Decimal } };
+          data: { balance: { decrement: Prisma.Decimal } };
+        }) => {
+          if (balance.gte(args.where.balance.gte)) {
+            balance = balance.minus(args.data.balance.decrement);
+
+            return { count: 1 };
+          }
+
+          return { count: 0 };
+        },
+      );
+      tx.wallet.findUniqueOrThrow.mockImplementation(async () => ({
+        id: 'wallet-1',
+        balance,
+      }));
+      tx.ledgerEntry.create.mockImplementation(async () => ({ id: 'entry' }));
+      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
+      useTx(tx);
+
+      const results = await Promise.allSettled([
+        service.chargeForSkill(USER_ID, 60, 'Параллельно #1', 'parallel-key-1'),
+        service.chargeForSkill(USER_ID, 60, 'Параллельно #2', 'parallel-key-2'),
+      ]);
+
+      const fulfilled = results.filter((result) => result.status === 'fulfilled');
+      const rejected = results.filter((result) => result.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(balance.toFixed(2)).toBe('40.00');
+      expect(tx.ledgerEntry.create).toHaveBeenCalledTimes(1);
     });
   });
 });

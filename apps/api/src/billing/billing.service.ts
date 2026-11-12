@@ -67,6 +67,7 @@ export class BillingService {
           data: {
             walletId: wallet.id,
             amount: decimalAmount,
+            balanceAfter: wallet.balance,
             type: 'credit',
             description,
             idempotencyKey,
@@ -89,7 +90,9 @@ export class BillingService {
 
   /**
    * Paywall: списание средств за вызов Skill.
-   * Проверяет баланс и атомарно уменьшает его, создавая debit-запись в Ledger.
+   *
+   * Списание атомарное: условный `updateMany` с `balance >= amount` исключает
+   * гонку между проверкой баланса и вычитанием (баланс не уйдёт в минус).
    * `idempotencyKey` защищает от повторных списаний.
    */
   async chargeForSkill(
@@ -111,28 +114,39 @@ export class BillingService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        const updateResult = await tx.wallet.updateMany({
+          where: {
+            userId,
+            balance: { gte: decimalAmount },
+          },
+          data: {
+            balance: { decrement: decimalAmount },
+          },
+        });
 
-        if (!wallet || wallet.balance.lessThan(decimalAmount)) {
-          throw new BadRequestException('Insufficient funds');
+        if (updateResult.count === 0) {
+          throw new BadRequestException(
+            'Insufficient funds or wallet not found',
+          );
         }
 
-        const updated = await tx.wallet.update({
+        // После атомарного списания баланс уже уменьшен.
+        const wallet = await tx.wallet.findUniqueOrThrow({
           where: { userId },
-          data: { balance: { decrement: decimalAmount } },
         });
 
         const entry = await tx.ledgerEntry.create({
           data: {
             walletId: wallet.id,
             amount: decimalAmount,
+            balanceAfter: wallet.balance,
             type: 'debit',
             description,
             idempotencyKey,
           },
         });
 
-        return { balance: formatBalance(updated.balance), entryId: entry.id };
+        return { balance: formatBalance(wallet.balance), entryId: entry.id };
       });
     } catch (error) {
       const raced = await this.replayAfterUniqueViolation(error, idempotencyKey, userId);

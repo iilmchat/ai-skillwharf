@@ -79,6 +79,7 @@ model LedgerEntry {
   id             String   @id @default(uuid())
   walletId       String
   amount         Decimal  @db.Decimal(18, 2)
+  balanceAfter   Decimal  @db.Decimal(18, 2)
   type           String
   description    String
   idempotencyKey String   @unique
@@ -86,4 +87,14 @@ model LedgerEntry {
   wallet         Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId, createdAt])
+}
+
+model InstalledSkill {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  version     String
+  author      String
+  manifest    Json
+  isEnabled   Boolean  @default(true)
+  installedAt DateTime @default(now())
 }

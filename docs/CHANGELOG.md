@@ -29,8 +29,9 @@
 - Биллинг: модели `Wallet` и append-only `LedgerEntry`, `GET /api/v1/billing/balance` и `POST /api/v1/billing/topup` (только `admin`) с атомарным начислением через `prisma.$transaction`.
 - Точность денег `DECIMAL(18,2)` для `Wallet.balance` / `LedgerEntry.amount` и триггеры PostgreSQL, запрещающие `UPDATE`/`DELETE` в Ledger.
 - Идемпотентность биллинга: `LedgerEntry.idempotencyKey @unique`, повторные запросы возвращают текущий баланс без дублей.
-- Paywall: `BillingService.chargeForSkill` и `POST /api/v1/billing/charge` (только `admin`, для тестов).
-- BAL: интерфейс `IBillingProvider` (`createPayment`, `handleWebhook`) и заглушка `MockYooKassaProvider`.
+- Paywall: `BillingService.chargeForSkill` и `POST /api/v1/billing/charge` (только `admin`, для тестов); списание атомарное через условный `updateMany`, `LedgerEntry.balanceAfter` фиксирует баланс после операции.
+- BAL: единый интерфейс `IBillingProvider` из `@skillwharf/shared` (`authorize`/`capture`/`cancel`) и mock-провайдер ЮKassa.
+- Каталог навыков: модель `InstalledSkill`, `POST /api/v1/skills/install` (только `admin`) и `GET /api/v1/skills` для авторизованных.
 - Сборка `packages/shared` в ESM-`dist` (пакет импортируется в API рантайме).
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 

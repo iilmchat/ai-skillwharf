@@ -45,13 +45,9 @@
    docker compose up -d --build
    ```
 
-4. **Применение миграций БД (при первом запуске):**
+   Миграции применяются автоматически при старте контейнера через `entrypoint.sh`.
 
-   ```bash
-   docker compose exec api prisma migrate deploy
-   ```
-
-5. **Проверка статуса:**
+4. **Проверка статуса:**
 
    ```bash
    curl http://localhost:3001/api/v1/health
@@ -220,11 +216,8 @@ YOOKASSA_RETURN_URL=http://localhost:3001/billing/success
 
 ### Проверка пополнения и списания
 
-Перед тестами примените миграции (включая триггеры append-only для Ledger):
-
-```bash
-docker compose exec api prisma migrate deploy
-```
+Миграции (включая триггеры append-only для Ledger) применяются автоматически
+при старте контейнера через `entrypoint.sh`.
 
 Эндпоинты требуют JWT администратора (`Authorization: Bearer <token>`).
 

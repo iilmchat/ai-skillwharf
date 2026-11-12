@@ -1,37 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { IBillingProvider, TransactionResult } from '@skillwharf/shared';
 import { randomUUID } from 'node:crypto';
-import type {
-  CreatePaymentParams,
-  IBillingProvider,
-  PaymentResult,
-  WebhookEvent,
-} from '../interfaces/billing-provider.interface.js';
 
 /**
- * Заглушка ЮKassa для локальной разработки и тестов: ничего не отправляет
- * в платёжный сервис, логирует вызовы и возвращает фейковый URL оплаты.
+ * Заглушка ЮKassa для локальной разработки и тестов: реализует BAL-интерфейс
+ * из `@skillwharf/shared`, ничего не отправляет в платёжный сервис,
+ * логирует вызовы и возвращает фейковые идентификаторы.
  */
 @Injectable()
 export class MockYooKassaProvider implements IBillingProvider {
   private readonly logger = new Logger(MockYooKassaProvider.name);
 
-  async createPayment(params: CreatePaymentParams): Promise<PaymentResult> {
-    const paymentId = randomUUID();
+  async authorize(
+    userId: string,
+    skillId: string,
+    amount: number,
+  ): Promise<TransactionResult> {
+    const transactionId = randomUUID();
 
     this.logger.log(
-      `Mock ЮKassa: createPayment user=${params.userId} amount=${params.amount} key=${params.idempotencyKey}`,
+      `Mock ЮKassa: authorize user=${userId} skill=${skillId} amount=${amount} tx=${transactionId}`,
     );
 
-    return {
-      paymentId,
-      confirmationUrl: `https://yookassa.mock/payments/${paymentId}/confirm`,
-      status: 'pending',
-    };
+    return { status: 'success', transactionId };
   }
 
-  async handleWebhook(event: WebhookEvent): Promise<void> {
-    this.logger.log(
-      `Mock ЮKassa: webhook event=${event.event} payment=${event.paymentId} status=${event.status}`,
-    );
+  async capture(transactionId: string): Promise<void> {
+    this.logger.log(`Mock ЮKassa: capture tx=${transactionId}`);
+  }
+
+  async cancel(transactionId: string): Promise<void> {
+    this.logger.log(`Mock ЮKassa: cancel tx=${transactionId}`);
   }
 }

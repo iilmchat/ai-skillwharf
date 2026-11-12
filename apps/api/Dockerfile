@@ -63,10 +63,12 @@ COPY --from=builder /prod/api/package.json ./package.json
 COPY --from=builder /prod/api/node_modules ./node_modules
 COPY --from=builder /prod/api/dist ./dist
 COPY --from=builder /prod/api/prisma ./prisma
+COPY apps/api/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 RUN addgroup -S -g 1001 appuser \
   && adduser -S -u 1001 -G appuser appuser
 
 USER appuser
 EXPOSE 3000
-CMD ["node", "dist/main"]
+ENTRYPOINT ["/app/entrypoint.sh"]
