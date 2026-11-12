@@ -13,7 +13,7 @@
 | Стек | TypeScript, NestJS, pnpm workspaces |
 | Пакеты | `apps/*`, `packages/*` (см. `pnpm-workspace.yaml`) |
 | Пакетный менеджер | pnpm, версия из `packageManager` (12.18.0) |
-| Документация | `docs/01-architecture`, `02-ecosystem`, `03-billing`, `04-security`, `05-operations`, `openapi` |
+| Документация | `docs/architecture`, `ecosystem`, `billing`, `security`, `operations`, `openapi` |
 | CI | `.github/workflows/ci.yml`, job `lint-docs` |
 
 Что уже настроено:

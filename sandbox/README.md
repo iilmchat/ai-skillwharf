@@ -2,7 +2,7 @@
 
 Изолированное окружение для запуска сторонних плагинов. На этапе MVP это
 hardened Docker-контейнер; целевой бэкенд — Firecracker (основной) и gVisor
-(fallback), см. `docs/04-security/Threat-Model.md`.
+(fallback), см. `docs/security/Threat-Model.md`.
 
 ## Что где лежит
 
