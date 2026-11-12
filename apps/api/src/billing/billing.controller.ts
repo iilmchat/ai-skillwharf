@@ -70,10 +70,12 @@ export class BillingController {
       throw new UnauthorizedException('Пользователь не аутентифицирован');
     }
 
-    // Обычный пользователь пополняет только свой кошелёк, даже если в теле
-    // запроса подставлен чужой userId. Админ может пополнить любой.
+    // `userId` из тела учитывается только для админа. Обычный пользователь
+    // пополняет свой кошелёк, даже если подставил чужой или не передал его.
     const userId =
-      currentUser.role === 'admin' ? dto.userId : currentUser.userId;
+      currentUser.role === 'admin' && dto.userId !== undefined
+        ? dto.userId
+        : currentUser.userId;
 
     return this.billingService.addFunds(
       userId,

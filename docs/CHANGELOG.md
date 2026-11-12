@@ -4,42 +4,37 @@
 
 ## [Unreleased]
 
+_Пока нет изменений._
+
+## [0.1.0] - 2026-11-12
+
+Первый публичный MVP: аутентификация, чат с агентом, песочница, биллинг,
+каталог навыков и локализация.
+
 ### Добавлено
 
-- Базовая документация: C4-модель, спецификация Skill Manifest, схема биллинга, STRIDE Threat Model, Runbook развертывания.
-- Монорепозиторий на базе pnpm workspaces.
+- Инициализация монорепозитория на pnpm workspaces, CI (сборка, тесты, Markdown-линтер, проверка песочницы) и базовая документация: C4-модель, спецификация Skill Manifest, схема биллинга, STRIDE Threat Model, Runbook развёртывания.
 - Пакет `packages/shared` со схемами Zod (Skill Manifest, Billing).
-- Каркас API на NestJS (`apps/api`).
-- Docker-инфраструктура: `Dockerfile` для API и `docker-compose.yml` (API + PostgreSQL).
+- Каркас API на NestJS (`apps/api`), Docker-инфраструктура: `Dockerfile` для API и `docker-compose.yml` (API + PostgreSQL).
 - Базовая песочница `docker-compose.sandbox.yml` (hardened Docker).
-- Prisma ORM: схема БД (`User`, `Session`, `Transaction`), первая миграция и скрипт `db:migrate`.
-- Эндпоинт `GET /api/v1/health` с проверкой подключения к PostgreSQL.
-- Модуль аутентификации: регистрация/логин (Argon2, JWT access + refresh), `JwtStrategy` и `JwtAuthGuard`.
-- Ротация refresh-токенов: `POST /api/v1/auth/refresh` с проверкой сессии и срока действия.
-- RBAC: поле `role` у пользователя (по умолчанию `user`), декоратор `@Roles()` и `RolesGuard`.
-- Защищённый эндпоинт `GET /api/v1/auth/me` (профиль текущего пользователя).
-- Модели `Conversation` и `Message` — история диалогов в БД.
-- WebSocket-шлюз `send_message` и чат-сервис (сохранение сообщений, ответ LLM).
-- Интеграция LangGraph (`StateGraph`) и LLM-клиент `@langchain/openai` с эхо-заглушкой без ключей.
-- Локальный Ollama в `docker-compose` (профиль `with-llm`) и переменные `LLM_*`.
-- REST API диалогов: `POST /api/v1/chat/conversations` (создание чата текущего пользователя).
-- Аутентификация WebSocket по JWT из `handshake.auth.token` и проверка владельца диалога.
-- Валидация `SKILL.md`: парсинг YAML frontmatter и Zod-схема `@skillwharf/shared`, эндпоинт `POST /api/v1/skills/validate` (только `admin`).
-- Sandbox: эндпоинт `POST /api/v1/sandbox/execute` (только `admin`) для запуска команд в изолированном Docker-контейнере.
-- Биллинг: модели `Wallet` и append-only `LedgerEntry`, `GET /api/v1/billing/balance` и `POST /api/v1/billing/topup` (только `admin`) с атомарным начислением через `prisma.$transaction`.
-- Точность денег `DECIMAL(18,2)` для `Wallet.balance` / `LedgerEntry.amount` и триггеры PostgreSQL, запрещающие `UPDATE`/`DELETE` в Ledger.
-- Идемпотентность биллинга: `LedgerEntry.idempotencyKey @unique`, повторные запросы возвращают текущий баланс без дублей.
-- Paywall: `BillingService.chargeForSkill` и `POST /api/v1/billing/charge` (только `admin`, для тестов); списание атомарное через условный `updateMany`, `LedgerEntry.balanceAfter` фиксирует баланс после операции.
-- BAL: единый интерфейс `IBillingProvider` из `@skillwharf/shared` (`authorize`/`capture`/`cancel`) и mock-провайдер ЮKassa.
-- Каталог навыков: модель `InstalledSkill`, `POST /api/v1/skills/install` (только `admin`) и `GET /api/v1/skills` для авторизованных.
-- Сборка `packages/shared` в ESM-`dist` (пакет импортируется в API рантайме).
-- Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
+- Prisma ORM: модели `User`, `Session`, `Conversation`, `Message`, `Wallet`, `LedgerEntry`, `InstalledSkill`, `SkillUsage`, миграции и скрипт `db:migrate`.
+- JWT-аутентификация: регистрация/логин (Argon2, access + refresh), ротация refresh-токенов, `JwtStrategy`, `JwtAuthGuard`, RBAC (`@Roles()`, `RolesGuard`) и профиль `GET /api/v1/auth/me`.
+- WebSocket-чат: шлюз `send_message`, аутентификация по JWT из `handshake.auth.token`, проверка владельца диалога; REST `POST /api/v1/chat/conversations` и сохранение истории сообщений в БД.
+- LangGraph (`StateGraph`) и LLM-клиент `@langchain/openai` с OpenAI-совместимым фасадом и эхо-заглушкой; локальный Ollama в `docker-compose` (профиль `with-llm`).
+- Инструменты агента в LangGraph: `execute_sandbox_code`, `web_search` (Tavily), `exec`; цикл `tool_calls` с возвратом результата в LLM и лимитом раундов.
+- Sandbox execution: изолированные Docker-контейнеры с лимитами CPU/памяти, таймаутом, read-only rootfs, allowlist секретов и egress по флагу; кастомный образ с `curl`, `jq`, `gh`, Python.
+- Billing (Ledger): модели `Wallet` и append-only `LedgerEntry`, `DECIMAL(18,2)`, триггеры PostgreSQL против `UPDATE`/`DELETE`, идемпотентность по `idempotencyKey`, `balanceAfter` в каждой записи.
+- Paywall: `BillingService.chargeForSkill` и атомарное списание; цены берутся из манифеста навыка; блокировка агента при балансе ниже `0.50`.
+- Freemium: таблица `SkillUsage` и `BillingService.checkAndChargeSkill` — первые `freeCallsLimit` вызовов навыка бесплатны, дальше списывается `price`.
+- BAL: интерфейс `IBillingProvider` (`authorize`/`capture`/`cancel`) и mock-провайдер ЮKassa.
+- Каталог навыков: валидация и установка `SKILL.md`, `GET /api/v1/skills`, включение/отключение и удаление; авто-сидинг `starter-skills` при старте.
+- Стартовый каталог навыков: `tavily-search`, `github`, `cron-automation`, `skill-vetter`, `code-runner`.
+- История транзакций: `GET /api/v1/billing/ledger` (последние 50 операций) и пополнение баланса обычным пользователем.
+- i18n: ключи ошибок API (`errors.insufficient_funds`) с переводом на клиенте, словари ru/en и переключатель языка в веб-интерфейсе; инструкция LLM отвечать на языке пользователя.
+- Web UI (React 19 + Vite): авторизация, чат по WebSocket, управление навыками, баланс и пополнение, тёмная тема, локализация.
 
 ### Изменено
 
 - CI настроен на проверку сборки, тестов, Markdown-линтера и тестов песочницы.
 - Docker-образ API переведён на `pnpm deploy --prod` (560 МБ вместо 904 МБ), Prisma CLI для `db:migrate` ставится глобально.
-
-## [0.1.0] - 2026-11-12
-
-- Инициализация репозитория.
+- `POST /api/v1/billing/topup` доступен роли `user`; `userId` в теле стал опциональным и учитывается только для `admin`.

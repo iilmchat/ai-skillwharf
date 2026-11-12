@@ -29,9 +29,9 @@ function createRequest(user?: TestUser): ControllerRequest {
   return { user } as unknown as ControllerRequest;
 }
 
-function createDto(userId: string): TopUpDto {
+function createDto(userId?: string): TopUpDto {
   return {
-    userId,
+    ...(userId === undefined ? {} : { userId }),
     amount: 500,
     idempotencyKey: 'topup-key-1',
   };
@@ -80,6 +80,23 @@ describe('BillingController', () => {
       );
     });
 
+    it('позволяет пользователю не передавать userId', async () => {
+      const request = createRequest({
+        userId: USER_ID,
+        email: 'user@example.com',
+        role: 'user',
+      });
+
+      await controller.topup(request, createDto());
+
+      expect(billing.addFunds).toHaveBeenCalledWith(
+        USER_ID,
+        500,
+        'Пополнение баланса',
+        'topup-key-1',
+      );
+    });
+
     it('игнорирует чужой userId в теле запроса для роли user', async () => {
       const request = createRequest({
         userId: USER_ID,
@@ -114,6 +131,23 @@ describe('BillingController', () => {
 
       expect(billing.addFunds).toHaveBeenCalledWith(
         OTHER_USER_ID,
+        500,
+        'Пополнение баланса',
+        'topup-key-1',
+      );
+    });
+
+    it('пополняет свой кошелёк, если админ не передал userId', async () => {
+      const request = createRequest({
+        userId: ADMIN_ID,
+        email: 'admin@example.com',
+        role: 'admin',
+      });
+
+      await controller.topup(request, createDto());
+
+      expect(billing.addFunds).toHaveBeenCalledWith(
+        ADMIN_ID,
         500,
         'Пополнение баланса',
         'topup-key-1',
