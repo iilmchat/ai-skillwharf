@@ -13,6 +13,7 @@
 
 - [Спецификация Skill Manifest](ecosystem/Manifest-Specification.md)
 - [Матрица монетизации](ecosystem/Monetization-Matrix.md)
+- [Спецификации бизнес-треков (use-cases)](ecosystem/use-cases/)
 
 ## 💳 Биллинг (`billing/`)
 
