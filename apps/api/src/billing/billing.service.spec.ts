@@ -14,7 +14,11 @@ interface TxMock {
     findUniqueOrThrow: MockFn;
     update: MockFn;
   };
-  ledgerEntry: { create: MockFn };
+  ledgerEntry: {
+    create: MockFn;
+    findUnique: MockFn;
+    update: MockFn;
+  };
 }
 
 interface PrismaMock {
@@ -34,7 +38,11 @@ function createTx(): TxMock {
       findUniqueOrThrow: vi.fn(),
       update: vi.fn(),
     },
-    ledgerEntry: { create: vi.fn() },
+    ledgerEntry: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
   };
 }
 
@@ -62,18 +70,16 @@ describe('BillingService', () => {
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        BillingService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [BillingService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = moduleRef.get(BillingService);
   });
 
   function useTx(tx: TxMock): void {
-    prisma.$transaction.mockImplementation((callback: (client: unknown) => unknown) =>
-      asTransactionCallback(callback, tx),
+    prisma.$transaction.mockImplementation(
+      (callback: (client: unknown) => unknown) =>
+        asTransactionCallback(callback, tx),
     );
   }
 
@@ -149,9 +155,7 @@ describe('BillingService', () => {
     it('возвращает пустую историю, если операций нет', async () => {
       prisma.ledgerEntry.findMany.mockResolvedValue([]);
 
-      await expect(service.getTransactionHistory(USER_ID)).resolves.toEqual(
-        [],
-      );
+      await expect(service.getTransactionHistory(USER_ID)).resolves.toEqual([]);
     });
   });
 
@@ -382,7 +386,9 @@ describe('BillingService', () => {
         service.chargeForSkill(USER_ID, 60, 'Параллельно #2', 'parallel-key-2'),
       ]);
 
-      const fulfilled = results.filter((result) => result.status === 'fulfilled');
+      const fulfilled = results.filter(
+        (result) => result.status === 'fulfilled',
+      );
       const rejected = results.filter((result) => result.status === 'rejected');
 
       expect(fulfilled).toHaveLength(1);
@@ -392,6 +398,145 @@ describe('BillingService', () => {
       );
       expect(balance.toFixed(2)).toBe('40.00');
       expect(tx.ledgerEntry.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('escrow', () => {
+    it('authorizeHold уменьшает balance, увеличивает heldBalance и пишет PENDING', async () => {
+      const tx = createTx();
+      useTx(tx);
+      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-1',
+        userId: USER_ID,
+        balance: new Prisma.Decimal('8.50'),
+        heldBalance: new Prisma.Decimal('1.50'),
+      });
+      tx.ledgerEntry.create.mockResolvedValue({ id: 'hold-1' });
+
+      await expect(
+        service.authorizeHold(USER_ID, 1.5, 'hold-key'),
+      ).resolves.toEqual({
+        balance: '8.50',
+        heldBalance: '1.50',
+        amount: '1.50',
+        entryId: 'hold-1',
+        type: 'PENDING',
+      });
+
+      expect(tx.wallet.updateMany).toHaveBeenCalledWith({
+        where: {
+          userId: USER_ID,
+          balance: { gte: expect.any(Prisma.Decimal) },
+        },
+        data: {
+          balance: { decrement: expect.any(Prisma.Decimal) },
+          heldBalance: { increment: expect.any(Prisma.Decimal) },
+        },
+      });
+      expect(tx.ledgerEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          walletId: 'wallet-1',
+          type: 'PENDING',
+          idempotencyKey: 'hold-key',
+        }),
+      });
+    });
+
+    it('authorizeHold отклоняет hold при недостатке средств', async () => {
+      const tx = createTx();
+      useTx(tx);
+      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
+      tx.wallet.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.authorizeHold(USER_ID, 100, 'hold-key'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('captureHold переводит PENDING в debit и освобождает heldBalance', async () => {
+      const tx = createTx();
+      useTx(tx);
+      tx.ledgerEntry.findUnique.mockResolvedValue({
+        id: 'hold-1',
+        type: 'PENDING',
+        amount: new Prisma.Decimal('1.50'),
+        walletId: 'wallet-1',
+        wallet: {
+          userId: USER_ID,
+          balance: new Prisma.Decimal('8.50'),
+          heldBalance: new Prisma.Decimal('1.50'),
+        },
+      });
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-1',
+        balance: new Prisma.Decimal('8.50'),
+        heldBalance: new Prisma.Decimal('0.00'),
+      });
+      tx.ledgerEntry.update.mockResolvedValue({});
+
+      await expect(service.captureHold('hold-1')).resolves.toEqual({
+        balance: '8.50',
+        heldBalance: '0.00',
+        amount: '1.50',
+        entryId: 'hold-1',
+        type: 'debit',
+      });
+      expect(tx.ledgerEntry.update).toHaveBeenCalledWith({
+        where: { id: 'hold-1' },
+        data: { type: 'debit' },
+      });
+    });
+
+    it('cancelHold возвращает деньги и переводит PENDING в credit', async () => {
+      const tx = createTx();
+      useTx(tx);
+      tx.ledgerEntry.findUnique.mockResolvedValue({
+        id: 'hold-1',
+        type: 'PENDING',
+        amount: new Prisma.Decimal('1.50'),
+        walletId: 'wallet-1',
+        wallet: {
+          userId: USER_ID,
+          balance: new Prisma.Decimal('8.50'),
+          heldBalance: new Prisma.Decimal('1.50'),
+        },
+      });
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-1',
+        balance: new Prisma.Decimal('10.00'),
+        heldBalance: new Prisma.Decimal('0.00'),
+      });
+      tx.ledgerEntry.update.mockResolvedValue({});
+
+      await expect(service.cancelHold('hold-1')).resolves.toEqual({
+        balance: '10.00',
+        heldBalance: '0.00',
+        amount: '1.50',
+        entryId: 'hold-1',
+        type: 'credit',
+      });
+      expect(tx.wallet.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'wallet-1',
+          heldBalance: { gte: expect.any(Prisma.Decimal) },
+        },
+        data: {
+          heldBalance: { decrement: expect.any(Prisma.Decimal) },
+          balance: { increment: expect.any(Prisma.Decimal) },
+        },
+      });
+      expect(tx.ledgerEntry.update).toHaveBeenCalledWith({
+        where: { id: 'hold-1' },
+        data: {
+          type: 'credit',
+          balanceAfter: new Prisma.Decimal('10.00'),
+        },
+      });
     });
   });
 
@@ -462,12 +607,7 @@ describe('BillingService', () => {
     });
 
     it('без freeCallsLimit списывает с первого вызова', async () => {
-      await service.checkAndChargeSkill(
-        USER_ID,
-        'tavily-search',
-        0.05,
-        0,
-      );
+      await service.checkAndChargeSkill(USER_ID, 'tavily-search', 0.05, 0);
 
       expect(prisma.skillUsage.updateMany).not.toHaveBeenCalled();
       expect(chargeSpy).toHaveBeenCalledWith(

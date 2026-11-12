@@ -244,6 +244,14 @@ function AgentDesk({
                   }}
                 />
               )}
+              {isWaiting && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -bottom-1 -right-1 grid size-5 place-items-center rounded-full bg-warning-container text-[11px] shadow ring-2 ring-surface"
+                >
+                  💳
+                </span>
+              )}
             </span>
 
             <span
@@ -445,6 +453,22 @@ function AgentSidebar({
             </div>
           )}
         </dl>
+
+        {agent.status === 'waiting_approval' && (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-warning/30 bg-warning-container/40 p-3">
+            <span aria-hidden="true" className="text-lg leading-none">
+              💳
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-on-warning-container">
+                {t('office.payment.title')}
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-on-warning-container">
+                {t('office.payment.body')}
+              </p>
+            </div>
+          </div>
+        )}
 
         {isApproved && (
           <div

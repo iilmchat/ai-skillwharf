@@ -28,6 +28,14 @@
 - Реализованы mock-инструменты `send_message`, `google_sheets_append`, `google_docs_create`, `generate_image` и `run_workflow`; реальные Telegram/VK/WhatsApp, Google Workspace и Midjourney API пока не подключены.
 - `ChatService` подключает эти инструменты только при наличии соответствующего включённого навыка; `generate_image` использует Pay-per-Call цену из манифеста.
 
+### Billing & Security
+
+- Pay-per-Outcome (escrow): в `Wallet` добавлен `heldBalance`, в `LedgerEntry` — статус `PENDING`; реализованы `authorizeHold`, `captureHold` и `cancelHold`.
+- Append-only защита Ledger сохранена: БД разрешает только перевод `PENDING` в `debit`/`credit`, остальные изменения и удаления по-прежнему запрещены.
+- `ChatService` автоматически резервирует средства для инструментов с `pricing.model: Pay-per-Outcome`: успех → capture, ошибка → cancel, `requiresApproval` → hold остаётся `PENDING` до одобрения.
+- Agent Gateway: `execute_sandbox_code` с `rm -rf /` блокируется `ForbiddenException`, а запросы `web_search` со словами `password`/`secret` маскируются до вызова инструмента.
+- Манифесты поддерживают `pricing.model: Pay-per-Outcome`; миграция `add_escrow_support`.
+
 ## [0.1.0] - 2026-11-12
 
 Первый публичный MVP: аутентификация, чат с агентом, песочница, биллинг,

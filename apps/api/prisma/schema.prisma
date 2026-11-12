@@ -67,15 +67,18 @@ model Message {
 }
 
 model Wallet {
-  id        String        @id @default(uuid())
-  userId    String        @unique
-  balance   Decimal       @default(0) @db.Decimal(18, 2)
-  updatedAt DateTime      @updatedAt
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entries   LedgerEntry[]
+  id           String        @id @default(uuid())
+  userId       String        @unique
+  balance      Decimal       @default(0) @db.Decimal(18, 2)
+  /// Средства, зарезервированные под PENDING-задачи (Pay-per-Outcome).
+  heldBalance  Decimal       @default(0) @db.Decimal(18, 2)
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries      LedgerEntry[]
 }
 
 /// Append-only ledger: записи только создаются, не обновляются и не удаляются.
+/// Исключение — перевод PENDING в debit/credit при завершении escrow.
 model LedgerEntry {
   id             String   @id @default(uuid())
   walletId       String

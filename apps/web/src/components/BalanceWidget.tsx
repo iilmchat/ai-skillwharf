@@ -3,6 +3,7 @@ import { CURRENCY_SYMBOL, formatMoney } from '../lib/money';
 
 interface BalanceWidgetProps {
   balance: string | undefined;
+  heldBalance?: string | undefined;
   isFetching: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -13,6 +14,7 @@ interface BalanceWidgetProps {
 
 export function BalanceWidget({
   balance,
+  heldBalance,
   isFetching,
   isError,
   onRetry,
@@ -24,12 +26,16 @@ export function BalanceWidget({
   const formatted =
     balance === undefined ? '—' : formatMoney(balance, i18n.language);
   const value = isError && balance === undefined ? '—' : formatted;
+  const held = heldBalance === undefined ? 0 : Number(heldBalance);
+  const hasHeld = Number.isFinite(held) && held > 0;
+  const formattedHeld =
+    heldBalance === undefined ? '—' : formatMoney(heldBalance, i18n.language);
 
   if (variant === 'inline') {
     return (
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-baseline gap-1.5 text-xs text-on-surface-variant">
-          <span>{t('billing.balance')}</span>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-1.5 text-xs text-on-surface-variant">
+          <span>{t('billing.available')}</span>
           {isFetching && (
             <span
               aria-hidden="true"
@@ -45,6 +51,11 @@ export function BalanceWidget({
           >
             {value} {CURRENCY_SYMBOL}
           </span>
+          {hasHeld && (
+            <span className="text-[11px] font-medium text-warning">
+              · {t('billing.held')}: {formattedHeld} {CURRENCY_SYMBOL}
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -81,7 +92,7 @@ export function BalanceWidget({
     <div className="rounded-xl border border-outline-variant bg-surface-container-high p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-on-surface-variant">
-          {t('billing.balance')}
+          {t('billing.available')}
         </p>
         {isFetching && (
           <span
@@ -103,6 +114,13 @@ export function BalanceWidget({
           {CURRENCY_SYMBOL}
         </span>
       </p>
+
+      {hasHeld && (
+        <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-warning-container px-2 py-0.5 text-[11px] font-semibold text-on-warning-container">
+          <span aria-hidden="true">🔒</span>
+          {t('billing.held')}: {formattedHeld} {CURRENCY_SYMBOL}
+        </p>
+      )}
 
       {isError && (
         <button

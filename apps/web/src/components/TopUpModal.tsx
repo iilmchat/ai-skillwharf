@@ -50,7 +50,7 @@ export function TopUpModal({
   const mutation = useMutation({
     mutationFn: (payload: TopUpPayload) => topUpBalance(payload),
     onSuccess: (data) => {
-      queryClient.setQueryData(balanceQueryKey, data.balance);
+      queryClient.setQueryData(balanceQueryKey, { balance: data.balance });
       void queryClient.invalidateQueries({ queryKey: balanceQueryKey });
       void queryClient.invalidateQueries({ queryKey: ledgerQueryKey });
       onClose();

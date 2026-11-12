@@ -11,6 +11,8 @@
   },
   "billing": {
     "balance": "Balance",
+    "available": "Available",
+    "held": "On hold",
     "topUp": "Top up",
     "topUpTitle": "Top up balance",
     "topUpSubtitle": "Test top-up via the mock provider.",
@@ -32,6 +34,7 @@
       "retry": "Retry",
       "credit": "Credit",
       "debit": "Debit",
+      "pending": "Pending",
       "balanceAfter": "Balance after: {{amount}} ₽"
     },
     "errors": {
@@ -301,6 +304,10 @@
       "finished": "Task finished",
       "approved": "Resuming after approval"
     },
+    "payment": {
+      "title": "Payment pending",
+      "body": "The Pay-per-Outcome tool holds funds until the action is confirmed."
+    },
     "backHome": "Home",
     "backToChat": "Chat",
     "login": "Sign in",
@@ -443,7 +450,7 @@
       "emptyBody": "User and system actions will appear here.",
       "columns": {
         "time": "Time",
-        "actor": "Actor",
+        "actor": "User",
         "action": "Action",
         "target": "Target"
       }

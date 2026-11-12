@@ -4,6 +4,8 @@ import { api } from './api';
 
 export interface WalletBalance {
   balance: string;
+  /** Замороженные средства Pay-per-Outcome. */
+  heldBalance?: string;
 }
 
 export interface LedgerOperationResult extends WalletBalance {
@@ -62,10 +64,28 @@ function formatServerMessage(message: string | string[]): string {
     : translateServerMessage(message);
 }
 
-export async function fetchBalance(): Promise<string> {
+export async function fetchBalance(): Promise<WalletBalance> {
   const { data } = await api.get<WalletBalance>('/billing/balance');
 
-  return data.balance;
+  if (data.heldBalance !== undefined) {
+    return data;
+  }
+
+  // Обратная совместимость: пока API не отдаёт heldBalance, считаем его
+  // по незавершённым PENDING-записям Ledger.
+  try {
+    const ledger = await api.get<LedgerEntry[]>('/billing/ledger');
+    const held = ledger.data
+      .filter((entry) => entry.type.toUpperCase() === 'PENDING')
+      .reduce((sum, entry) => sum + Number(entry.amount), 0);
+
+    return {
+      balance: data.balance,
+      heldBalance: Number.isFinite(held) ? held.toFixed(2) : undefined,
+    };
+  } catch {
+    return data;
+  }
 }
 
 export async function topUpBalance(

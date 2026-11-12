@@ -29,14 +29,33 @@ function formatDate(value: string, language: string): string {
 
 function LedgerRow({ entry }: { entry: LedgerEntry }) {
   const { t, i18n } = useTranslation();
-  const isCredit = entry.type === 'credit';
+  const type = entry.type.toUpperCase();
+  const isPending = type === 'PENDING';
+  const isCredit = type === 'CREDIT';
+  const statusKey = isPending
+    ? 'billing.history.pending'
+    : isCredit
+      ? 'billing.history.credit'
+      : 'billing.history.debit';
+  const badgeClasses = isPending
+    ? 'bg-warning-container text-on-warning-container'
+    : isCredit
+      ? 'bg-success/10 text-success'
+      : 'bg-error-container text-on-error-container';
 
   return (
     <li className="flex items-start justify-between gap-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm font-medium text-on-surface">
-          {entry.description}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium text-on-surface">
+            {entry.description}
+          </p>
+          <span
+            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badgeClasses}`}
+          >
+            {t(statusKey)}
+          </span>
+        </div>
         <p className="mt-0.5 text-xs text-on-surface-variant">
           {formatDate(entry.createdAt, i18n.language)}
         </p>
@@ -49,12 +68,13 @@ function LedgerRow({ entry }: { entry: LedgerEntry }) {
 
       <span
         className={`shrink-0 text-sm font-semibold tabular-nums ${
-          isCredit ? 'text-success' : 'text-error'
+          isPending
+            ? 'text-warning'
+            : isCredit
+              ? 'text-success'
+              : 'text-error'
         }`}
       >
-        <span className="sr-only">
-          {isCredit ? t('billing.history.credit') : t('billing.history.debit')}
-        </span>
         {isCredit ? '+' : '−'}
         {formatMoney(entry.amount, i18n.language)} {CURRENCY_SYMBOL}
       </span>

@@ -74,7 +74,7 @@ Gateway использует эту схему (через библиотеку 
       "properties": {
         "model": {
           "type": "string",
-          "enum": ["Free", "Pay-per-Call", "Subscription", "Freemium"]
+          "enum": ["Free", "Pay-per-Call", "Pay-per-Outcome", "Subscription", "Freemium"]
         },
         "price": { "type": "number", "minimum": 0 },
         "currency": { "type": "string", "enum": ["RUB", "USD"] },

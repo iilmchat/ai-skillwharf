@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -20,6 +21,7 @@ import {
 } from '@langchain/langgraph';
 import type { InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema } from '@skillwharf/shared';
+import { randomUUID } from 'node:crypto';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
@@ -39,6 +41,7 @@ import {
   type SandboxToolOptions,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
   LlmRouterService,
@@ -97,6 +100,11 @@ const ChatStateAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => null,
   }),
+  /** Цены Pay-per-Outcome по именам инструментов. */
+  outcomePrices: Annotation<Record<string, OutcomePrice>>({
+    reducer: (_previous, next) => next,
+    default: () => ({}),
+  }),
 });
 
 type ChatState = typeof ChatStateAnnotation.State;
@@ -119,6 +127,12 @@ interface ToolPrice {
   price: number;
   skillName: string;
   freeCallsLimit: number;
+}
+
+/** Цена Pay-per-Outcome для инструмента. */
+export interface OutcomePrice {
+  price: number;
+  skillName: string;
 }
 
 /**
@@ -202,6 +216,37 @@ function skillDeclaresTool(
   });
 }
 
+/** Цены Pay-per-Outcome по инструментам из манифестов навыков. */
+function resolveOutcomePrices(
+  skills: InstalledSkill[],
+): Record<string, OutcomePrice> {
+  const prices: Record<string, OutcomePrice> = {};
+
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    const pricing = parsed.data.pricing;
+
+    if (
+      pricing?.model !== 'Pay-per-Outcome' ||
+      typeof pricing.price !== 'number' ||
+      pricing.price <= 0
+    ) {
+      continue;
+    }
+
+    for (const tool of parsed.data.dependencies?.tools ?? []) {
+      prices[tool] = { price: pricing.price, skillName: parsed.data.name };
+    }
+  }
+
+  return prices;
+}
+
 function lastMessage(messages: BaseMessage[]): BaseMessage | undefined {
   return messages[messages.length - 1];
 }
@@ -216,16 +261,30 @@ function toolRounds(messages: BaseMessage[]): number {
   return messages.filter((message) => toolCallsOf(message).length > 0).length;
 }
 
+interface EscrowHold {
+  entryId: string;
+}
+
+interface ToolExecutionOptions {
+  userId: string;
+  outcomePrices: Record<string, OutcomePrice>;
+  preAuthorizedHolds: Map<number, EscrowHold>;
+  billingService: BillingService;
+  agentGateway: AgentGatewayService;
+}
+
 /**
- * Выполняет `tool_calls` текущего ответа модели. Ошибки инструмента
- * (например, от paywall) пробрасываются наружу и прерывают граф.
+ * Выполняет `tool_calls` текущего ответа модели с runtime-политиками:
+ * Agent Gateway проверяет аргументы, Pay-per-Outcome инструменты проходят
+ * через hold → capture/cancel. Ошибки инструмента пробрасываются наружу.
  */
 async function executeToolCalls(
   tools: StructuredToolInterface[],
   calls: ToolCall[],
+  options: ToolExecutionOptions,
 ): Promise<ToolMessage[]> {
   return Promise.all(
-    calls.map(async (call) => {
+    calls.map(async (call, index) => {
       const tool = tools.find((candidate) => candidate.name === call.name);
 
       if (!tool) {
@@ -237,7 +296,34 @@ async function executeToolCalls(
         });
       }
 
-      const result = await tool.invoke(call.args);
+      const args = options.agentGateway.validateToolCall(call.name, call.args);
+      const outcome = options.outcomePrices[call.name];
+      let hold = options.preAuthorizedHolds.get(index);
+
+      if (!hold && outcome) {
+        const authorized = await options.billingService.authorizeHold(
+          options.userId,
+          outcome.price,
+          randomUUID(),
+        );
+        hold = { entryId: authorized.entryId };
+      }
+
+      let result: unknown;
+
+      try {
+        result = await tool.invoke(args);
+      } catch (error) {
+        if (hold) {
+          await options.billingService.cancelHold(hold.entryId);
+        }
+
+        throw error;
+      }
+
+      if (hold) {
+        await options.billingService.captureHold(hold.entryId);
+      }
 
       return new ToolMessage({
         tool_call_id: call.id ?? '',
@@ -262,7 +348,12 @@ type ApprovalGate = (conversationId: string, userId: string) => Promise<void>;
  * Инструменты приходят в состоянии, потому что содержат привязанный к
  * пользователю paywall-хук.
  */
-function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
+function buildChatGraph(
+  llmService: LlmService,
+  waitForApproval: ApprovalGate,
+  billingService: BillingService,
+  agentGateway: AgentGatewayService,
+) {
   return new StateGraph(ChatStateAnnotation)
     .addNode('llm', async (state: ChatState, config) => {
       const emit = getWriter(config);
@@ -309,11 +400,51 @@ function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
       const emit = getWriter(config);
       const calls = toolCallsOf(lastMessage(state.messages));
       const approvalRequired = new Set(state.approvalRequiredTools);
-      const approvalCall = calls.find((call) =>
+      const approvalCalls = calls.filter((call) =>
         approvalRequired.has(call.name),
       );
+      const preAuthorizedHolds = new Map<number, EscrowHold>();
 
-      if (approvalCall) {
+      if (approvalCalls.length > 0) {
+        // Сначала валидируем все approval-вызовы, чтобы не зарезервировать
+        // деньги под действие, которое всё равно заблокирует политика.
+        for (const call of approvalCalls) {
+          agentGateway.validateToolCall(call.name, call.args);
+        }
+
+        const createdHolds: EscrowHold[] = [];
+
+        try {
+          // Pay-per-Outcome резервируется до ожидания одобрения и остаётся
+          // PENDING, пока пользователь не подтвердит действие.
+          for (const [index, call] of calls.entries()) {
+            if (!approvalRequired.has(call.name)) {
+              continue;
+            }
+
+            const outcome = state.outcomePrices[call.name];
+
+            if (!outcome) {
+              continue;
+            }
+
+            const authorized = await billingService.authorizeHold(
+              state.userId,
+              outcome.price,
+              randomUUID(),
+            );
+            const hold = { entryId: authorized.entryId };
+
+            preAuthorizedHolds.set(index, hold);
+            createdHolds.push(hold);
+          }
+        } catch (error) {
+          await Promise.all(
+            createdHolds.map((hold) => billingService.cancelHold(hold.entryId)),
+          );
+          throw error;
+        }
+
         // Ставим промис в Map до отправки события, чтобы approve_action
         // не мог прийти раньше, чем сохранено состояние ожидания.
         const approved = waitForApproval(state.conversationId, state.userId);
@@ -323,7 +454,7 @@ function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
           conversationId: state.conversationId,
           agentId: DEFAULT_OFFICE_AGENT_ID,
           status: 'waiting_approval',
-          task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(approvalCall.name)}`,
+          task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(approvalCalls[0]?.name ?? '')}`,
         } satisfies ChatOfficeEvent);
 
         await approved;
@@ -344,7 +475,13 @@ function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
       return {
         messages: [
           ...state.messages,
-          ...(await executeToolCalls(state.availableTools, calls)),
+          ...(await executeToolCalls(state.availableTools, calls, {
+            userId: state.userId,
+            outcomePrices: state.outcomePrices,
+            preAuthorizedHolds,
+            billingService,
+            agentGateway,
+          })),
         ],
       };
     })
@@ -363,6 +500,7 @@ function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
   private readonly graph: ReturnType<typeof buildChatGraph>;
   /**
    * Ожидающие одобрения диалоги: ключ — `conversationId`, значение —
@@ -379,9 +517,13 @@ export class ChatService {
     private readonly billingService: BillingService,
     private readonly skillsService: SkillsService,
     private readonly llmRouterService: LlmRouterService,
+    private readonly agentGateway: AgentGatewayService,
   ) {
-    this.graph = buildChatGraph(this.llmService, (conversationId, userId) =>
-      this.waitForApproval(conversationId, userId),
+    this.graph = buildChatGraph(
+      this.llmService,
+      (conversationId, userId) => this.waitForApproval(conversationId, userId),
+      this.billingService,
+      this.agentGateway,
     );
   }
 
@@ -421,7 +563,9 @@ export class ChatService {
     conversationId: string,
     content: string,
   ): Promise<ChatReply> {
-    const { messages, tools, approvalRequiredTools } =
+    this.logAgentContext(userId, conversationId);
+
+    const { messages, tools, approvalRequiredTools, outcomePrices } =
       await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
@@ -434,6 +578,7 @@ export class ChatService {
         messages,
         availableTools: tools,
         approvalRequiredTools,
+        outcomePrices,
         llmRoute,
       });
       reply = state.reply;
@@ -466,7 +611,9 @@ export class ChatService {
     onDelta: (text: string) => void,
     onOfficeEvent?: (event: OfficeEvent) => void,
   ): Promise<ChatReply> {
-    const { messages, tools, approvalRequiredTools } =
+    this.logAgentContext(userId, conversationId);
+
+    const { messages, tools, approvalRequiredTools, outcomePrices } =
       await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
@@ -480,6 +627,7 @@ export class ChatService {
           messages,
           availableTools: tools,
           approvalRequiredTools,
+          outcomePrices,
           llmRoute,
         },
         { streamMode: ['custom', 'values'] },
@@ -542,6 +690,7 @@ export class ChatService {
     messages: BaseMessage[];
     tools: StructuredToolInterface[];
     approvalRequiredTools: string[];
+    outcomePrices: Record<string, OutcomePrice>;
   }> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -577,8 +726,9 @@ export class ChatService {
     const skills = await this.skillsService.getEnabledSkills();
     const tools = this.buildTools(userId, skills);
     const approvalRequiredTools = resolveApprovalTools(skills);
+    const outcomePrices = resolveOutcomePrices(skills);
 
-    return { messages, tools, approvalRequiredTools };
+    return { messages, tools, approvalRequiredTools, outcomePrices };
   }
 
   /** Сохраняет ответ ассистента и обновляет время диалога. */
@@ -612,6 +762,21 @@ export class ChatService {
     return new Promise<void>((resolve) => {
       this.pendingApprovals.set(conversationId, { userId, resume: resolve });
     });
+  }
+
+  /**
+   * OTel-атрибуты запуска агента: агент и tenant (владелец диалога).
+   * Пишем JSON в лог приложения, чтобы позже подключить OTLP-экспорт.
+   */
+  private logAgentContext(userId: string, conversationId: string): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'gen_ai.agent.run',
+        'gen_ai.agent.id': DEFAULT_OFFICE_AGENT_ID,
+        'gen_ai.tenant.id': userId,
+        conversationId,
+      }),
+    );
   }
 
   /**

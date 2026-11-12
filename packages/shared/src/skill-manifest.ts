@@ -46,7 +46,13 @@ export const skillPermissionSchema = z.enum([
 
 /** Модель монетизации навыка. */
 export const skillPricingSchema = z.object({
-  model: z.enum(["Free", "Pay-per-Call", "Subscription", "Freemium"]),
+  model: z.enum([
+    "Free",
+    "Pay-per-Call",
+    "Pay-per-Outcome",
+    "Subscription",
+    "Freemium",
+  ]),
   price: z.number().min(0).optional(),
   currency: z.enum(["RUB", "USD"]).optional(),
   freeCallsLimit: z.number().int().min(0).optional(),

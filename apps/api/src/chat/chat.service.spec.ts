@@ -30,6 +30,7 @@ import {
 } from '../llm/llm.service.js';
 import { LlmRouterService } from '../llm-router/llm-router.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import {
   SANDBOX_NETWORK_FLAG,
   type SandboxService,
@@ -56,6 +57,9 @@ interface SandboxMock {
 interface BillingMock {
   checkAndChargeSkill: MockFn;
   getBalance: MockFn;
+  authorizeHold: MockFn;
+  captureHold: MockFn;
+  cancelHold: MockFn;
 }
 
 interface SkillsMock {
@@ -67,7 +71,7 @@ interface RouterMock {
 }
 
 interface TestPricing {
-  model: 'Free' | 'Pay-per-Call' | 'Freemium';
+  model: 'Free' | 'Pay-per-Call' | 'Pay-per-Outcome' | 'Freemium';
   price?: number;
   currency?: 'RUB' | 'USD';
   freeCallsLimit?: number;
@@ -142,7 +146,13 @@ describe('ChatService', () => {
       message: { create: vi.fn(), findMany: vi.fn() },
     };
     sandbox = { runCommand: vi.fn() };
-    billing = { checkAndChargeSkill: vi.fn(), getBalance: vi.fn() };
+    billing = {
+      checkAndChargeSkill: vi.fn(),
+      getBalance: vi.fn(),
+      authorizeHold: vi.fn(),
+      captureHold: vi.fn(),
+      cancelHold: vi.fn(),
+    };
     skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
     router = { selectRoute: vi.fn().mockResolvedValue(null) };
 
@@ -159,6 +169,7 @@ describe('ChatService', () => {
         { provide: BillingService, useValue: billing },
         { provide: SkillsService, useValue: skills },
         { provide: LlmRouterService, useValue: router },
+        AgentGatewayService,
       ],
     }).compile();
 
@@ -352,6 +363,77 @@ describe('ChatService', () => {
           RUN_WORKFLOW_TOOL_NAME,
         ]),
       );
+    });
+
+    it('captureHold при успешном Pay-per-Outcome инструменте', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('outcome-skill', SANDBOX_TOOL_NAME, {
+          model: 'Pay-per-Outcome',
+          price: 1.5,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'выполни задачу' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
+      sandbox.runCommand.mockResolvedValue('hi\n');
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'выполни задачу'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      expect(billing.authorizeHold).toHaveBeenCalledWith(
+        USER_ID,
+        1.5,
+        expect.any(String),
+      );
+      expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
+      expect(billing.cancelHold).not.toHaveBeenCalled();
+    });
+
+    it('cancelHold при ошибке Pay-per-Outcome инструмента', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('outcome-skill', SANDBOX_TOOL_NAME, {
+          model: 'Pay-per-Outcome',
+          price: 1.5,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'выполни задачу' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+      );
+      sandbox.runCommand.mockRejectedValue(new Error('sandbox failed'));
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'выполни задачу'),
+      ).rejects.toThrow('sandbox failed');
+
+      expect(billing.cancelHold).toHaveBeenCalledWith('hold-1');
+      expect(billing.captureHold).not.toHaveBeenCalled();
+    });
+
+    it('блокирует опасный вызов инструмента через Agent Gateway', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'удали всё' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'rm -rf /' })),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'удали всё'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+      expect(billing.authorizeHold).not.toHaveBeenCalled();
     });
 
     it('не запускает агента при балансе ниже минимального', async () => {

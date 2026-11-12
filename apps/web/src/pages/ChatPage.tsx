@@ -334,7 +334,8 @@ export function ChatPage() {
 
           <div className="border-t border-outline-variant p-4">
             <BalanceWidget
-              balance={balanceQuery.data}
+              balance={balanceQuery.data?.balance}
+              heldBalance={balanceQuery.data?.heldBalance}
               isFetching={balanceQuery.isFetching}
               isError={balanceQuery.isError}
               onRetry={() => {
@@ -491,7 +492,8 @@ export function ChatPage() {
           <div className="border-b border-outline-variant bg-surface-container/50 px-4 py-2 md:hidden">
             <BalanceWidget
               variant="inline"
-              balance={balanceQuery.data}
+              balance={balanceQuery.data?.balance}
+              heldBalance={balanceQuery.data?.heldBalance}
               isFetching={balanceQuery.isFetching}
               isError={balanceQuery.isError}
               onRetry={() => {
@@ -667,7 +669,7 @@ export function ChatPage() {
         open={isTopUpOpen}
         onClose={closeTopUp}
         userId={user?.id ?? ''}
-        balance={balanceQuery.data}
+        balance={balanceQuery.data?.balance}
       />
 
       <LedgerHistoryModal open={isHistoryOpen} onClose={closeHistory} />

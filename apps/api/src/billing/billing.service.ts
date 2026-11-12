@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -14,6 +15,14 @@ export interface WalletBalance {
 
 export interface LedgerOperationResult extends WalletBalance {
   entryId: string;
+}
+
+/** Результат escrow-операции: hold, capture или cancel. */
+export interface EscrowOperationResult extends WalletBalance {
+  entryId: string;
+  amount: string;
+  heldBalance: string;
+  type: 'PENDING' | 'debit' | 'credit';
 }
 
 /** Запись истории операций для отдачи в API. */
@@ -31,7 +40,13 @@ const LEDGER_HISTORY_LIMIT = 50;
 
 interface ExistingLedgerEntry {
   id: string;
-  wallet: { userId: string; balance: Prisma.Decimal };
+  type: string;
+  amount: Prisma.Decimal;
+  wallet: {
+    userId: string;
+    balance: Prisma.Decimal;
+    heldBalance: Prisma.Decimal;
+  };
 }
 
 @Injectable()
@@ -122,7 +137,11 @@ export class BillingService {
       });
     } catch (error) {
       // Параллельный запрос с тем же ключом мог успеть первым.
-      const raced = await this.replayAfterUniqueViolation(error, idempotencyKey, userId);
+      const raced = await this.replayAfterUniqueViolation(
+        error,
+        idempotencyKey,
+        userId,
+      );
 
       if (raced) {
         return raced;
@@ -191,7 +210,11 @@ export class BillingService {
         return { balance: formatBalance(wallet.balance), entryId: entry.id };
       });
     } catch (error) {
-      const raced = await this.replayAfterUniqueViolation(error, idempotencyKey, userId);
+      const raced = await this.replayAfterUniqueViolation(
+        error,
+        idempotencyKey,
+        userId,
+      );
 
       if (raced) {
         return raced;
@@ -199,6 +222,206 @@ export class BillingService {
 
       throw error;
     }
+  }
+
+  /**
+   * Pay-per-Outcome, фаза 1: резервирует сумму под будущую задачу.
+   * `balance` уменьшается, `heldBalance` растёт, в Ledger пишется PENDING.
+   */
+  async authorizeHold(
+    userId: string,
+    amount: number,
+    idempotencyKey: string,
+  ): Promise<EscrowOperationResult> {
+    this.assertPositiveAmount(amount);
+    this.assertIdempotencyKey(idempotencyKey);
+
+    const existing = await this.findExistingEntry(idempotencyKey);
+
+    if (existing) {
+      return this.replayEscrow(existing, userId);
+    }
+
+    const decimalAmount = new Prisma.Decimal(amount);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updateResult = await tx.wallet.updateMany({
+          where: {
+            userId,
+            balance: { gte: decimalAmount },
+          },
+          data: {
+            balance: { decrement: decimalAmount },
+            heldBalance: { increment: decimalAmount },
+          },
+        });
+
+        if (updateResult.count === 0) {
+          throw new BadRequestException(ERROR_KEYS.insufficientFunds);
+        }
+
+        const wallet = await tx.wallet.findUniqueOrThrow({
+          where: { userId },
+        });
+
+        const entry = await tx.ledgerEntry.create({
+          data: {
+            walletId: wallet.id,
+            amount: decimalAmount,
+            balanceAfter: wallet.balance,
+            type: 'PENDING',
+            description: 'Резерв под задачу (Pay-per-Outcome)',
+            idempotencyKey,
+          },
+        });
+
+        return {
+          balance: formatBalance(wallet.balance),
+          heldBalance: formatBalance(wallet.heldBalance),
+          amount: formatBalance(decimalAmount),
+          entryId: entry.id,
+          type: 'PENDING' as const,
+        };
+      });
+    } catch (error) {
+      const raced = await this.replayEscrowAfterUniqueViolation(
+        error,
+        idempotencyKey,
+        userId,
+      );
+
+      if (raced) {
+        return raced;
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Pay-per-Outcome, фаза 2 (успех): PENDING становится debit.
+   * `heldBalance` уменьшается, `balance` уже был уменьшен при hold.
+   */
+  async captureHold(transactionId: string): Promise<EscrowOperationResult> {
+    this.assertTransactionId(transactionId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const entry = await tx.ledgerEntry.findUnique({
+        where: { id: transactionId },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          walletId: true,
+          wallet: {
+            select: { userId: true, balance: true, heldBalance: true },
+          },
+        },
+      });
+
+      if (!entry) {
+        throw new NotFoundException(
+          `Escrow-транзакция ${transactionId} не найдена`,
+        );
+      }
+
+      if (entry.type === 'debit') {
+        return this.escrowResult(entry, entry.wallet, 'debit');
+      }
+
+      if (entry.type !== 'PENDING') {
+        throw new ConflictException('Escrow-транзакция уже отменена');
+      }
+
+      const updateResult = await tx.wallet.updateMany({
+        where: {
+          id: entry.walletId,
+          heldBalance: { gte: entry.amount },
+        },
+        data: {
+          heldBalance: { decrement: entry.amount },
+        },
+      });
+
+      if (updateResult.count === 0) {
+        throw new ConflictException('На кошельке недостаточно heldBalance');
+      }
+
+      const wallet = await tx.wallet.findUniqueOrThrow({
+        where: { id: entry.walletId },
+      });
+
+      await tx.ledgerEntry.update({
+        where: { id: entry.id },
+        data: { type: 'debit' },
+      });
+
+      return this.escrowResult(entry, wallet, 'debit');
+    });
+  }
+
+  /**
+   * Pay-per-Outcome, фаза 2 (ошибка/отмена): PENDING становится credit.
+   * `heldBalance` уменьшается, `balance` возвращается пользователю.
+   */
+  async cancelHold(transactionId: string): Promise<EscrowOperationResult> {
+    this.assertTransactionId(transactionId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const entry = await tx.ledgerEntry.findUnique({
+        where: { id: transactionId },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          walletId: true,
+          wallet: {
+            select: { userId: true, balance: true, heldBalance: true },
+          },
+        },
+      });
+
+      if (!entry) {
+        throw new NotFoundException(
+          `Escrow-транзакция ${transactionId} не найдена`,
+        );
+      }
+
+      if (entry.type === 'credit') {
+        return this.escrowResult(entry, entry.wallet, 'credit');
+      }
+
+      if (entry.type !== 'PENDING') {
+        throw new ConflictException('Escrow-транзакция уже списана');
+      }
+
+      const updateResult = await tx.wallet.updateMany({
+        where: {
+          id: entry.walletId,
+          heldBalance: { gte: entry.amount },
+        },
+        data: {
+          heldBalance: { decrement: entry.amount },
+          balance: { increment: entry.amount },
+        },
+      });
+
+      if (updateResult.count === 0) {
+        throw new ConflictException('На кошельке недостаточно heldBalance');
+      }
+
+      const wallet = await tx.wallet.findUniqueOrThrow({
+        where: { id: entry.walletId },
+      });
+
+      await tx.ledgerEntry.update({
+        where: { id: entry.id },
+        data: { type: 'credit', balanceAfter: wallet.balance },
+      });
+
+      return this.escrowResult(entry, wallet, 'credit');
+    });
   }
 
   /**
@@ -293,6 +516,12 @@ export class BillingService {
     }
   }
 
+  private assertTransactionId(transactionId: string): void {
+    if (typeof transactionId !== 'string' || transactionId.trim() === '') {
+      throw new BadRequestException('transactionId обязателен');
+    }
+  }
+
   private findExistingEntry(
     idempotencyKey: string,
   ): Promise<ExistingLedgerEntry | null> {
@@ -300,7 +529,11 @@ export class BillingService {
       where: { idempotencyKey },
       select: {
         id: true,
-        wallet: { select: { userId: true, balance: true } },
+        type: true,
+        amount: true,
+        wallet: {
+          select: { userId: true, balance: true, heldBalance: true },
+        },
       },
     });
   }
@@ -322,6 +555,34 @@ export class BillingService {
     };
   }
 
+  /** Повторный escrow-запрос: возвращаем состояние существующей записи. */
+  private replayEscrow(
+    entry: ExistingLedgerEntry,
+    userId: string,
+  ): EscrowOperationResult {
+    if (entry.wallet.userId !== userId) {
+      throw new ConflictException(
+        'idempotencyKey уже использован другим пользователем',
+      );
+    }
+
+    return this.escrowResult(entry, entry.wallet, escrowType(entry.type));
+  }
+
+  private escrowResult(
+    entry: { id: string; amount: Prisma.Decimal },
+    wallet: { balance: Prisma.Decimal; heldBalance: Prisma.Decimal },
+    type: 'PENDING' | 'debit' | 'credit',
+  ): EscrowOperationResult {
+    return {
+      balance: formatBalance(wallet.balance),
+      heldBalance: formatBalance(wallet.heldBalance),
+      amount: formatBalance(entry.amount),
+      entryId: entry.id,
+      type,
+    };
+  }
+
   private async replayAfterUniqueViolation(
     error: unknown,
     idempotencyKey: string,
@@ -335,10 +596,32 @@ export class BillingService {
 
     return entry ? this.replayExisting(entry, userId) : null;
   }
+
+  private async replayEscrowAfterUniqueViolation(
+    error: unknown,
+    idempotencyKey: string,
+    userId: string,
+  ): Promise<EscrowOperationResult | null> {
+    if (!isUniqueViolation(error)) {
+      return null;
+    }
+
+    const entry = await this.findExistingEntry(idempotencyKey);
+
+    return entry ? this.replayEscrow(entry, userId) : null;
+  }
 }
 
 function formatBalance(balance: Prisma.Decimal): string {
   return balance.toFixed(2);
+}
+
+function escrowType(type: string): 'PENDING' | 'debit' | 'credit' {
+  if (type === 'PENDING' || type === 'debit' || type === 'credit') {
+    return type;
+  }
+
+  throw new Error(`Неподдерживаемый тип escrow-записи: ${type}`);
 }
 
 function isUniqueViolation(error: unknown): boolean {
