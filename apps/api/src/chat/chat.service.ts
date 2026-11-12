@@ -25,7 +25,10 @@ import { randomUUID } from 'node:crypto';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
+  CHECK_FACTS_TOOL_NAME,
   EXEC_TOOL_NAME,
+  EXTRACT_DOCUMENT_DATA_TOOL_NAME,
+  GENERATE_ARTICLE_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
@@ -33,6 +36,7 @@ import {
   OZON_MCP_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  SCREEN_RESUME_TOOL_NAME,
   SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
@@ -872,6 +876,38 @@ export class ChatService {
       tools.push(
         this.llmService.createRunWorkflowTool({
           beforeExecute: beforeExecuteFor(RUN_WORKFLOW_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, GENERATE_ARTICLE_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createGenerateArticleTool({
+          beforeExecute: beforeExecuteFor(GENERATE_ARTICLE_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, CHECK_FACTS_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createCheckFactsTool({
+          beforeExecute: beforeExecuteFor(CHECK_FACTS_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, SCREEN_RESUME_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createScreenResumeTool({
+          beforeExecute: beforeExecuteFor(SCREEN_RESUME_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, EXTRACT_DOCUMENT_DATA_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createExtractDocumentDataTool({
+          beforeExecute: beforeExecuteFor(EXTRACT_DOCUMENT_DATA_TOOL_NAME),
         }),
       );
     }

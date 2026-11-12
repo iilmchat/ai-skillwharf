@@ -36,6 +36,12 @@
 - Agent Gateway: `execute_sandbox_code` с `rm -rf /` блокируется `ForbiddenException`, а запросы `web_search` со словами `password`/`secret` маскируются до вызова инструмента.
 - Манифесты поддерживают `pricing.model: Pay-per-Outcome`; миграция `add_escrow_support`.
 
+### Content, HR & Legal
+
+- Добавлены стартовые навыки `dzen-article`, `fact-checker`, `resume-screener` и `document-analyzer`.
+- Реализованы mock-инструменты `generate_article`, `check_facts`, `screen_resume` и `extract_document_data`; реальные API Дзена, фактчекинга, HR-систем и юридических сервисов пока не подключены.
+- `dzen-article` использует Pay-per-Outcome (100 ₽) и `requiresApproval: true`; `ChatService` подключает инструменты только при наличии соответствующего включённого навыка.
+
 ## [0.1.0] - 2026-11-12
 
 Первый публичный MVP: аутентификация, чат с агентом, песочница, биллинг,

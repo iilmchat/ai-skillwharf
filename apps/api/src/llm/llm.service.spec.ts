@@ -15,6 +15,7 @@ import {
 } from '../sandbox/sandbox.service.js';
 import {
   EXEC_TOOL_NAME,
+  GENERATE_ARTICLE_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
   SANDBOX_TOOL_DESCRIPTION,
@@ -424,6 +425,19 @@ describe('LlmService', () => {
           text: 'Ваш заказ готов',
         }),
       ).resolves.toBe('Сообщение отправлено в telegram для @customer');
+    });
+  });
+
+  describe('createGenerateArticleTool', () => {
+    it('возвращает текст с указанной темой', async () => {
+      const service = createService();
+
+      const tool = service.createGenerateArticleTool();
+
+      expect(tool.name).toBe(GENERATE_ARTICLE_TOOL_NAME);
+      await expect(tool.invoke({ topic: 'Как выбрать CRM' })).resolves.toBe(
+        "Статья на тему 'Как выбрать CRM' успешно сгенерирована.",
+      );
     });
   });
 

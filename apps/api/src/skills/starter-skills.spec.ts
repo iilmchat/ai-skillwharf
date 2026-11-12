@@ -24,6 +24,10 @@ const STARTER_SKILLS = [
   '08-productivity/google-workspace/SKILL.md',
   '09-creative/midjourney-api/SKILL.md',
   '10-orchestration/workflow-orchestrator/SKILL.md',
+  '11-content/dzen-article/SKILL.md',
+  '12-content/fact-checker/SKILL.md',
+  '13-hr/resume-screener/SKILL.md',
+  '14-legal/document-analyzer/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

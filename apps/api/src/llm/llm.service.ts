@@ -152,6 +152,54 @@ export const RunWorkflowToolSchema = z.object({
   steps: z.array(z.string()).describe('Шаги цепочки задач'),
 });
 
+/** Имя mock-инструмента генерации статьи. */
+export const GENERATE_ARTICLE_TOOL_NAME = 'generate_article';
+
+/** Описание mock-инструмента генерации статьи. */
+export const GENERATE_ARTICLE_TOOL_DESCRIPTION =
+  'Генерирует статью для Дзен по теме (заглушка)';
+
+/** Схема аргументов `generate_article`. */
+export const GenerateArticleToolSchema = z.object({
+  topic: z.string().describe('Тема статьи'),
+});
+
+/** Имя mock-инструмента проверки фактов. */
+export const CHECK_FACTS_TOOL_NAME = 'check_facts';
+
+/** Описание mock-инструмента проверки фактов. */
+export const CHECK_FACTS_TOOL_DESCRIPTION =
+  'Проверяет факты в тексте (заглушка)';
+
+/** Схема аргументов `check_facts`. */
+export const CheckFactsToolSchema = z.object({
+  text: z.string().describe('Текст для проверки'),
+});
+
+/** Имя mock-инструмента скрининга резюме. */
+export const SCREEN_RESUME_TOOL_NAME = 'screen_resume';
+
+/** Описание mock-инструмента скрининга резюме. */
+export const SCREEN_RESUME_TOOL_DESCRIPTION =
+  'Оценивает резюме кандидата (заглушка)';
+
+/** Схема аргументов `screen_resume`. */
+export const ScreenResumeToolSchema = z.object({
+  resumeText: z.string().describe('Текст резюме'),
+});
+
+/** Имя mock-инструмента извлечения данных из документа. */
+export const EXTRACT_DOCUMENT_DATA_TOOL_NAME = 'extract_document_data';
+
+/** Описание mock-инструмента извлечения данных из документа. */
+export const EXTRACT_DOCUMENT_DATA_TOOL_DESCRIPTION =
+  'Извлекает сумму и дату из договора (заглушка)';
+
+/** Схема аргументов `extract_document_data`. */
+export const ExtractDocumentDataToolSchema = z.object({
+  documentText: z.string().describe('Текст документа'),
+});
+
 /** Инструкция по умолчанию живёт в prompts/default-prompt.ts. */
 
 /**
@@ -408,6 +456,70 @@ export class LlmService {
         await options.beforeExecute?.();
 
         return `Цепочка задач выполнена: ${steps.join(' -> ')}`;
+      },
+    });
+  }
+
+  /** Mock-инструмент генерации статьи для Дзен. */
+  createGenerateArticleTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: GENERATE_ARTICLE_TOOL_NAME,
+      description: GENERATE_ARTICLE_TOOL_DESCRIPTION,
+      schema: GenerateArticleToolSchema,
+      func: async ({ topic }) => {
+        await options.beforeExecute?.();
+
+        return `Статья на тему '${topic}' успешно сгенерирована.`;
+      },
+    });
+  }
+
+  /** Mock-инструмент проверки фактов. */
+  createCheckFactsTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: CHECK_FACTS_TOOL_NAME,
+      description: CHECK_FACTS_TOOL_DESCRIPTION,
+      schema: CheckFactsToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return 'Факты подтверждены (0 ошибок).';
+      },
+    });
+  }
+
+  /** Mock-инструмент скрининга резюме. */
+  createScreenResumeTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: SCREEN_RESUME_TOOL_NAME,
+      description: SCREEN_RESUME_TOOL_DESCRIPTION,
+      schema: ScreenResumeToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return 'Кандидат подходит (Score: 85/100).';
+      },
+    });
+  }
+
+  /** Mock-инструмент извлечения данных из договора. */
+  createExtractDocumentDataTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: EXTRACT_DOCUMENT_DATA_TOOL_NAME,
+      description: EXTRACT_DOCUMENT_DATA_TOOL_DESCRIPTION,
+      schema: ExtractDocumentDataToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return '{"amount": "100000", "date": "2026-11-13"}';
       },
     });
   }

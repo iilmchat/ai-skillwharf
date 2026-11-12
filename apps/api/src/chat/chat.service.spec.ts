@@ -14,7 +14,10 @@ import type { InstalledSkill } from '@prisma/client';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
+  CHECK_FACTS_TOOL_NAME,
   EXEC_TOOL_NAME,
+  EXTRACT_DOCUMENT_DATA_TOOL_NAME,
+  GENERATE_ARTICLE_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
@@ -22,6 +25,7 @@ import {
   OZON_MCP_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  SCREEN_RESUME_TOOL_NAME,
   SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
@@ -361,6 +365,42 @@ describe('ChatService', () => {
           GOOGLE_DOCS_CREATE_TOOL_NAME,
           GENERATE_IMAGE_TOOL_NAME,
           RUN_WORKFLOW_TOOL_NAME,
+        ]),
+      );
+    });
+
+    it('подключает content, HR и legal mock-инструменты', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('dzen-article', GENERATE_ARTICLE_TOOL_NAME, {
+          model: 'Pay-per-Outcome',
+          price: 100,
+        }),
+        createSkill('fact-checker', CHECK_FACTS_TOOL_NAME),
+        createSkill('resume-screener', SCREEN_RESUME_TOOL_NAME),
+        createSkill('document-analyzer', EXTRACT_DOCUMENT_DATA_TOOL_NAME),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'подготовь статью' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('Готово')),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'подготовь статью'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      const [, tools] = chatWithToolsStream.mock.calls[0] as [
+        BaseMessage[],
+        { name: string }[],
+      ];
+
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          GENERATE_ARTICLE_TOOL_NAME,
+          CHECK_FACTS_TOOL_NAME,
+          SCREEN_RESUME_TOOL_NAME,
+          EXTRACT_DOCUMENT_DATA_TOOL_NAME,
         ]),
       );
     });
