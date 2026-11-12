@@ -197,6 +197,7 @@ describe('ChatGateway', () => {
         agentId: 'default',
         status: 'waiting_approval',
         task: 'Ожидание подтверждения',
+        reason: 'approval',
       });
     });
 

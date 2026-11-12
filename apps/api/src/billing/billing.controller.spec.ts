@@ -60,6 +60,34 @@ describe('BillingController', () => {
     controller = moduleRef.get(BillingController);
   });
 
+  describe('getBalance', () => {
+    it('возвращает balance и heldBalance', async () => {
+      const request = createRequest({
+        userId: USER_ID,
+        email: 'user@example.com',
+        role: 'user',
+      });
+      billing.getBalance.mockResolvedValue({
+        balance: '10.00',
+        heldBalance: '100.00',
+      });
+
+      await expect(controller.getBalance(request)).resolves.toEqual({
+        balance: '10.00',
+        heldBalance: '100.00',
+      });
+      expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('требует аутентификации', () => {
+      const request = createRequest();
+
+      expect(() => controller.getBalance(request)).toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
   describe('topup', () => {
     it('позволяет пользователю пополнить свой баланс', async () => {
       const request = createRequest({
@@ -68,9 +96,9 @@ describe('BillingController', () => {
         role: 'user',
       });
 
-      await expect(controller.topup(request, createDto(USER_ID))).resolves.toEqual(
-        { balance: '500.00', entryId: 'entry-1' },
-      );
+      await expect(
+        controller.topup(request, createDto(USER_ID)),
+      ).resolves.toEqual({ balance: '500.00', entryId: 'entry-1' });
 
       expect(billing.addFunds).toHaveBeenCalledWith(
         USER_ID,

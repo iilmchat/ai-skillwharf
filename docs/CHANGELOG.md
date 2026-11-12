@@ -35,6 +35,8 @@
 - `ChatService` автоматически резервирует средства для инструментов с `pricing.model: Pay-per-Outcome`: успех → capture, ошибка → cancel, `requiresApproval` → hold остаётся `PENDING` до одобрения.
 - Agent Gateway: `execute_sandbox_code` с `rm -rf /` блокируется `ForbiddenException`, а запросы `web_search` со словами `password`/`secret` маскируются до вызова инструмента.
 - Манифесты поддерживают `pricing.model: Pay-per-Outcome`; миграция `add_escrow_support`.
+- `GET /api/v1/billing/balance` возвращает `heldBalance` — сумму незавершённых `PENDING`-записей Ledger.
+- Событие `office_event` со статусом `waiting_approval` содержит `reason`: `payment` для Pay-per-Outcome и `approval` для остальных инструментов.
 
 ### Content, HR & Legal
 

@@ -452,6 +452,11 @@ function buildChatGraph(
         // Ставим промис в Map до отправки события, чтобы approve_action
         // не мог прийти раньше, чем сохранено состояние ожидания.
         const approved = waitForApproval(state.conversationId, state.userId);
+        const reason = approvalCalls.some((call) =>
+          Boolean(state.outcomePrices[call.name]),
+        )
+          ? ('payment' as const)
+          : ('approval' as const);
 
         emit?.({
           type: 'office',
@@ -459,6 +464,7 @@ function buildChatGraph(
           agentId: DEFAULT_OFFICE_AGENT_ID,
           status: 'waiting_approval',
           task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(approvalCalls[0]?.name ?? '')}`,
+          reason,
         } satisfies ChatOfficeEvent);
 
         await approved;
@@ -661,6 +667,10 @@ export class ChatService {
                 agentId: officeEvent.agentId,
                 status: officeEvent.status,
                 task: officeEvent.task,
+                ...(officeEvent.reason === 'approval' ||
+                officeEvent.reason === 'payment'
+                  ? { reason: officeEvent.reason }
+                  : {}),
               });
             }
           }

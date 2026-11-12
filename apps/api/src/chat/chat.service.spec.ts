@@ -833,6 +833,7 @@ describe('ChatService', () => {
         agentId: 'default',
         status: 'waiting_approval',
         task: 'Ожидание подтверждения: Выполнение кода',
+        reason: 'approval',
       });
       // До одобрения песочница не запускается.
       expect(sandbox.runCommand).not.toHaveBeenCalled();
@@ -845,6 +846,62 @@ describe('ChatService', () => {
 
       expect(result.reply).toBe('Готово: hi');
       expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
+    });
+
+    it('помечает waiting_approval для Pay-per-Outcome как payment', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill(
+          'outcome-approval',
+          SANDBOX_TOOL_NAME,
+          { model: 'Pay-per-Outcome', price: 100 },
+          true,
+        ),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сгенерируй результат' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
+      sandbox.runCommand.mockResolvedValue('hi\n');
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      let notifyWaiting: ((event: OfficeEvent) => void) | undefined;
+      const waiting = new Promise<OfficeEvent>((resolve) => {
+        notifyWaiting = resolve;
+      });
+
+      const streamPromise = service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'сгенерируй результат',
+        () => {},
+        (event) => {
+          if (event.status === 'waiting_approval') {
+            notifyWaiting?.(event);
+          }
+        },
+      );
+
+      const waitingEvent = await waiting;
+
+      expect(waitingEvent).toMatchObject({
+        conversationId: CONVERSATION_ID,
+        status: 'waiting_approval',
+        reason: 'payment',
+      });
+      expect(billing.authorizeHold).toHaveBeenCalledWith(
+        USER_ID,
+        100,
+        expect.any(String),
+      );
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+
+      expect(service.approveAction(CONVERSATION_ID, USER_ID)).toBe(true);
+      await expect(streamPromise).resolves.toMatchObject({ reply: 'Готово' });
+      expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
     });
 
     it('отправляет ошибку paywall в стрим и сохраняет её', async () => {

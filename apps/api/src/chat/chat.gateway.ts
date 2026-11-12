@@ -80,6 +80,7 @@ export class ChatGateway implements OnGatewayConnection {
       agentId: DEFAULT_OFFICE_AGENT_ID,
       status: 'waiting_approval',
       task,
+      reason: 'approval',
     });
   }
 

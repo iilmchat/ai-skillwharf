@@ -23,7 +23,11 @@ interface TxMock {
 
 interface PrismaMock {
   wallet: { upsert: MockFn };
-  ledgerEntry: { findUnique: MockFn; findMany: MockFn };
+  ledgerEntry: {
+    findUnique: MockFn;
+    findMany: MockFn;
+    aggregate: MockFn;
+  };
   skillUsage: { updateMany: MockFn; findUnique: MockFn; create: MockFn };
   $transaction: MockFn;
 }
@@ -60,7 +64,11 @@ describe('BillingService', () => {
   beforeEach(async () => {
     prisma = {
       wallet: { upsert: vi.fn() },
-      ledgerEntry: { findUnique: vi.fn(), findMany: vi.fn() },
+      ledgerEntry: {
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
+        aggregate: vi.fn(),
+      },
       skillUsage: {
         updateMany: vi.fn(),
         findUnique: vi.fn(),
@@ -88,12 +96,18 @@ describe('BillingService', () => {
       prisma.wallet.upsert.mockResolvedValue({
         id: 'wallet-1',
         balance: new Prisma.Decimal('125.5'),
-        heldBalance: new Prisma.Decimal('5.00'),
+      });
+      prisma.ledgerEntry.aggregate.mockResolvedValue({
+        _sum: { amount: new Prisma.Decimal('5.00') },
       });
 
       await expect(service.getBalance(USER_ID)).resolves.toEqual({
         balance: '125.50',
         heldBalance: '5.00',
+      });
+      expect(prisma.ledgerEntry.aggregate).toHaveBeenCalledWith({
+        where: { walletId: 'wallet-1', type: 'PENDING' },
+        _sum: { amount: true },
       });
       expect(prisma.wallet.upsert).toHaveBeenCalledWith({
         where: { userId: USER_ID },
@@ -106,7 +120,9 @@ describe('BillingService', () => {
       prisma.wallet.upsert.mockResolvedValue({
         id: 'wallet-1',
         balance: new Prisma.Decimal(0),
-        heldBalance: new Prisma.Decimal(0),
+      });
+      prisma.ledgerEntry.aggregate.mockResolvedValue({
+        _sum: { amount: null },
       });
 
       await expect(service.getBalance(USER_ID)).resolves.toEqual({

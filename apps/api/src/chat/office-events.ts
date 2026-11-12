@@ -7,6 +7,8 @@ export interface OfficeEvent {
   agentId: string;
   status: OfficeAgentStatus;
   task: string;
+  /** Причина ожидания: одобрение действия или оплата результата. */
+  reason?: 'approval' | 'payment';
 }
 
 /** Событие AI-Офиса внутри custom-стрима LangGraph. */

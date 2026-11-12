@@ -55,17 +55,21 @@ interface ExistingLedgerEntry {
 export class BillingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Баланс кошелька; если кошелька нет — создаёт его с нулевым балансом. */
+  /** Баланс кошелька и сумма незавершённых PENDING-записей. */
   async getBalance(userId: string): Promise<WalletBalance> {
     const wallet = await this.prisma.wallet.upsert({
       where: { userId },
       create: { userId },
       update: {},
     });
+    const pending = await this.prisma.ledgerEntry.aggregate({
+      where: { walletId: wallet.id, type: 'PENDING' },
+      _sum: { amount: true },
+    });
 
     return {
       balance: formatBalance(wallet.balance),
-      heldBalance: formatBalance(wallet.heldBalance),
+      heldBalance: formatBalance(pending._sum.amount ?? new Prisma.Decimal(0)),
     };
   }
 
