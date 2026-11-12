@@ -11,6 +11,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 
 export interface WalletBalance {
   balance: string;
+  /** Замороженные средства Pay-per-Outcome. */
+  heldBalance?: string;
 }
 
 export interface LedgerOperationResult extends WalletBalance {
@@ -61,7 +63,10 @@ export class BillingService {
       update: {},
     });
 
-    return { balance: formatBalance(wallet.balance) };
+    return {
+      balance: formatBalance(wallet.balance),
+      heldBalance: formatBalance(wallet.heldBalance),
+    };
   }
 
   /**

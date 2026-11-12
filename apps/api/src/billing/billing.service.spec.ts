@@ -88,10 +88,12 @@ describe('BillingService', () => {
       prisma.wallet.upsert.mockResolvedValue({
         id: 'wallet-1',
         balance: new Prisma.Decimal('125.5'),
+        heldBalance: new Prisma.Decimal('5.00'),
       });
 
       await expect(service.getBalance(USER_ID)).resolves.toEqual({
         balance: '125.50',
+        heldBalance: '5.00',
       });
       expect(prisma.wallet.upsert).toHaveBeenCalledWith({
         where: { userId: USER_ID },
@@ -104,10 +106,12 @@ describe('BillingService', () => {
       prisma.wallet.upsert.mockResolvedValue({
         id: 'wallet-1',
         balance: new Prisma.Decimal(0),
+        heldBalance: new Prisma.Decimal(0),
       });
 
       await expect(service.getBalance(USER_ID)).resolves.toEqual({
         balance: '0.00',
+        heldBalance: '0.00',
       });
     });
   });
