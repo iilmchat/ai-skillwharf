@@ -8,3 +8,7 @@ allowBuilds:
   '@prisma/engines': true
   argon2: true
   prisma: true
+
+minimumReleaseAgeExclude:
+  - '@langchain/core@1.4.0'
+  - '@langchain/openai@1.8.4'

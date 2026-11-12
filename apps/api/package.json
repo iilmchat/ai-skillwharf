@@ -22,12 +22,17 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
   },
   "dependencies": {
+    "@langchain/core": "^1.4.0",
+    "@langchain/langgraph": "^1.7.3",
+    "@langchain/openai": "^1.8.4",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/jwt": "^12.0.4",
     "@nestjs/passport": "^12.0.1",
     "@nestjs/platform-express": "^12.0.1",
+    "@nestjs/platform-socket.io": "^12.4.2",
     "@nestjs/terminus": "12.1.0",
+    "@nestjs/websockets": "^12.4.2",
     "@prisma/client": "5.22.0",
     "argon2": "^0.45.2",
     "class-transformer": "^0.5.1",
@@ -35,7 +40,8 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",

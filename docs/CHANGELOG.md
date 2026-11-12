@@ -17,6 +17,11 @@
 - Модуль аутентификации: регистрация/логин (Argon2, JWT access + refresh), `JwtStrategy` и `JwtAuthGuard`.
 - Ротация refresh-токенов: `POST /api/v1/auth/refresh` с проверкой сессии и срока действия.
 - RBAC: поле `role` у пользователя (по умолчанию `user`), декоратор `@Roles()` и `RolesGuard`.
+- Защищённый эндпоинт `GET /api/v1/auth/me` (профиль текущего пользователя).
+- Модели `Conversation` и `Message` — история диалогов в БД.
+- WebSocket-шлюз `send_message` и чат-сервис (сохранение сообщений, ответ LLM).
+- Интеграция LangGraph (`StateGraph`) и LLM-клиент `@langchain/openai` с эхо-заглушкой без ключей.
+- Локальный Ollama в `docker-compose` (профиль `with-llm`) и переменные `LLM_*`.
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 
 ### Изменено
