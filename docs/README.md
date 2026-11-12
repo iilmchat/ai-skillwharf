@@ -30,6 +30,10 @@
 - [Текущий Roadmap](development/ROADMAP.md)
 - [Промпт для AI-агентов](development/PROMPT_CURRENT.md)
 
+## 📣 Маркетинг и презентации (`marketing/`)
+
+- [Концепция AI-Офиса и Лендинга](marketing/LANDING_CONCEPT.md)
+
 ## 🐞 Релизы и баги
 
 - [Changelog](CHANGELOG.md)
