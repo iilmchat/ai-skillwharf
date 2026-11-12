@@ -29,6 +29,16 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+После старта:
+
+| Сервис | Адрес |
+| --- | --- |
+| UI (web) | <http://localhost:8080> |
+| API Gateway | <http://localhost:3001/api/v1> |
+| Healthcheck API | <http://localhost:3001/api/v1/health> |
+
+Остановить стек: `docker compose down` (с данными БД — `docker compose down -v`).
+
 ## Разработка
 
 ```bash

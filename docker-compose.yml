@@ -32,6 +32,21 @@ services:
       postgres:
         condition: service_healthy
 
+  web:
+    build:
+      # Контекст — корень репозитория: pnpm workspace и lockfile лежат там.
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Vite вшивает значения на этапе сборки.
+        VITE_API_URL: /api/v1
+        VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
+    ports:
+      # UI на 8080, чтобы не занимать стандартный 80 на хосте.
+      - "8080:80"
+    depends_on:
+      - api
+
   # Локальная LLM для разработки. Профиль with-llm: сервис не поднимается
   # вместе с основным стеком и не тянет образ/RAM в CI.
   ollama:

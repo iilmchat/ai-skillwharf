@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+
+# --- Stage 1: сборка статики ---
+FROM node:24-alpine AS builder
+
+ENV npm_config_fetch_retries=5 \
+    npm_config_fetch_timeout=120000
+
+RUN npm install --global pnpm@12.18.0
+WORKDIR /app
+
+# Контекст сборки — корень репозитория: pnpm workspace и lockfile лежат там.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/shared/package.json ./packages/shared/package.json
+RUN pnpm install --frozen-lockfile
+
+COPY packages/shared ./packages/shared
+COPY apps/web ./apps/web
+
+# Vite вшивает переменные на этапе сборки.
+ARG VITE_API_URL=/api/v1
+ARG VITE_WS_URL=http://localhost:3001
+ENV VITE_API_URL=${VITE_API_URL} \
+    VITE_WS_URL=${VITE_WS_URL}
+
+RUN pnpm --filter web build
+
+# --- Stage 2: раздача статики и прокси на API ---
+FROM nginx:alpine AS runner
+
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+
+EXPOSE 80
