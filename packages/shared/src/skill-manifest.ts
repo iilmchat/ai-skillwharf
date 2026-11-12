@@ -67,8 +67,10 @@ export const skillManifestSchema = z.object({
   checksum: skillChecksumSchema.optional(),
 });
 
-export type SkillName = z.infer<typeof skillNameSchema>;
-export type SkillVersion = z.infer<typeof skillVersionSchema>;
+/** Алиас в PascalCase для использования в коде Gateway/API. */
+export const SkillManifestSchema = skillManifestSchema;
+
+export type SkillName = z.infer<typeof skillNameSchema>;export type SkillVersion = z.infer<typeof skillVersionSchema>;
 export type SkillAuthor = z.infer<typeof skillAuthorSchema>;
 export type SkillDependencies = z.infer<typeof skillDependenciesSchema>;
 export type SkillPermission = z.infer<typeof skillPermissionSchema>;

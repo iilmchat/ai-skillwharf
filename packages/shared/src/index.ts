@@ -1,2 +1,2 @@
-export * from "./billing/interfaces";
-export * from "./skill-manifest";
+export * from "./billing/interfaces.js";
+export * from "./skill-manifest.js";

@@ -9,7 +9,7 @@
     "lint:docs": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\"",
     "format": "prettier --write .",
     "build:api": "pnpm --filter api build",
-    "test": "vitest run",
+    "test": "pnpm --filter @skillwharf/shared build && vitest run",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "keywords": [],

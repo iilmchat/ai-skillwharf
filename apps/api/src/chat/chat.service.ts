@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { LlmService, type ChatHistoryMessage } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 /** Сколько последних сообщений диалога передаём в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
+
+const DEFAULT_CONVERSATION_TITLE = 'Новый диалог';
 
 const ChatStateAnnotation = Annotation.Root({
   messages: Annotation<ChatHistoryMessage[]>({
@@ -49,14 +51,35 @@ export class ChatService {
     this.graph = buildChatGraph(this.llmService);
   }
 
-  async handleMessage(conversationId: string, content: string): Promise<ChatReply> {
+  async createConversation(
+    userId: string,
+    title?: string,
+  ): Promise<{ id: string }> {
+    return this.prisma.conversation.create({
+      data: {
+        userId,
+        title: title?.trim() || DEFAULT_CONVERSATION_TITLE,
+      },
+      select: { id: true },
+    });
+  }
+
+  async handleMessage(
+    userId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<ChatReply> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
 
     if (!conversation) {
       throw new NotFoundException(`Диалог ${conversationId} не найден`);
+    }
+
+    if (conversation.userId !== userId) {
+      throw new ForbiddenException('Диалог принадлежит другому пользователю');
     }
 
     await this.prisma.message.create({

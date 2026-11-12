@@ -22,6 +22,10 @@
 - WebSocket-шлюз `send_message` и чат-сервис (сохранение сообщений, ответ LLM).
 - Интеграция LangGraph (`StateGraph`) и LLM-клиент `@langchain/openai` с эхо-заглушкой без ключей.
 - Локальный Ollama в `docker-compose` (профиль `with-llm`) и переменные `LLM_*`.
+- REST API диалогов: `POST /api/v1/chat/conversations` (создание чата текущего пользователя).
+- Аутентификация WebSocket по JWT из `handshake.auth.token` и проверка владельца диалога.
+- Валидация `SKILL.md`: парсинг YAML frontmatter и Zod-схема `@skillwharf/shared`, эндпоинт `POST /api/v1/skills/validate` (только `admin`).
+- Сборка `packages/shared` в ESM-`dist` (пакет импортируется в API рантайме).
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 
 ### Изменено
