@@ -16,8 +16,10 @@ import {
 import {
   EXEC_TOOL_NAME,
   LlmService,
+  OZON_MCP_TOOL_NAME,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
+  WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   withLanguageInstruction,
 } from './llm.service.js';
@@ -351,6 +353,58 @@ describe('LlmService', () => {
       );
       expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {
         [SANDBOX_NETWORK_FLAG]: 'true',
+      });
+    });
+  });
+
+  describe('createOzonMcpTool', () => {
+    it('возвращает фейковые данные продаж для get_sales', async () => {
+      const service = createService();
+
+      const tool = service.createOzonMcpTool();
+      const raw = await tool.invoke({
+        action: 'get_sales',
+        params: { period: 'month' },
+      });
+      const data = JSON.parse(raw as string) as Record<string, unknown>;
+
+      expect(tool.name).toBe(OZON_MCP_TOOL_NAME);
+      expect(data).toMatchObject({
+        platform: 'ozon',
+        action: 'get_sales',
+        sales: 15000,
+        items: 42,
+      });
+    });
+
+    it('вызывает paywall-хук до возврата данных', async () => {
+      const beforeExecute = vi.fn();
+      const service = createService();
+
+      await service
+        .createOzonMcpTool({ beforeExecute })
+        .invoke({ action: 'get_orders', params: {} });
+
+      expect(beforeExecute).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('createWbMcpTool', () => {
+    it('возвращает фейковые данные Wildberries', async () => {
+      const service = createService();
+
+      const tool = service.createWbMcpTool();
+      const raw = await tool.invoke({
+        action: 'get_sales',
+        params: {},
+      });
+      const data = JSON.parse(raw as string) as Record<string, unknown>;
+
+      expect(tool.name).toBe(WB_MCP_TOOL_NAME);
+      expect(data).toMatchObject({
+        platform: 'wb',
+        sales: 15000,
+        items: 42,
       });
     });
   });

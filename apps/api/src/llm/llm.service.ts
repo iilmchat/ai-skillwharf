@@ -68,6 +68,26 @@ export const ExecToolSchema = z.object({
   command: z.string().describe('Shell-команда для выполнения'),
 });
 
+/** Имя MCP-инструмента Ozon. */
+export const OZON_MCP_TOOL_NAME = 'ozon_mcp_call';
+
+/** Описание MCP-инструмента Ozon для LLM. */
+export const OZON_MCP_TOOL_DESCRIPTION =
+  'Вызывает MCP-инструмент Ozon Seller: карточки, заказы, продажи и отзывы';
+
+/** Имя MCP-инструмента Wildberries. */
+export const WB_MCP_TOOL_NAME = 'wb_mcp_call';
+
+/** Описание MCP-инструмента Wildberries для LLM. */
+export const WB_MCP_TOOL_DESCRIPTION =
+  'Вызывает MCP-инструмент Wildberries Seller: карточки, заказы, продажи и отзывы';
+
+/** Схема аргументов marketplace MCP-инструментов. */
+export const McpToolSchema = z.object({
+  action: z.string().describe('Действие MCP-инструмента'),
+  params: z.record(z.string(), z.any()).describe('Параметры действия'),
+});
+
 /** Инструкция по умолчанию живёт в prompts/default-prompt.ts. */
 
 /**
@@ -207,6 +227,47 @@ export class LlmService {
     });
   }
 
+  /**
+   * MCP-заглушка Ozon: пока реальный MCP-сервер не подключён, инструмент
+   * возвращает демонстрационные данные по запрошенному действию.
+   */
+  createOzonMcpTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
+    return this.createMarketplaceMcpTool(
+      OZON_MCP_TOOL_NAME,
+      OZON_MCP_TOOL_DESCRIPTION,
+      'ozon',
+      options,
+    );
+  }
+
+  /** MCP-заглушка Wildberries. */
+  createWbMcpTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
+    return this.createMarketplaceMcpTool(
+      WB_MCP_TOOL_NAME,
+      WB_MCP_TOOL_DESCRIPTION,
+      'wb',
+      options,
+    );
+  }
+
+  private createMarketplaceMcpTool(
+    name: string,
+    description: string,
+    platform: 'ozon' | 'wb',
+    options: SandboxToolOptions,
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name,
+      description,
+      schema: McpToolSchema,
+      func: async ({ action, params }) => {
+        await options.beforeExecute?.();
+
+        return mockMarketplaceResponse(platform, action, params);
+      },
+    });
+  }
+
   async chat(messages: ChatHistoryMessage[]): Promise<string> {
     const response = await this.chatWithTools(
       messages.map(toLangChainMessage),
@@ -340,6 +401,52 @@ export function withLanguageInstruction(
   systemPrompt: string = DEFAULT_SYSTEM_PROMPT,
 ): BaseMessage[] {
   return [new SystemMessage(systemPrompt), ...messages];
+}
+
+/**
+ * Демо-ответ MCP-заглушки. Реальные Ozon/WB MCP-серверы ещё не подключены,
+ * поэтому возвращаем предсказуемые данные для сценариев и тестов.
+ */
+function mockMarketplaceResponse(
+  platform: 'ozon' | 'wb',
+  action: string,
+  params: unknown,
+): string {
+  const base = { platform, action, mock: true, params };
+
+  switch (action) {
+    case 'get_sales':
+      return JSON.stringify({
+        ...base,
+        sales: 15000,
+        items: 42,
+        currency: 'RUB',
+      });
+    case 'get_orders':
+      return JSON.stringify({
+        ...base,
+        orders: [{ id: 'order-1', status: 'delivered', amount: 2500 }],
+        total: 42,
+      });
+    case 'get_products':
+      return JSON.stringify({
+        ...base,
+        products: [{ id: 'product-1', name: 'Демо-товар', price: 1990 }],
+        total: 42,
+      });
+    case 'update_product':
+      return JSON.stringify({ ...base, updated: true });
+    case 'get_reviews':
+      return JSON.stringify({
+        ...base,
+        reviews: [{ id: 'review-1', rating: 5, text: 'Отличный товар' }],
+        rating: 4.8,
+      });
+    case 'reply_review':
+      return JSON.stringify({ ...base, replied: true });
+    default:
+      return JSON.stringify({ ...base, result: 'ok' });
+  }
 }
 
 /** Собирает разрешённые секреты из окружения Gateway для песочницы. */

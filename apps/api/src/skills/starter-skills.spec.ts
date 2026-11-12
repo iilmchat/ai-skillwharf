@@ -18,6 +18,8 @@ const STARTER_SKILLS = [
   '03-automation/cron-automation/SKILL.md',
   '04-security/skill-vetter/SKILL.md',
   '05-utility/code-runner/SKILL.md',
+  '06-marketplace/ozon-seller/SKILL.md',
+  '06-marketplace/wb-seller/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {
@@ -43,7 +45,8 @@ describe('starter skills', () => {
     const errors = result.success
       ? []
       : result.error.issues.map((issue) => {
-          const path = issue.path.length > 0 ? issue.path.join('.') : 'manifest';
+          const path =
+            issue.path.length > 0 ? issue.path.join('.') : 'manifest';
 
           return `${path}: ${issue.message}`;
         });

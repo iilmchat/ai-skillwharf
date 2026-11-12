@@ -16,7 +16,9 @@ import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
   EXEC_TOOL_NAME,
   LlmService,
+  OZON_MCP_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   messageContentToText,
   type ChatStreamChunk,
@@ -274,6 +276,32 @@ describe('ChatService', () => {
       expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
       expect(skills.getEnabledSkills).toHaveBeenCalledTimes(1);
       expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
+    });
+
+    it('подключает marketplace-инструменты из манифестов', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('ozon-seller', OZON_MCP_TOOL_NAME, { model: 'Free' }),
+        createSkill('wb-seller', WB_MCP_TOOL_NAME, { model: 'Free' }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'покажи продажи' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('Готово')),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'покажи продажи'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      const [, tools] = chatWithToolsStream.mock.calls[0] as [
+        BaseMessage[],
+        { name: string }[],
+      ];
+
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([OZON_MCP_TOOL_NAME, WB_MCP_TOOL_NAME]),
+      );
     });
 
     it('не запускает агента при балансе ниже минимального', async () => {

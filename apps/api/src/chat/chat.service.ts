@@ -25,7 +25,9 @@ import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
   EXEC_TOOL_NAME,
   LlmService,
+  OZON_MCP_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   messageContentToText,
   toLangChainMessage,
@@ -178,6 +180,21 @@ function resolveApprovalTools(skills: InstalledSkill[]): string[] {
   }
 
   return [...tools];
+}
+
+/** Объявлен ли инструмент хотя бы одним включённым навыком. */
+function skillDeclaresTool(
+  skills: InstalledSkill[],
+  toolName: string,
+): boolean {
+  return skills.some((skill) => {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    return (
+      parsed.success &&
+      (parsed.data.dependencies?.tools?.includes(toolName) ?? false)
+    );
+  });
 }
 
 function lastMessage(messages: BaseMessage[]): BaseMessage | undefined {
@@ -619,7 +636,7 @@ export class ChatService {
       };
     };
 
-    return [
+    const tools: StructuredToolInterface[] = [
       this.llmService.createSandboxTool({
         beforeExecute: beforeExecuteFor(SANDBOX_TOOL_NAME),
       }),
@@ -630,5 +647,25 @@ export class ChatService {
         beforeExecute: beforeExecuteFor(EXEC_TOOL_NAME),
       }),
     ];
+
+    // Marketplace-инструменты подключаются только если их объявил
+    // установленный и включённый навык (ozon-seller / wb-seller).
+    if (skillDeclaresTool(skills, OZON_MCP_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createOzonMcpTool({
+          beforeExecute: beforeExecuteFor(OZON_MCP_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, WB_MCP_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createWbMcpTool({
+          beforeExecute: beforeExecuteFor(WB_MCP_TOOL_NAME),
+        }),
+      );
+    }
+
+    return tools;
   }
 }
