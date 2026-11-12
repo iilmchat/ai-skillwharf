@@ -54,6 +54,9 @@ jobs:
       - name: Test Docker Build
         run: docker compose build api
 
+      - name: Test Sandbox Worker Build
+        run: docker compose build sandbox-worker
+
       - name: Test Sandbox Isolation
         run: bash scripts/test-sandbox.sh
 
@@ -86,6 +89,8 @@ jobs:
           # эхо-заглушкой, и тест проверяет доставку ответа в UI.
           sed -i 's|^LLM_BASE_URL=.*|LLM_BASE_URL=|' .env
           sed -i 's|^LLM_MODEL=.*|LLM_MODEL=|' .env
+          # E2E делает больше 5 логинов за минуту с одного IP.
+          echo 'AUTH_LOGIN_LIMIT=100' >> .env
 
       - name: Start stack
         run: docker compose up -d --build

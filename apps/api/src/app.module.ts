@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuditModule } from './audit/audit.module.js';
@@ -15,6 +17,8 @@ import { SkillsModule } from './skills/skills.module.js';
 
 @Module({
   imports: [
+    // Базовый лимит для всех маршрутов; auth переопределяет его точечно.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 1_000 }]),
     PrismaModule,
     HealthModule,
     AuthModule,
@@ -28,6 +32,12 @@ import { SkillsModule } from './skills/skills.module.js';
     BillingModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

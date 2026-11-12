@@ -1,15 +1,4 @@
-# Оверрайд ТОЛЬКО для локальной разработки с песочницей.
-# Запуск: docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
-#
-# Монтирование Docker-сокета даёт контейнеру root-доступ к хосту.
-# Никогда не используйте этот файл в production (см. Runbook, раздел 7).
-services:
-  api:
-    volumes:
-      # Windows/macOS Docker Desktop: задайте DOCKER_SOCKET=//var/run/docker.sock
-      # (PowerShell: $env:DOCKER_SOCKET='//var/run/docker.sock').
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
-    # appuser (UID 1001) не входит в группу docker, поэтому для доступа к сокету
-    # контейнер в dev-профиле запускается от root. Это ещё одна причина
-    # не использовать оверрайд вне локальной машины разработчика.
-    user: "0:0"
+# Устаревший оверрайд: sandbox-контейнеры теперь запускает отдельный
+# сервис sandbox-worker из базового docker-compose.yml. API больше не получает
+# /var/run/docker.sock. Файл оставлен пустым для совместимости старых команд.
+services: {}

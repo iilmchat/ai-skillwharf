@@ -200,54 +200,53 @@ docker compose exec -T postgres pg_restore -U skillwharf_admin -d skillwharf_db 
 
 ## 7. Безопасность Sandbox
 
-`SandboxService` запускает код в одноразовых контейнерах через `dockerode`, поэтому
-ему нужен доступ к Docker daemon. В базовом `docker-compose.yml` этот доступ
-намеренно не выдан: сокет подключается отдельным оверрайд-файлом только для
-локальной разработки.
+Код выполняется в отдельном сервисе `sandbox-worker`
+(`apps/sandbox-worker`). Только этот сервис получает `/var/run/docker.sock`;
+в API сокет не монтируется. API вызывает worker по HTTP:
+
+```text
+POST http://sandbox-worker:4000/execute
+```
+
+Адрес задаётся переменной `SANDBOX_WORKER_URL` (по умолчанию
+`http://sandbox-worker:4000`).
+
+### Worker
+
+* Express-сервер на порту `4000`, порт не публикуется на хост.
+* Ограничения контейнера: read-only rootfs, `cap_drop: ALL`,
+  `no-new-privileges`, 128 МБ памяти, 0.5 CPU.
+* Сеть по умолчанию `none`; `bridge` включается только по флагу
+  `ALLOW_NETWORK=true` или `SANDBOX_ALLOW_NETWORK=true`.
+* Worker запускается от root: GID `docker.sock` зависит от хоста. API при этом
+  остаётся непривилегированным и не имеет доступа к Docker.
 
 ### Production
 
-Монтировать `/var/run/docker.sock` в API в production **запрещено**: доступ к
-сокету эквивалентен root-доступу к хосту, а компрометация API означает
-компрометацию хоста и обход изоляции песочницы.
-
-В production должен использоваться **удалённый Sandbox Provider** — отдельный
-микросервис на базе Firecracker или gVisor, который общается с Gateway по gRPC
-и не требует доступа к Docker daemon со стороны API.
+Монтировать `/var/run/docker.sock` в API **запрещено**: доступ к сокету
+эквивалентен root-доступу к хосту. Сокет должен быть только у
+`sandbox-worker`, а порт `4000` — доступен только внутри compose-сети.
+Для строгой изоляции замените worker на удалённый Firecracker/gVisor
+provider.
 
 ### Локальная разработка
 
-Для запуска стека с песочницей используйте оверрайд
-`docker-compose.sandbox-dev.yml`:
+`sandbox-worker` входит в базовый `docker-compose.yml`, поэтому достаточно:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
+docker compose up -d --build
 ```
 
-Остановка стека выполняется с тем же набором файлов:
+На Windows/macOS с Docker Desktop сокет доступен по
+`/var/run/docker.sock`. На Linux используется тот же путь; при нестандартном
+расположении сокета задайте `DOCKER_SOCKET` и смонтируйте его в
+`sandbox-worker`.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml down
-```
+Файл `docker-compose.sandbox-dev.yml` больше не нужен: он оставлен пустым
+для совместимости старых команд и не даёт API доступ к сокету.
 
-На Windows/macOS с Docker Desktop путь к сокету отличается. Задайте его через
-переменную `DOCKER_SOCKET` перед запуском:
-
-```powershell
-$env:DOCKER_SOCKET = '//var/run/docker.sock'
-docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
-```
-
-На Linux по умолчанию используется `/var/run/docker.sock`, переменную можно не
-задавать.
-
-> **Внимание:** Монтирование сокета дает контейнеру root-доступ к хосту.
-> Используйте только на локальной машине разработчика. Не переносите этот
-> оверрайд в базовый `docker-compose.yml` и не применяйте его на общих или
-> публичных стендах.
-
-CI собирает только базовый образ (`docker compose build api`) и не использует
-`docker-compose.sandbox-dev.yml`, поэтому оверрайд не влияет на пайплайн.
+CI собирает базовый образ API и отдельный образ `sandbox-worker`
+(`docker compose build sandbox-worker`).
 
 ## 8. Настройка биллинга
 

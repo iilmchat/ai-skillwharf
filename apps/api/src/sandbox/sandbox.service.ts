@@ -1,19 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
-import Docker from 'dockerode';
-import { Writable } from 'node:stream';
+import axios from 'axios';
 
 /**
- * Ограничения повторяют docker-compose.sandbox.yml: сеть по умолчанию выключена,
- * корневая файловая система только для чтения, сброшены capabilities,
- * лимит 128 МБ и 0.5 CPU.
+ * Ограничения задаёт sandbox-worker: сеть по умолчанию выключена, корневая
+ * файловая система только для чтения, сброшены capabilities, лимит 128 МБ
+ * и 0.5 CPU.
  */
-const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE ?? 'skillwharf-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = 10_000;
-const SANDBOX_MEMORY_LIMIT_BYTES = 128 * 1024 * 1024;
-const SANDBOX_NANO_CPUS = 500_000_000;
+const SANDBOX_WORKER_URL =
+  process.env.SANDBOX_WORKER_URL ?? 'http://sandbox-worker:4000';
 
 /** Флаг в `env`, разрешающий контейнеру доступ в сеть. */
 export const SANDBOX_NETWORK_FLAG = 'ALLOW_NETWORK';
+
+interface SandboxWorkerResponse {
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
 
 /**
  * Сеть включается по флагу `ALLOW_NETWORK=true` (запрос навыка) или глобально
@@ -29,91 +33,76 @@ export function resolveNetworkMode(
   return requested || allowedGlobally ? 'bridge' : 'none';
 }
 
+/**
+ * Клиент sandbox-worker. У API нет Docker-сокета: он отправляет код по HTTP
+ * доверенному worker'у, который запускает одноразовый контейнер.
+ */
 @Injectable()
 export class SandboxService {
   private readonly logger = new Logger(SandboxService.name);
-  private readonly docker = new Docker();
 
   /**
    * Выполняет shell-команду в одноразовом контейнере и возвращает stdout.
-   * Контейнер удаляется в любом случае; при превышении таймаута kill.
    *
-   * `env` передаётся в контейнер как переменные окружения (например, ключи
-   * внешних API для навыков). Значения видны в `docker inspect` — передавайте
-   * только те секреты, которые нужны выполняемому коду.
+   * `env` передаётся worker'у как переменные окружения контейнера (например,
+   * ключи внешних API для навыков). Передавайте только те секреты, которые
+   * нужны выполняемому коду.
    */
   async runCommand(
     code: string,
     env: Record<string, string> = {},
   ): Promise<string> {
-    const container = await this.docker.createContainer({
-      Image: SANDBOX_IMAGE,
-      Cmd: ['sh', '-c', code],
-      User: '65534:65534',
-      Tty: false,
-      AttachStdout: true,
-      AttachStderr: true,
-      // Сам флаг — управляющий, внутрь контейнера его не передаём.
-      Env: Object.entries(env)
-        .filter(([key]) => key !== SANDBOX_NETWORK_FLAG)
-        .map(([key, value]) => `${key}=${value}`),
-      HostConfig: {
-        NetworkMode: resolveNetworkMode(env),
-        ReadonlyRootfs: true,
-        CapDrop: ['ALL'],
-        SecurityOpt: ['no-new-privileges:true'],
-        Tmpfs: { '/tmp': '' },
-        Memory: SANDBOX_MEMORY_LIMIT_BYTES,
-        NanoCpus: SANDBOX_NANO_CPUS,
-      },
-    });
+    const safeEnv = Object.fromEntries(
+      Object.entries(env).filter(([key]) => key !== SANDBOX_NETWORK_FLAG),
+    );
 
-    let stdout = '';
-    let stderr = '';
-    const stdoutStream = new Writable({
-      write(chunk: Buffer, _encoding, callback) {
-        stdout += chunk.toString();
-        callback();
-      },
-    });
-    const stderrStream = new Writable({
-      write(chunk: Buffer, _encoding, callback) {
-        stderr += chunk.toString();
-        callback();
-      },
-    });
-
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      container.kill().catch((error: unknown) => {
-        this.logger.warn(`Не удалось остановить sandbox-контейнер: ${String(error)}`);
-      });
-    }, SANDBOX_TIMEOUT_MS);
+    let result: SandboxWorkerResponse;
 
     try {
-      const stream = await container.attach({ stream: true, stdout: true, stderr: true });
-      this.docker.modem.demuxStream(stream, stdoutStream, stderrStream);
-      await container.start();
+      const response = await axios.post<SandboxWorkerResponse>(
+        `${SANDBOX_WORKER_URL}/execute`,
+        {
+          code,
+          env: safeEnv,
+          network: resolveNetworkMode(env),
+        },
+        { timeout: SANDBOX_TIMEOUT_MS + 5_000 },
+      );
 
-      await new Promise<void>((resolve, reject) => {
-        stream.once('end', resolve);
-        stream.once('error', reject);
-      });
-    } finally {
-      clearTimeout(timeout);
-      await container.remove({ force: true }).catch((error: unknown) => {
-        this.logger.warn(`Не удалось удалить sandbox-контейнер: ${String(error)}`);
-      });
+      result = response.data;
+    } catch (error) {
+      const detail = axios.isAxiosError(error)
+        ? (extractWorkerError(error.response?.data) ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+
+      throw new Error(`sandbox-worker: ${detail}`);
     }
 
-    if (timedOut) {
-      throw new Error(`Команда превысила лимит ${SANDBOX_TIMEOUT_MS} мс и была остановлена`);
-    }
-    if (stderr.trim()) {
-      this.logger.debug(`stderr sandbox: ${stderr.trim()}`);
+    if (result.timedOut) {
+      throw new Error(
+        `Команда превысила лимит ${SANDBOX_TIMEOUT_MS} мс и была остановлена`,
+      );
     }
 
-    return stdout;
+    if (result.stderr.trim()) {
+      this.logger.debug(`stderr sandbox: ${result.stderr.trim()}`);
+    }
+
+    return result.stdout;
   }
+}
+
+function extractWorkerError(data: unknown): string | null {
+  if (
+    typeof data === 'object' &&
+    data !== null &&
+    'message' in data &&
+    typeof data.message === 'string'
+  ) {
+    return data.message;
+  }
+
+  return null;
 }

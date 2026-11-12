@@ -32,6 +32,11 @@ services:
       YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
       YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
       YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
+      # API ходит к sandbox-worker по внутренней сети compose.
+      SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
+      # Строгие лимиты по умолчанию; E2E может ослабить их через env.
+      AUTH_LOGIN_LIMIT: ${AUTH_LOGIN_LIMIT:-5}
+      AUTH_REGISTER_LIMIT: ${AUTH_REGISTER_LIMIT:-10}
     extra_hosts:
       # Доступ к LM Studio и другим сервисам на хосте из контейнера.
       # host-gateway нужен на Linux; на Windows и macOS работает из коробки.
@@ -42,6 +47,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Единственный сервис с доступом к Docker-сокету. API общается с ним по
+  # HTTP, поэтому компрометация API не даёт управления хостом.
+  sandbox-worker:
+    build:
+      context: .
+      dockerfile: apps/sandbox-worker/Dockerfile
+    environment:
+      PORT: 4000
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-skillwharf-sandbox:latest}
+      SANDBOX_ALLOW_NETWORK: ${SANDBOX_ALLOW_NETWORK:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Наружу порт не публикуется: доступ только из compose-сети.
 
   web:
     build:
