@@ -14,13 +14,17 @@ import type { InstalledSkill } from '@prisma/client';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
+  AUDIT_FRAUD_RISK_TOOL_NAME,
+  CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
   CHECK_FACTS_TOOL_NAME,
+  DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
+  MONITOR_COMPETITOR_PRICES_TOOL_NAME,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
@@ -401,6 +405,49 @@ describe('ChatService', () => {
           CHECK_FACTS_TOOL_NAME,
           SCREEN_RESUME_TOOL_NAME,
           EXTRACT_DOCUMENT_DATA_TOOL_NAME,
+        ]),
+      );
+    });
+
+    it('подключает финансовые mock-инструменты', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('unit-economics', CALCULATE_UNIT_ECONOMICS_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('profit-leak-detector', DETECT_PROFIT_LEAKS_TOOL_NAME, {
+          model: 'Pay-per-Call',
+          price: 300,
+        }),
+        createSkill('price-monitor', MONITOR_COMPETITOR_PRICES_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('fraud-shield-audit', AUDIT_FRAUD_RISK_TOOL_NAME, {
+          model: 'Pay-per-Outcome',
+          price: 500,
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'посчитай маржу' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('Готово')),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'посчитай маржу'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      const [, tools] = chatWithToolsStream.mock.calls[0] as [
+        BaseMessage[],
+        { name: string }[],
+      ];
+
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
+          DETECT_PROFIT_LEAKS_TOOL_NAME,
+          MONITOR_COMPETITOR_PRICES_TOOL_NAME,
+          AUDIT_FRAUD_RISK_TOOL_NAME,
         ]),
       );
     });

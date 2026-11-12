@@ -28,6 +28,10 @@ const STARTER_SKILLS = [
   '12-content/fact-checker/SKILL.md',
   '13-hr/resume-screener/SKILL.md',
   '14-legal/document-analyzer/SKILL.md',
+  '15-finance/unit-economics/SKILL.md',
+  '15-finance/profit-leak-detector/SKILL.md',
+  '15-finance/price-monitor/SKILL.md',
+  '15-finance/fraud-shield-audit/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

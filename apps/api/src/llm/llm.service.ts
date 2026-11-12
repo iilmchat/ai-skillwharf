@@ -169,6 +169,54 @@ export const PublishToDzenToolSchema = z.object({
   imageUrl: z.string().describe('URL обложки статьи'),
 });
 
+/** Имя mock-инструмента юнит-экономики. */
+export const CALCULATE_UNIT_ECONOMICS_TOOL_NAME = 'calculate_unit_economics';
+
+/** Описание mock-инструмента юнит-экономики. */
+export const CALCULATE_UNIT_ECONOMICS_TOOL_DESCRIPTION =
+  'Считает маржу по SKU (заглушка)';
+
+/** Схема аргументов `calculate_unit_economics`. */
+export const CalculateUnitEconomicsToolSchema = z.object({
+  sku: z.string().describe('Идентификатор товара'),
+});
+
+/** Имя mock-инструмента поиска утечек прибыли. */
+export const DETECT_PROFIT_LEAKS_TOOL_NAME = 'detect_profit_leaks';
+
+/** Описание mock-инструмента поиска утечек прибыли. */
+export const DETECT_PROFIT_LEAKS_TOOL_DESCRIPTION =
+  'Ищет утечки прибыли по продавцу (заглушка)';
+
+/** Схема аргументов `detect_profit_leaks`. */
+export const DetectProfitLeaksToolSchema = z.object({
+  sellerId: z.string().describe('Идентификатор продавца'),
+});
+
+/** Имя mock-инструмента мониторинга цен конкурентов. */
+export const MONITOR_COMPETITOR_PRICES_TOOL_NAME = 'monitor_competitor_prices';
+
+/** Описание mock-инструмента мониторинга цен. */
+export const MONITOR_COMPETITOR_PRICES_TOOL_DESCRIPTION =
+  'Проверяет цены конкурентов по SKU (заглушка)';
+
+/** Схема аргументов `monitor_competitor_prices`. */
+export const MonitorCompetitorPricesToolSchema = z.object({
+  sku: z.string().describe('Идентификатор товара'),
+});
+
+/** Имя mock-инструмента аудита рисков. */
+export const AUDIT_FRAUD_RISK_TOOL_NAME = 'audit_fraud_risk';
+
+/** Описание mock-инструмента аудита рисков. */
+export const AUDIT_FRAUD_RISK_TOOL_DESCRIPTION =
+  'Проверяет доказательный пакет рекламной кампании (заглушка)';
+
+/** Схема аргументов `audit_fraud_risk`. */
+export const AuditFraudRiskToolSchema = z.object({
+  campaignId: z.string().describe('Идентификатор рекламной кампании'),
+});
+
 /** Имя mock-инструмента проверки фактов. */
 export const CHECK_FACTS_TOOL_NAME = 'check_facts';
 
@@ -517,6 +565,70 @@ export class LlmService {
         await writeFile(hostPath, decoded, 'utf8');
 
         return `Черновик статьи «${title}» сохранён: ${hostPath}`;
+      },
+    });
+  }
+
+  /** Mock-инструмент расчёта юнит-экономики. */
+  createCalculateUnitEconomicsTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
+      description: CALCULATE_UNIT_ECONOMICS_TOOL_DESCRIPTION,
+      schema: CalculateUnitEconomicsToolSchema,
+      func: async ({ sku }) => {
+        await options.beforeExecute?.();
+
+        return `Маржа для ${sku} составляет 25%.`;
+      },
+    });
+  }
+
+  /** Mock-инструмент поиска утечек прибыли. */
+  createDetectProfitLeaksTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: DETECT_PROFIT_LEAKS_TOOL_NAME,
+      description: DETECT_PROFIT_LEAKS_TOOL_DESCRIPTION,
+      schema: DetectProfitLeaksToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return 'Найдена утечка на 120 000 ₽ из-за штрафа за габариты.';
+      },
+    });
+  }
+
+  /** Mock-инструмент мониторинга цен конкурентов. */
+  createMonitorCompetitorPricesTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: MONITOR_COMPETITOR_PRICES_TOOL_NAME,
+      description: MONITOR_COMPETITOR_PRICES_TOOL_DESCRIPTION,
+      schema: MonitorCompetitorPricesToolSchema,
+      func: async ({ sku }) => {
+        await options.beforeExecute?.();
+
+        return `Конкурент снизил цену на ${sku} до 990 ₽.`;
+      },
+    });
+  }
+
+  /** Mock-инструмент аудита рисков санкций. */
+  createAuditFraudRiskTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: AUDIT_FRAUD_RISK_TOOL_NAME,
+      description: AUDIT_FRAUD_RISK_TOOL_DESCRIPTION,
+      schema: AuditFraudRiskToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return 'Доказательный пакет неполный (отсутствует ERID). Риск санкции высокий.';
       },
     });
   }

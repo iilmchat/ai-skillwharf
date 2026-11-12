@@ -25,13 +25,17 @@ import { randomUUID } from 'node:crypto';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
+  AUDIT_FRAUD_RISK_TOOL_NAME,
+  CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
   CHECK_FACTS_TOOL_NAME,
+  DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
+  MONITOR_COMPETITOR_PRICES_TOOL_NAME,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
@@ -918,6 +922,38 @@ export class ChatService {
       tools.push(
         this.llmService.createExtractDocumentDataTool({
           beforeExecute: beforeExecuteFor(EXTRACT_DOCUMENT_DATA_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, CALCULATE_UNIT_ECONOMICS_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createCalculateUnitEconomicsTool({
+          beforeExecute: beforeExecuteFor(CALCULATE_UNIT_ECONOMICS_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, DETECT_PROFIT_LEAKS_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createDetectProfitLeaksTool({
+          beforeExecute: beforeExecuteFor(DETECT_PROFIT_LEAKS_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, MONITOR_COMPETITOR_PRICES_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createMonitorCompetitorPricesTool({
+          beforeExecute: beforeExecuteFor(MONITOR_COMPETITOR_PRICES_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, AUDIT_FRAUD_RISK_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createAuditFraudRiskTool({
+          beforeExecute: beforeExecuteFor(AUDIT_FRAUD_RISK_TOOL_NAME),
         }),
       );
     }

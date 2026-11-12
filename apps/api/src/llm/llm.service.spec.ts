@@ -17,6 +17,7 @@ import {
   type SandboxService,
 } from '../sandbox/sandbox.service.js';
 import {
+  DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
@@ -479,6 +480,19 @@ describe('LlmService', () => {
       } finally {
         await rm(outputDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe('createDetectProfitLeaksTool', () => {
+    it('возвращает текст с суммой утечки', async () => {
+      const service = createService();
+
+      const tool = service.createDetectProfitLeaksTool();
+
+      expect(tool.name).toBe(DETECT_PROFIT_LEAKS_TOOL_NAME);
+      await expect(tool.invoke({ sellerId: 'seller-1' })).resolves.toBe(
+        'Найдена утечка на 120 000 ₽ из-за штрафа за габариты.',
+      );
     });
   });
 

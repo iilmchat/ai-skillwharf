@@ -45,6 +45,12 @@
 - `dzen-article` использует Pay-per-Outcome (100 ₽) и `requiresApproval: true`; `ChatService` подключает инструменты только при наличии соответствующего включённого навыка.
 - `dzen-article` переведён с Mock на экспорт Markdown-черновика: инструмент `publish_to_dzen` пишет файл в `/tmp/dzen-output/` песочницы, переносит его в `./dzen-output` API и получает разрешение `filesystem`.
 
+### Financial Analyst (Track J)
+
+- Добавлены стартовые навыки `unit-economics`, `profit-leak-detector`, `price-monitor` и `fraud-shield-audit`.
+- Реализованы mock-инструменты `calculate_unit_economics`, `detect_profit_leaks`, `monitor_competitor_prices` и `audit_fraud_risk`; реальные финансовые API и данные маркетплейсов пока не подключены.
+- `profit-leak-detector` использует Pay-per-Call (300 ₽), `fraud-shield-audit` — Pay-per-Outcome (500 ₽) с обязательным одобрением; `price-monitor` запрашивает `network`.
+
 ## [0.1.0] - 2026-11-12
 
 Первый публичный MVP: аутентификация, чат с агентом, песочница, биллинг,
