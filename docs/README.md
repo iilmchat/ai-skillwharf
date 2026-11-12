@@ -6,6 +6,7 @@
 
 - [C4 Level 1: Контекст](architecture/C4-Level1-Context.md)
 - [Спецификация Wharf Control Plane](architecture/Control-Plane-Specification.md)
+- [Специфика провайдеров LLM](architecture/LLM-Router-Providers.md)
 - [ADR 0001: Hub-and-Spoke](architecture/ADR/0001-hub-and-spoke.md)
 - [ADR 0002: Технологический стек](architecture/ADR/0002-tech-stack.md)
 
@@ -17,6 +18,7 @@
 - [Трек F: Контент-конвейер](ecosystem/use-cases/track-f-content-pipeline.md)
 - [Трек G: HR-Рекрутинг](ecosystem/use-cases/track-g-hr-recruiting.md)
 - [Трек H: Документооборот](ecosystem/use-cases/track-h-document-flow.md)
+- [Трек I: Обработка документов](ecosystem/use-cases/track-i-document-processing.md)
 
 ## 💳 Биллинг (`billing/`)
 
