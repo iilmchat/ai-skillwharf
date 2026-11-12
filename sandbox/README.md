@@ -8,7 +8,7 @@ hardened Docker-контейнер; целевой бэкенд — Firecracker 
 
 | Путь | Назначение |
 | --- | --- |
-| `Dockerfile` | Образ `skillwharf-sandbox` с `curl`, `jq`, `gh` и `bash` |
+| `Dockerfile` | Образ `skillwharf-sandbox` с `curl`, `jq`, `gh`, `bash`, `python3` и `pip` |
 | `docker-compose.sandbox.yml` | Описание сервиса `sandbox-runner` (лимиты и изоляция) |
 | `scripts/test-sandbox.sh` | Скрипт проверки изоляции |
 
@@ -56,8 +56,16 @@ docker compose -f docker-compose.sandbox.yml run --rm sandbox-runner sh
 - `read_only: true` — корневая ФС неизменяема, запись только в `/tmp`;
 - `cap_drop: ALL` — все Linux capabilities сняты;
 - `no-new-privileges:true` — запрет повышения привилегий через setuid;
-- `network_mode: "none"` — сети нет: ни внешней, ни доступа к другим контейнерам;
+- сеть по умолчанию выключена (`NetworkMode: none`): ни внешней сети, ни
+  доступа к другим контейнерам. Навык с разрешением `network` включает
+  `bridge`, передавая в `SandboxService.runCommand` флаг `ALLOW_NETWORK=true`;
+  для локальной разработки `SANDBOX_ALLOW_NETWORK=true` включает сеть всем
+  вызовам песочницы;
 - `mem_limit: 128m`, `cpus: 0.5` — лимиты памяти и CPU.
+
+> `SANDBOX_ALLOW_NETWORK=true` — только для локальной разработки. В production
+> оставляйте его выключенным: сеть будет доступна лишь вызовам с явным
+> `ALLOW_NETWORK=true`.
 
 ## Чего пока нет
 

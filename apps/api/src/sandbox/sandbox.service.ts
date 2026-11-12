@@ -3,13 +3,31 @@ import Docker from 'dockerode';
 import { Writable } from 'node:stream';
 
 /**
- * Ограничения повторяют docker-compose.sandbox.yml: сеть выключена, корневая
- * файловая система только для чтения, сброшены capabilities, лимит 128 МБ и 0.5 CPU.
+ * Ограничения повторяют docker-compose.sandbox.yml: сеть по умолчанию выключена,
+ * корневая файловая система только для чтения, сброшены capabilities,
+ * лимит 128 МБ и 0.5 CPU.
  */
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE ?? 'skillwharf-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_MEMORY_LIMIT_BYTES = 128 * 1024 * 1024;
 const SANDBOX_NANO_CPUS = 500_000_000;
+
+/** Флаг в `env`, разрешающий контейнеру доступ в сеть. */
+export const SANDBOX_NETWORK_FLAG = 'ALLOW_NETWORK';
+
+/**
+ * Сеть включается по флагу `ALLOW_NETWORK=true` (запрос навыка) или глобально
+ * через `SANDBOX_ALLOW_NETWORK=true` (локальная разработка). По умолчанию
+ * контейнер запускается с `none`: это защищает от exfiltration секретов.
+ */
+export function resolveNetworkMode(
+  env: Record<string, string>,
+): 'bridge' | 'none' {
+  const requested = env[SANDBOX_NETWORK_FLAG] === 'true';
+  const allowedGlobally = process.env.SANDBOX_ALLOW_NETWORK === 'true';
+
+  return requested || allowedGlobally ? 'bridge' : 'none';
+}
 
 @Injectable()
 export class SandboxService {
@@ -35,9 +53,12 @@ export class SandboxService {
       Tty: false,
       AttachStdout: true,
       AttachStderr: true,
-      Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
+      // Сам флаг — управляющий, внутрь контейнера его не передаём.
+      Env: Object.entries(env)
+        .filter(([key]) => key !== SANDBOX_NETWORK_FLAG)
+        .map(([key, value]) => `${key}=${value}`),
       HostConfig: {
-        NetworkMode: 'none',
+        NetworkMode: resolveNetworkMode(env),
         ReadonlyRootfs: true,
         CapDrop: ['ALL'],
         SecurityOpt: ['no-new-privileges:true'],
