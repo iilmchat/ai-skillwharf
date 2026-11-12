@@ -25,6 +25,7 @@
   "packageManager": "pnpm@12.18.0",
   "type": "module",
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@vitest/coverage-v8": "^5.1.0",
     "markdownlint-cli2": "^0.24.0",
     "oxlint": "^1.93.0",

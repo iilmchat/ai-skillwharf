@@ -324,3 +324,78 @@ WebSocket (`/socket.io/`) идёт через тот же домен: edge-Caddy
 > Сертификаты и ACME-аккаунт хранятся в volume `caddy_data`, конфигурация —
 > в `caddy_config`. Не удаляйте `caddy_data` при перезапуске, иначе Caddy
 > запросит сертификаты повторно и может упереться в лимиты Let's Encrypt.
+
+## 11. Тестирование
+
+### E2E-тесты (Playwright)
+
+Сквозные сценарии лежат в `apps/web/e2e` и запускаются против уже
+поднятого стека. Проверяются страница входа, отправка сообщения в чат и
+установка навыка из магазина.
+
+1. Установите зависимости и браузер:
+
+   ```bash
+   pnpm install
+   pnpm exec playwright install --with-deps chromium
+   ```
+
+2. Поднимите стек и дождитесь healthcheck:
+
+   ```bash
+   docker compose up -d --build
+   curl http://localhost:8080/api/v1/health
+   ```
+
+3. Для детерминированного ответа чата отключите внешнюю LLM — API вернёт
+   эхо-заглушку. В `.env`:
+
+   ```text
+   LLM_BASE_URL=
+   LLM_MODEL=
+   ```
+
+   Затем перезапустите API: `docker compose up -d api`. Если LLM настроена и
+   доступна, тест всё равно пройдёт — он проверяет факт ответа, а не его текст.
+
+4. Запустите тесты:
+
+   ```bash
+   pnpm exec playwright test
+   ```
+
+Тестовый пользователь `e2e@skillwharf.test` создаётся автоматически через
+`POST /api/v1/auth/register` и получает стартовый баланс через
+`POST /api/v1/billing/topup`; отдельный сид не нужен. Для локального стека
+тест повышает пользователя до `admin` и удаляет ранее установленный
+`weather-api`, чтобы установка из магазина проверялась при каждом прогоне.
+На удалённом стенде (`E2E_BASE_URL`) эти шаги пропускаются: роль и чистое
+состояние должен обеспечить сид.
+
+Адрес стенда переопределяется переменной `E2E_BASE_URL` (по умолчанию
+`http://localhost:8080`).
+
+### Отчёты и артефакты
+
+HTML-отчёт открывается командой:
+
+```bash
+pnpm exec playwright show-report
+```
+
+При падении Playwright сохраняет скриншоты и trace в `test-results/`, отчёт —
+в `playwright-report/`. В CI эти каталоги публикуются артефактом
+`playwright-artifacts` (job `e2e`, retention 7 дней).
+
+### Что делать при падении
+
+* `#email`/`#password` не найдены — проверьте, что `/` редиректит на `/login`,
+  а статика собирается из актуального `apps/web`.
+* Поле `#chat-message` остаётся disabled — не поднялся Socket.IO; проверьте
+  `docker compose logs web api` и проксирование `/socket.io`.
+* В чате `insufficient funds` — у тестового пользователя не пополнился
+  баланс; проверьте доступность `POST /api/v1/billing/topup`.
+* Пустой магазин — не отвечает `GET /api/v1/registry/skills`; проверьте
+  `docker compose logs api` и модуль `RegistryModule`.
+* Установка навыка возвращает 403 — тестовый пользователь не `admin`;
+  локально это делает `promoteToAdmin()` в `beforeAll`.
