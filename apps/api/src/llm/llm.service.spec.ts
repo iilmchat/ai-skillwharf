@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
+import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
 import {
@@ -231,6 +232,64 @@ describe('LlmService', () => {
           where: { name: 'default_system_prompt', isActive: true },
         }),
       );
+    });
+  });
+
+  describe('нативные провайдеры', () => {
+    const nativeRoute = (providerType: string) =>
+      ({
+        id: 'route-1',
+        name: `route-${providerType}`,
+        modelName: 'GigaChat',
+        providerType,
+        baseUrl: 'https://gigachat.devices.sberbank.ru/api/v1',
+        apiKeyEnvVar: null,
+      }) as unknown as LlmRouteSelection;
+
+    it('направляет запрос в адаптер GigaChat по providerType', async () => {
+      const service = createService();
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          nativeRoute('GigaChat'),
+        ),
+      ).rejects.toThrow(/GIGACHAT_CLIENT_ID/);
+    });
+
+    it('направляет запрос в адаптер YandexGPT по providerType', async () => {
+      const service = createService();
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          nativeRoute('YandexGPT'),
+        ),
+      ).rejects.toThrow(/YANDEX_IAM_TOKEN|YANDEX_FOLDER_ID/);
+    });
+
+    it('оставляет OpenAI-совместимые маршруты на прежнем клиенте', async () => {
+      const service = createService();
+      const route = {
+        ...nativeRoute('OpenAI'),
+        modelName: 'llama3',
+        baseUrl: 'http://localhost:11434/v1',
+      };
+
+      Object.assign(service, {
+        client: {
+          invoke: vi.fn().mockResolvedValue(new AIMessage('эхо')),
+        },
+        resolveClient: () => ({
+          invoke: vi.fn().mockResolvedValue(new AIMessage('эхо')),
+        }),
+      });
+
+      await expect(
+        service.chatWithTools([new HumanMessage('привет')], [], route),
+      ).resolves.toBeInstanceOf(AIMessage);
     });
   });
 

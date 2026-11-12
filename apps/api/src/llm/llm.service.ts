@@ -23,6 +23,13 @@ import { z } from 'zod';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
+import {
+  isNativeProviderType,
+  normalizeProviderType,
+} from '../llm-router/provider-type.js';
+import { GigaChatAdapter } from './adapters/gigachat.adapter.js';
+import type { NativeProviderAdapter } from './adapters/types.js';
+import { YandexAdapter } from './adapters/yandex.adapter.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
 import {
@@ -741,6 +748,12 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): Promise<AIMessage> {
+    const adapter = this.resolveAdapter(route);
+
+    if (adapter) {
+      return this.chatWithAdapter(adapter, messages, tools, route, options);
+    }
+
     const client = this.resolveClient(route);
 
     if (!client) {
@@ -778,6 +791,27 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
+    const adapter = this.resolveAdapter(route);
+
+    if (adapter) {
+      // Нативные адаптеры отвечают целиком: отдаём текст одним чанком,
+      // чтобы фронтенд и граф работали одинаково.
+      const message = await this.chatWithAdapter(
+        adapter,
+        messages,
+        tools,
+        route,
+        options,
+      );
+
+      if (typeof message.content === 'string' && message.content !== '') {
+        yield { type: 'delta', text: message.content };
+      }
+
+      yield { type: 'message', message };
+      return;
+    }
+
     const client = this.resolveClient(route);
 
     if (!client) {
@@ -895,6 +929,60 @@ export class LlmService {
         'gen_ai.completion_tokens': usage?.output_tokens ?? 0,
       }),
     );
+  }
+
+  /**
+   * Вызов нативного провайдера (YandexGPT/GigaChat): адаптер сам ходит в
+   * свой API, а мы приводим ответ к `AIMessage` и списываем токены.
+   */
+  private async chatWithAdapter(
+    adapter: NativeProviderAdapter,
+    messages: BaseMessage[],
+    tools: StructuredToolInterface[],
+    route: LlmRouteSelection | undefined,
+    options: LlmCallOptions,
+  ): Promise<AIMessage> {
+    await this.assertCanAffordLlm(options.userId);
+
+    const systemPrompt = await this.getSystemPrompt();
+    const response = await adapter.chat({ messages, tools, systemPrompt });
+
+    this.logGenAiUsage(route, response.usage_metadata);
+    await this.chargeLlmUsage(options.userId, response.usage_metadata);
+
+    return response;
+  }
+
+  /**
+   * Адаптер для провайдера из маршрута. `providerType` может отсутствовать
+   * в старых записях и в маршрутах, созданных до появления поля, поэтому
+   * читаем его защищённо и по умолчанию считаем провайдера OpenAI-совместимым.
+   */
+  private resolveAdapter(
+    route?: LlmRouteSelection,
+  ): NativeProviderAdapter | null {
+    if (!route) {
+      return null;
+    }
+
+    const providerType = normalizeProviderType(
+      (route as LlmRouteSelection & { providerType?: string }).providerType,
+    );
+
+    if (!isNativeProviderType(providerType)) {
+      return null;
+    }
+
+    if (providerType === 'YandexGPT') {
+      const tokenEnvVar = route.apiKeyEnvVar ?? 'YANDEX_IAM_TOKEN';
+
+      return new YandexAdapter({
+        modelName: route.modelName,
+        iamToken: process.env[tokenEnvVar] ?? process.env.YANDEX_IAM_TOKEN,
+      });
+    }
+
+    return new GigaChatAdapter({ model: route.modelName });
   }
 
   /**
