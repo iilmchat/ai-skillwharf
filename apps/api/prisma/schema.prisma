@@ -23,6 +23,7 @@ model User {
   transactions  Transaction[]
   conversations Conversation[]
   wallet        Wallet?
+  auditLogs     AuditLog[]
 }
 
 model Session {
@@ -109,4 +110,58 @@ model SkillUsage {
 
   @@unique([userId, skillName])
   @@index([userId])
+}
+
+/// Шаблон системного промпта; версии хранятся отдельно.
+model PromptTemplate {
+  id          String          @id @default(uuid())
+  name        String          @unique
+  description String?
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  versions    PromptVersion[]
+}
+
+/// Версия содержимого промпта. Активной считается последняя версия.
+model PromptVersion {
+  id         String         @id @default(uuid())
+  templateId String
+  version    Int
+  content    String
+  createdAt  DateTime       @default(now())
+  template   PromptTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([templateId, createdAt])
+}
+
+/// Правило выбора LLM-провайдера. Меньший priority выбирается первым.
+model LlmRoute {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  modelName    String
+  baseUrl      String
+  apiKeyEnvVar String?
+  priority     Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive, priority])
+}
+
+/// Аудит изменений Control Plane: кто, что и когда изменил.
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
 }

@@ -21,6 +21,7 @@ import {
   messageContentToText,
   type ChatStreamChunk,
 } from '../llm/llm.service.js';
+import { LlmRouterService } from '../llm-router/llm-router.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   SANDBOX_NETWORK_FLAG,
@@ -52,6 +53,10 @@ interface BillingMock {
 
 interface SkillsMock {
   getEnabledSkills: MockFn;
+}
+
+interface RouterMock {
+  selectRoute: MockFn;
 }
 
 interface TestPricing {
@@ -116,6 +121,7 @@ describe('ChatService', () => {
   let sandbox: SandboxMock;
   let billing: BillingMock;
   let skills: SkillsMock;
+  let router: RouterMock;
   let llm: LlmService;
   let chatWithToolsStream: ReturnType<typeof vi.spyOn>;
 
@@ -131,6 +137,7 @@ describe('ChatService', () => {
     sandbox = { runCommand: vi.fn() };
     billing = { checkAndChargeSkill: vi.fn(), getBalance: vi.fn() };
     skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
+    router = { selectRoute: vi.fn().mockResolvedValue(null) };
 
     // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
     // сам вызов модели подменяем.
@@ -144,6 +151,7 @@ describe('ChatService', () => {
         { provide: LlmService, useValue: llm },
         { provide: BillingService, useValue: billing },
         { provide: SkillsService, useValue: skills },
+        { provide: LlmRouterService, useValue: router },
       ],
     }).compile();
 
@@ -195,6 +203,13 @@ describe('ChatService', () => {
         { role: 'assistant', content: 'предыдущий ответ' },
         { role: 'user', content: 'привет' },
       ]);
+      router.selectRoute.mockResolvedValue({
+        id: 'route-1',
+        name: 'local',
+        modelName: 'llama3',
+        baseUrl: 'http://localhost:11435/v1',
+        apiKeyEnvVar: null,
+      });
       chatWithToolsStream.mockReturnValueOnce(
         streamOf(new AIMessage('ответ ассистента')),
       );
@@ -233,9 +248,10 @@ describe('ChatService', () => {
         }),
       );
 
-      const [messages, tools] = chatWithToolsStream.mock.calls[0] as [
+      const [messages, tools, llmRoute] = chatWithToolsStream.mock.calls[0] as [
         BaseMessage[],
         { name: string }[],
+        unknown,
       ];
 
       // История уходит в LLM в хронологическом порядке (старые → новые).
@@ -244,6 +260,10 @@ describe('ChatService', () => {
       expect(messages[0]?.content).toBe('привет');
       expect(messages[1]).toBeInstanceOf(AIMessage);
       expect(messages[1]?.content).toBe('предыдущий ответ');
+
+      // Роутер выбран до вызова LLM, маршрут ушёл в модель.
+      expect(router.selectRoute).toHaveBeenCalledTimes(1);
+      expect(llmRoute).toMatchObject({ modelName: 'llama3' });
 
       // LLM получает инструменты песочницы, поиска и shell-команд.
       expect(tools.map((tool) => tool.name)).toEqual([

@@ -2,22 +2,26 @@ import { BadRequestException } from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
+  type BaseMessage,
   HumanMessage,
   SystemMessage,
 } from '@langchain/core/messages';
+import { AuditService } from '../audit/audit.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { PromptsService } from '../prompts/prompts.service.js';
 import {
   SANDBOX_NETWORK_FLAG,
   type SandboxService,
 } from '../sandbox/sandbox.service.js';
 import {
   EXEC_TOOL_NAME,
-  LANGUAGE_INSTRUCTION,
   LlmService,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   withLanguageInstruction,
 } from './llm.service.js';
+import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 
 const ENV_KEYS = [
   'LLM_BASE_URL',
@@ -129,6 +133,52 @@ describe('LlmService', () => {
 
       expect(deltas).toEqual(['При', 'вет']);
       expect(message?.content).toBe('Привет');
+    });
+
+    it('использует активный промпт из БД', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const prisma = {
+        promptTemplate: {
+          findFirst: vi.fn().mockResolvedValue({
+            versions: [{ content: 'Кастомный системный промпт' }],
+          }),
+        },
+      };
+      const prompts = new PromptsService(
+        prisma as unknown as PrismaService,
+        {} as AuditService,
+      );
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        prompts,
+      );
+      let sent: BaseMessage[] = [];
+
+      Object.assign(service, {
+        client: {
+          stream: async function* (messages: BaseMessage[]) {
+            sent = messages;
+            yield new AIMessageChunk({ content: 'ok' });
+          },
+        },
+      });
+
+      for await (const _chunk of service.chatWithToolsStream(
+        [new HumanMessage('привет')],
+        [],
+      )) {
+        // Итератор нужен только для побочного эффекта — запроса к модели.
+      }
+
+      expect(sent[0]).toBeInstanceOf(SystemMessage);
+      expect(sent[0]?.content).toBe('Кастомный системный промпт');
+      expect(prisma.promptTemplate.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { name: 'default_system_prompt', isActive: true },
+        }),
+      );
     });
   });
 
@@ -313,7 +363,7 @@ describe('LlmService', () => {
 
       expect(messages).toHaveLength(2);
       expect(messages[0]).toBeInstanceOf(SystemMessage);
-      expect(messages[0]?.content).toBe(LANGUAGE_INSTRUCTION);
+      expect(messages[0]?.content).toBe(DEFAULT_SYSTEM_PROMPT);
       expect(messages[1]).toBe(human);
     });
   });

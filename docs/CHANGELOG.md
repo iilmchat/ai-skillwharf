@@ -4,7 +4,17 @@
 
 ## [Unreleased]
 
-_Пока нет изменений._
+### Control Plane UI
+
+- Защищённый раздел `/admin` с вкладками «Промпты», «LLM Роутер» и «Аудит». В «Промптах» доступны история версий и создание новой версии, в «LLM Роутере» — таблица правил и добавление правила, в «Аудите» — последние действия. Доступ разрешён только ролям `admin` и `owner`, ссылка в навигации показывается только им.
+
+### Control Plane Backend
+
+- Версионирование системных промптов в БД: модели `PromptTemplate` и `PromptVersion`, сидинг `default_system_prompt`, API `GET /api/v1/prompts`, `GET /api/v1/prompts/:id/versions`, `POST /api/v1/prompts/:id/versions` (роли `admin`/`owner`).
+- `LlmService` читает активную версию промпта из БД без перезапуска API; при недоступности БД используется дефолтная инструкция.
+- LLM Router: модель `LlmRoute`, выбор активного маршрута по `priority` перед вызовом LLM, fallback на `LLM_MODEL`/`LLM_BASE_URL` из окружения и CRUD `GET/POST/PATCH/DELETE /api/v1/admin/llm-routes` (роли `admin`/`owner`).
+- Аудит Control Plane: модель `AuditLog`, запись при создании версии промпта и изменении LLM-маршрутов, эндпоинт `GET /api/v1/admin/audit` (роли `admin`/`owner`).
+- Миграции `add_prompt_templates` и `add_llm_routes`.
 
 ## [0.1.0] - 2026-11-12
 

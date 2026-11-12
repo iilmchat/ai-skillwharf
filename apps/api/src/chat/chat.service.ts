@@ -34,6 +34,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
+  LlmRouterService,
+  type LlmRouteSelection,
+} from '../llm-router/llm-router.service.js';
+import {
   DEFAULT_OFFICE_AGENT_ID,
   OFFICE_TASKS,
   officeTaskForTool,
@@ -80,6 +84,11 @@ const ChatStateAnnotation = Annotation.Root({
   approvalRequiredTools: Annotation<string[]>({
     reducer: (_previous, next) => next,
     default: () => [],
+  }),
+  /** Маршрут LLM, выбранный роутером перед запуском графа. */
+  llmRoute: Annotation<LlmRouteSelection | null>({
+    reducer: (_previous, next) => next,
+    default: () => null,
   }),
 });
 
@@ -241,6 +250,7 @@ function buildChatGraph(llmService: LlmService, waitForApproval: ApprovalGate) {
       for await (const chunk of llmService.chatWithToolsStream(
         state.messages,
         state.availableTools,
+        state.llmRoute ?? undefined,
       )) {
         if (chunk.type === 'delta') {
           text += chunk.text;
@@ -346,6 +356,7 @@ export class ChatService {
     private readonly llmService: LlmService,
     private readonly billingService: BillingService,
     private readonly skillsService: SkillsService,
+    private readonly llmRouterService: LlmRouterService,
   ) {
     this.graph = buildChatGraph(this.llmService, (conversationId, userId) =>
       this.waitForApproval(conversationId, userId),
@@ -390,6 +401,7 @@ export class ChatService {
   ): Promise<ChatReply> {
     const { messages, tools, approvalRequiredTools } =
       await this.prepareMessage(userId, conversationId, content);
+    const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply: string;
 
@@ -400,6 +412,7 @@ export class ChatService {
         messages,
         availableTools: tools,
         approvalRequiredTools,
+        llmRoute,
       });
       reply = state.reply;
     } catch (error) {
@@ -433,6 +446,7 @@ export class ChatService {
   ): Promise<ChatReply> {
     const { messages, tools, approvalRequiredTools } =
       await this.prepareMessage(userId, conversationId, content);
+    const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply = '';
 
@@ -444,6 +458,7 @@ export class ChatService {
           messages,
           availableTools: tools,
           approvalRequiredTools,
+          llmRoute,
         },
         { streamMode: ['custom', 'values'] },
       );

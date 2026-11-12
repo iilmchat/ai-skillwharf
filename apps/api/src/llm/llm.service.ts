@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
@@ -12,6 +12,9 @@ import {
 } from '@langchain/core/tools';
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
+import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
+import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
+import type { PromptsService } from '../prompts/prompts.service.js';
 import {
   SANDBOX_NETWORK_FLAG,
   SandboxService,
@@ -65,9 +68,7 @@ export const ExecToolSchema = z.object({
   command: z.string().describe('Shell-команда для выполнения'),
 });
 
-/** Инструкция, чтобы ответы шли на языке пользователя. */
-export const LANGUAGE_INSTRUCTION =
-  'Отвечай на том же языке, на котором написал пользователь (русский или английский).';
+/** Инструкция по умолчанию живёт в prompts/default-prompt.ts. */
 
 /**
  * Запрос к Tavily. Тело собирается в JSON в Gateway и передаётся в песочницу
@@ -106,7 +107,10 @@ export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly client: ChatOpenAI | null;
 
-  constructor(private readonly sandboxService: SandboxService) {
+  constructor(
+    private readonly sandboxService: SandboxService,
+    @Optional() private readonly promptsService?: PromptsService,
+  ) {
     const baseURL = process.env.LLM_BASE_URL;
     const model = process.env.LLM_MODEL;
 
@@ -219,8 +223,11 @@ export class LlmService {
   async chatWithTools(
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
+    route?: LlmRouteSelection,
   ): Promise<AIMessage> {
-    if (!this.client) {
+    const client = this.resolveClient(route);
+
+    if (!client) {
       const lastUserMessage = [...messages]
         .reverse()
         .find((message) => message instanceof HumanMessage);
@@ -230,9 +237,10 @@ export class LlmService {
       );
     }
 
-    const model = tools.length > 0 ? this.client.bindTools(tools) : this.client;
+    const model = tools.length > 0 ? client.bindTools(tools) : client;
+    const systemPrompt = await this.getSystemPrompt();
 
-    return model.invoke(withLanguageInstruction(messages));
+    return model.invoke(withLanguageInstruction(messages, systemPrompt));
   }
 
   /**
@@ -243,8 +251,11 @@ export class LlmService {
   async *chatWithToolsStream(
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
+    route?: LlmRouteSelection,
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
-    if (!this.client) {
+    const client = this.resolveClient(route);
+
+    if (!client) {
       const lastUserMessage = [...messages]
         .reverse()
         .find((message) => message instanceof HumanMessage);
@@ -255,11 +266,12 @@ export class LlmService {
       return;
     }
 
-    const model = tools.length > 0 ? this.client.bindTools(tools) : this.client;
+    const model = tools.length > 0 ? client.bindTools(tools) : client;
+    const systemPrompt = await this.getSystemPrompt();
     let accumulated: AIMessageChunk | undefined;
 
     for await (const chunk of await model.stream(
-      withLanguageInstruction(messages),
+      withLanguageInstruction(messages, systemPrompt),
     )) {
       accumulated = accumulated ? accumulated.concat(chunk) : chunk;
 
@@ -279,13 +291,55 @@ export class LlmService {
 
     yield { type: 'message', message };
   }
+
+  /**
+   * Клиент для выбранного маршрута или env-fallback. Ключ API берётся из
+   * переменной окружения, имя которой хранится в маршруте.
+   */
+  private resolveClient(route?: LlmRouteSelection): ChatOpenAI | null {
+    if (!route) {
+      return this.client;
+    }
+
+    const modelName = route.modelName.trim();
+    const baseURL = route.baseUrl.trim();
+
+    if (!modelName || !baseURL) {
+      return this.client;
+    }
+
+    const apiKey = route.apiKeyEnvVar
+      ? process.env[route.apiKeyEnvVar]
+      : process.env.LLM_API_KEY;
+
+    return new ChatOpenAI({
+      model: modelName,
+      apiKey: apiKey || 'not-needed',
+      configuration: { baseURL },
+      temperature: 0.7,
+    });
+  }
+
+  /** Активный системный промпт из БД; при сбое — дефолтная инструкция. */
+  private async getSystemPrompt(): Promise<string> {
+    if (!this.promptsService) {
+      return DEFAULT_SYSTEM_PROMPT;
+    }
+
+    try {
+      return await this.promptsService.getActiveSystemPrompt();
+    } catch {
+      return DEFAULT_SYSTEM_PROMPT;
+    }
+  }
 }
 
-/** Добавляет системную инструкцию о языке ответа в начало диалога. */
+/** Добавляет системную инструкцию в начало диалога. */
 export function withLanguageInstruction(
   messages: BaseMessage[],
+  systemPrompt: string = DEFAULT_SYSTEM_PROMPT,
 ): BaseMessage[] {
-  return [new SystemMessage(LANGUAGE_INSTRUCTION), ...messages];
+  return [new SystemMessage(systemPrompt), ...messages];
 }
 
 /** Собирает разрешённые секреты из окружения Gateway для песочницы. */

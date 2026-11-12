@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { HealthModule } from './health/health.module.js';
+import { LlmRouterModule } from './llm-router/llm-router.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { PromptsModule } from './prompts/prompts.module.js';
 import { RegistryModule } from './registry/registry.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
 import { SkillsModule } from './skills/skills.module.js';
@@ -18,6 +21,9 @@ import { SkillsModule } from './skills/skills.module.js';
     ChatModule,
     SkillsModule,
     RegistryModule,
+    PromptsModule,
+    LlmRouterModule,
+    AuditModule,
     SandboxModule,
     BillingModule,
   ],
