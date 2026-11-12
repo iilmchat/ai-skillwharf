@@ -24,9 +24,14 @@ import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
   EXEC_TOOL_NAME,
+  GENERATE_IMAGE_TOOL_NAME,
+  GOOGLE_DOCS_CREATE_TOOL_NAME,
+  GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
+  RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   messageContentToText,
@@ -662,6 +667,46 @@ export class ChatService {
       tools.push(
         this.llmService.createWbMcpTool({
           beforeExecute: beforeExecuteFor(WB_MCP_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, SEND_MESSAGE_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createSendMessageTool({
+          beforeExecute: beforeExecuteFor(SEND_MESSAGE_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, GOOGLE_SHEETS_APPEND_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createGoogleSheetsAppendTool({
+          beforeExecute: beforeExecuteFor(GOOGLE_SHEETS_APPEND_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, GOOGLE_DOCS_CREATE_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createGoogleDocsCreateTool({
+          beforeExecute: beforeExecuteFor(GOOGLE_DOCS_CREATE_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, GENERATE_IMAGE_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createGenerateImageTool({
+          beforeExecute: beforeExecuteFor(GENERATE_IMAGE_TOOL_NAME),
+        }),
+      );
+    }
+
+    if (skillDeclaresTool(skills, RUN_WORKFLOW_TOOL_NAME)) {
+      tools.push(
+        this.llmService.createRunWorkflowTool({
+          beforeExecute: beforeExecuteFor(RUN_WORKFLOW_TOOL_NAME),
         }),
       );
     }

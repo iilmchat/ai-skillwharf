@@ -19,6 +19,7 @@ import {
   OZON_MCP_TOOL_NAME,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
+  SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   withLanguageInstruction,
@@ -406,6 +407,23 @@ describe('LlmService', () => {
         sales: 15000,
         items: 42,
       });
+    });
+  });
+
+  describe('createSendMessageTool', () => {
+    it('возвращает подтверждение отправки сообщения', async () => {
+      const service = createService();
+
+      const tool = service.createSendMessageTool();
+
+      expect(tool.name).toBe(SEND_MESSAGE_TOOL_NAME);
+      await expect(
+        tool.invoke({
+          channel: 'telegram',
+          to: '@customer',
+          text: 'Ваш заказ готов',
+        }),
+      ).resolves.toBe('Сообщение отправлено в telegram для @customer');
     });
   });
 

@@ -20,6 +20,10 @@ const STARTER_SKILLS = [
   '05-utility/code-runner/SKILL.md',
   '06-marketplace/ozon-seller/SKILL.md',
   '06-marketplace/wb-seller/SKILL.md',
+  '07-communication/messenger-connector/SKILL.md',
+  '08-productivity/google-workspace/SKILL.md',
+  '09-creative/midjourney-api/SKILL.md',
+  '10-orchestration/workflow-orchestrator/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

@@ -22,6 +22,12 @@
 - Реализованы MCP-заглушки для Ozon и Wildberries: инструменты принимают `action`/`params` и возвращают демонстрационные данные (продажи, заказы, товары, отзывы). Реальные MCP-серверы ещё не подключены.
 - `ChatService` подключает marketplace-инструменты только при наличии соответствующего включённого навыка.
 
+### Communication, Productivity & Creative
+
+- Добавлены стартовые навыки `messenger-connector`, `google-workspace`, `midjourney-api` и `workflow-orchestrator`.
+- Реализованы mock-инструменты `send_message`, `google_sheets_append`, `google_docs_create`, `generate_image` и `run_workflow`; реальные Telegram/VK/WhatsApp, Google Workspace и Midjourney API пока не подключены.
+- `ChatService` подключает эти инструменты только при наличии соответствующего включённого навыка; `generate_image` использует Pay-per-Call цену из манифеста.
+
 ## [0.1.0] - 2026-11-12
 
 Первый публичный MVP: аутентификация, чат с агентом, песочница, биллинг,

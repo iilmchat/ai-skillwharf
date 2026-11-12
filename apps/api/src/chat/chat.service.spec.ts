@@ -15,9 +15,14 @@ import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
   EXEC_TOOL_NAME,
+  GENERATE_IMAGE_TOOL_NAME,
+  GOOGLE_DOCS_CREATE_TOOL_NAME,
+  GOOGLE_SHEETS_APPEND_TOOL_NAME,
   LlmService,
   OZON_MCP_TOOL_NAME,
+  RUN_WORKFLOW_TOOL_NAME,
   SANDBOX_TOOL_NAME,
+  SEND_MESSAGE_TOOL_NAME,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   messageContentToText,
@@ -301,6 +306,51 @@ describe('ChatService', () => {
 
       expect(tools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([OZON_MCP_TOOL_NAME, WB_MCP_TOOL_NAME]),
+      );
+    });
+
+    it('подключает отраслевые mock-инструменты из манифестов', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('messenger-connector', SEND_MESSAGE_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('google-workspace', GOOGLE_SHEETS_APPEND_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('google-workspace', GOOGLE_DOCS_CREATE_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('midjourney-api', GENERATE_IMAGE_TOOL_NAME, {
+          model: 'Free',
+        }),
+        createSkill('workflow-orchestrator', RUN_WORKFLOW_TOOL_NAME, {
+          model: 'Free',
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сделай отчёт' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('Готово')),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'сделай отчёт'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      const [, tools] = chatWithToolsStream.mock.calls[0] as [
+        BaseMessage[],
+        { name: string }[],
+      ];
+
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          SEND_MESSAGE_TOOL_NAME,
+          GOOGLE_SHEETS_APPEND_TOOL_NAME,
+          GOOGLE_DOCS_CREATE_TOOL_NAME,
+          GENERATE_IMAGE_TOOL_NAME,
+          RUN_WORKFLOW_TOOL_NAME,
+        ]),
       );
     });
 

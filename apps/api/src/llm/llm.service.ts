@@ -88,6 +88,70 @@ export const McpToolSchema = z.object({
   params: z.record(z.string(), z.any()).describe('Параметры действия'),
 });
 
+/** Имя mock-инструмента отправки сообщений. */
+export const SEND_MESSAGE_TOOL_NAME = 'send_message';
+
+/** Описание mock-инструмента отправки сообщений. */
+export const SEND_MESSAGE_TOOL_DESCRIPTION =
+  'Отправляет сообщение в Telegram/VK/WhatsApp (заглушка)';
+
+/** Схема аргументов `send_message`. */
+export const SendMessageToolSchema = z.object({
+  channel: z.string().describe('Канал: telegram, vk или whatsapp'),
+  to: z.string().describe('Получатель сообщения'),
+  text: z.string().describe('Текст сообщения'),
+});
+
+/** Имя mock-инструмента добавления строк в Google Sheets. */
+export const GOOGLE_SHEETS_APPEND_TOOL_NAME = 'google_sheets_append';
+
+/** Описание mock-инструмента Google Sheets. */
+export const GOOGLE_SHEETS_APPEND_TOOL_DESCRIPTION =
+  'Добавляет строки в Google Таблицу (заглушка)';
+
+/** Схема аргументов `google_sheets_append`. */
+export const GoogleSheetsAppendToolSchema = z.object({
+  sheetId: z.string().describe('Идентификатор таблицы'),
+  values: z.array(z.any()).describe('Строки для добавления'),
+});
+
+/** Имя mock-инструмента создания Google Docs. */
+export const GOOGLE_DOCS_CREATE_TOOL_NAME = 'google_docs_create';
+
+/** Описание mock-инструмента Google Docs. */
+export const GOOGLE_DOCS_CREATE_TOOL_DESCRIPTION =
+  'Создаёт документ Google Docs (заглушка)';
+
+/** Схема аргументов `google_docs_create`. */
+export const GoogleDocsCreateToolSchema = z.object({
+  title: z.string().describe('Заголовок документа'),
+  content: z.string().describe('Содержимое документа'),
+});
+
+/** Имя mock-инструмента генерации изображений. */
+export const GENERATE_IMAGE_TOOL_NAME = 'generate_image';
+
+/** Описание mock-инструмента генерации изображений. */
+export const GENERATE_IMAGE_TOOL_DESCRIPTION =
+  'Генерирует изображение по текстовому промпту (заглушка)';
+
+/** Схема аргументов `generate_image`. */
+export const GenerateImageToolSchema = z.object({
+  prompt: z.string().describe('Текстовый промпт изображения'),
+});
+
+/** Имя mock-инструмента запуска цепочек задач. */
+export const RUN_WORKFLOW_TOOL_NAME = 'run_workflow';
+
+/** Описание mock-инструмента запуска цепочек задач. */
+export const RUN_WORKFLOW_TOOL_DESCRIPTION =
+  'Запускает многошаговую цепочку задач (заглушка)';
+
+/** Схема аргументов `run_workflow`. */
+export const RunWorkflowToolSchema = z.object({
+  steps: z.array(z.string()).describe('Шаги цепочки задач'),
+});
+
 /** Инструкция по умолчанию живёт в prompts/default-prompt.ts. */
 
 /**
@@ -264,6 +328,86 @@ export class LlmService {
         await options.beforeExecute?.();
 
         return mockMarketplaceResponse(platform, action, params);
+      },
+    });
+  }
+
+  /** Mock-инструмент отправки сообщений в мессенджеры. */
+  createSendMessageTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: SEND_MESSAGE_TOOL_NAME,
+      description: SEND_MESSAGE_TOOL_DESCRIPTION,
+      schema: SendMessageToolSchema,
+      func: async ({ channel, to }) => {
+        await options.beforeExecute?.();
+
+        return `Сообщение отправлено в ${channel} для ${to}`;
+      },
+    });
+  }
+
+  /** Mock-инструмент добавления строк в Google Sheets. */
+  createGoogleSheetsAppendTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: GOOGLE_SHEETS_APPEND_TOOL_NAME,
+      description: GOOGLE_SHEETS_APPEND_TOOL_DESCRIPTION,
+      schema: GoogleSheetsAppendToolSchema,
+      func: async ({ sheetId }) => {
+        await options.beforeExecute?.();
+
+        return `Данные добавлены в таблицу ${sheetId}`;
+      },
+    });
+  }
+
+  /** Mock-инструмент создания Google Docs. */
+  createGoogleDocsCreateTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: GOOGLE_DOCS_CREATE_TOOL_NAME,
+      description: GOOGLE_DOCS_CREATE_TOOL_DESCRIPTION,
+      schema: GoogleDocsCreateToolSchema,
+      func: async ({ title }) => {
+        await options.beforeExecute?.();
+
+        return `Документ "${title}" создан`;
+      },
+    });
+  }
+
+  /** Mock-инструмент генерации изображений. */
+  createGenerateImageTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: GENERATE_IMAGE_TOOL_NAME,
+      description: GENERATE_IMAGE_TOOL_DESCRIPTION,
+      schema: GenerateImageToolSchema,
+      func: async () => {
+        await options.beforeExecute?.();
+
+        return 'https://placehold.co/600x400?text=Generated';
+      },
+    });
+  }
+
+  /** Mock-инструмент запуска многошаговых цепочек. */
+  createRunWorkflowTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: RUN_WORKFLOW_TOOL_NAME,
+      description: RUN_WORKFLOW_TOOL_DESCRIPTION,
+      schema: RunWorkflowToolSchema,
+      func: async ({ steps }) => {
+        await options.beforeExecute?.();
+
+        return `Цепочка задач выполнена: ${steps.join(' -> ')}`;
       },
     });
   }
