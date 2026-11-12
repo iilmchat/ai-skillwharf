@@ -16,6 +16,7 @@
 Перед запуском создайте файл `.env` в корне проекта на основе `.env.example`:
 
 * `POSTGRES_PASSWORD`: Надежный пароль для БД.
+* `DATABASE_URL`: Строка подключения Prisma к PostgreSQL (по умолчанию порт хоста `5435`, см. `.env.example`).
 * `JWT_SECRET`: Секрет для подписи токенов (минимум 32 символа).
 * `GIGACHAT_CLIENT_ID` / `GIGACHAT_CLIENT_SECRET`: Ключи для российских LLM (опционально).
 * `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY`: Ключи для биллинга (если включен).
@@ -52,9 +53,12 @@
 5. **Проверка статуса:**
 
    ```bash
-   curl http://localhost:3000/health
+   curl http://localhost:3001/api/v1/health
    # Ожидаемый ответ: {"status":"ok","database":true}
    ```
+
+   > Порты `3000` и `5432` на хосте заняты другими проектами, поэтому API
+   > проброшен на `3001`, а PostgreSQL — на `5435` (см. `docker-compose.yml`).
 
 ## 4. Бэкап и восстановление (Ledger и БД)
 

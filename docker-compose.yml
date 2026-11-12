@@ -7,6 +7,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      # 5432 занят другим проектом на хосте, пробрасываем свободный 5435.
+      - "5435:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -18,9 +21,13 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     ports:
-      - "3000:3000"
+      # 3000 занят другим проектом на хосте, пробрасываем свободный 3001.
+      - "3001:3000"
     env_file:
       - .env
+    environment:
+      # Внутри compose-сети API ходит в postgres по имени сервиса, а не localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
     depends_on:
       postgres:
         condition: service_healthy

@@ -12,6 +12,10 @@
 - Каркас API на NestJS (`apps/api`).
 - Docker-инфраструктура: `Dockerfile` для API и `docker-compose.yml` (API + PostgreSQL).
 - Базовая песочница `docker-compose.sandbox.yml` (hardened Docker).
+- Prisma ORM: схема БД (`User`, `Session`, `Transaction`), первая миграция и скрипт `db:migrate`.
+- Эндпоинт `GET /api/v1/health` с проверкой подключения к PostgreSQL.
+- Модуль аутентификации: регистрация/логин (Argon2, JWT access + refresh), `JwtStrategy` и `JwtAuthGuard`.
+- Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 
 ### Изменено
 
