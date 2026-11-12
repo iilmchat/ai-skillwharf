@@ -5,7 +5,6 @@ import i18n from '../i18n';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 
-const SOCKET_URL = import.meta.env.VITE_WS_URL ?? 'http://localhost:3001';
 const ACK_TIMEOUT_MS = 90_000;
 const INSUFFICIENT_FUNDS_MARKER = 'Недостаточно средств';
 const ERROR_KEY_PREFIX = 'errors.';
@@ -230,14 +229,18 @@ export function useChatSession(): ChatSession {
       });
   }, [accessToken, attempt]);
 
-  // Socket.IO подключается с JWT в handshake.auth. Сервер сам проверяет
-  // токен и отключает сокет при ошибке.
+  // Socket.IO идёт на тот же origin: в dev его проксирует Vite,
+  // в production — reverse proxy (Caddy/Nginx). Это убирает CORS
+  // и хардкод адреса API.
   useEffect(() => {
     if (accessToken === null) {
       return;
     }
 
-    const socket = io(SOCKET_URL, { auth: { token: accessToken } });
+    const socket = io(window.location.origin, {
+      path: '/socket.io',
+      auth: { token: accessToken },
+    });
     socketRef.current = socket;
 
     const handleConnect = () => {

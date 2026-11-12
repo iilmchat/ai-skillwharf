@@ -1,5 +1,9 @@
 export const CURRENCY_SYMBOL = '₽';
 
+export function getCurrencySymbol(currency: 'RUB' | 'USD' | undefined): string {
+  return currency === 'USD' ? '$' : CURRENCY_SYMBOL;
+}
+
 /** Форматирует денежную строку API без изменения её точности. */
 export function formatMoney(value: string, language: string): string {
   const amount = Number(value);

@@ -7,7 +7,7 @@ import {
   type FormEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
@@ -19,11 +19,19 @@ import {
   type ChatMessage,
   type ConnectionState,
 } from '../hooks/useChatSession';
-import { balanceQueryKey, useBalance } from '../hooks/useBalance';
+import { useBalance } from '../hooks/useBalance';
 import { useAuthStore } from '../store/auth.store';
 
 const LOGOUT_BUTTON_CLASSES =
   'rounded-lg border border-outline px-3 py-2 text-sm font-medium text-on-surface-variant transition hover:border-error/40 hover:bg-error-container hover:text-on-error-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
+
+function navItemClasses({ isActive }: { isActive: boolean }): string {
+  return `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+    isActive
+      ? 'bg-primary-container text-on-primary-container'
+      : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+  }`;
+}
 
 const CONNECTION_LABEL_KEY: Record<ConnectionState, string> = {
   connecting: 'chat.status.connecting',
@@ -152,7 +160,7 @@ export function ChatPage() {
       : 'connecting';
 
   function handleLogout() {
-    queryClient.removeQueries({ queryKey: balanceQueryKey });
+    queryClient.clear();
     logout();
     navigate('/login', { replace: true });
   }
@@ -178,6 +186,46 @@ export function ChatPage() {
           <div className="flex h-16 items-center border-b border-outline-variant px-5">
             <Brand />
           </div>
+
+          <nav
+            aria-label={t('nav.primary')}
+            className="space-y-1 border-b border-outline-variant p-3"
+          >
+            <NavLink to="/chat" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-7a8 8 0 0 1 8-8h2a8 8 0 0 1 8 4Z" />
+              </svg>
+              {t('nav.chat')}
+            </NavLink>
+
+            <NavLink to="/skills" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <rect x="4" y="4" width="6" height="6" rx="1" />
+                <rect x="14" y="4" width="6" height="6" rx="1" />
+                <rect x="4" y="14" width="6" height="6" rx="1" />
+                <rect x="14" y="14" width="6" height="6" rx="1" />
+              </svg>
+              {t('nav.skills')}
+            </NavLink>
+          </nav>
 
           <div className="flex-1 overflow-y-auto p-4">
             <h2 className="px-2 text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
@@ -270,13 +318,49 @@ export function ChatPage() {
               <div className="md:hidden">
                 <LanguageSwitcher />
               </div>
+              <Link
+                to="/skills"
+                aria-label={t('nav.skills')}
+                title={t('nav.skills')}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <rect x="4" y="4" width="6" height="6" rx="1" />
+                  <rect x="14" y="4" width="6" height="6" rx="1" />
+                  <rect x="4" y="14" width="6" height="6" rx="1" />
+                  <rect x="14" y="14" width="6" height="6" rx="1" />
+                </svg>
+              </Link>
               <ThemeToggle />
               <button
                 type="button"
                 onClick={handleLogout}
-                className={`md:hidden ${LOGOUT_BUTTON_CLASSES}`}
+                aria-label={t('chat.logout')}
+                title={t('chat.logout')}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-outline text-on-surface-variant transition hover:border-error/40 hover:bg-error-container hover:text-on-error-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
               >
-                {t('chat.logout')}
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <path d="m16 17 5-5-5-5M21 12H9" />
+                </svg>
               </button>
             </div>
           </header>

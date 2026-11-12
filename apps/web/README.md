@@ -9,15 +9,15 @@ Zustand, TanStack Query, React Router и Socket.IO.
 pnpm --filter web dev
 ```
 
-Dev-сервер поднимается на <http://localhost:5173> и проксирует `/api` на API
-Gateway <http://localhost:3001>: у REST API не включён CORS. Socket.IO
-подключается к `http://localhost:3001` напрямую (у gateway включён CORS).
+Dev-сервер поднимается на <http://localhost:5173> и проксирует `/api` и
+`/socket.io` на API Gateway <http://localhost:3001>: у REST API не включён
+CORS, а WebSocket ходит на тот же origin (`window.location.origin`,
+path `/socket.io`). В production этот же путь проксирует reverse proxy
+(Caddy/Nginx).
 
 Переменные окружения:
 
-- `VITE_API_URL` — базовый URL REST API (по умолчанию `/api/v1`);
-- `VITE_WS_URL` — адрес Socket.IO-сервера (по умолчанию
-  `http://localhost:3001`).
+- `VITE_API_URL` — базовый URL REST API (по умолчанию `/api/v1`).
 
 ## Проверки
 
@@ -51,16 +51,28 @@ Inter/Manrope заданы в `src/index.css`. Светлая и тёмная т
 текущего пользователя, `amount` и сгенерированный `idempotencyKey`; после
 успеха кэш баланса инвалидируется.
 
-На текущем бэкенде эндпоинт защищён ролью `admin`, поэтому обычный
-пользователь получает 403 — интерфейс показывает локализованное сообщение.
-Для массового пополнения нужно ослабить guard в API (задача OpenCode).
+На текущем бэкенде эндпоинт доступен ролям `user` и `admin`: обычный
+пользователь пополняет только свой кошелёк, администратор может указать
+`userId` другого пользователя.
 
 ## Маршруты и чат
 
 - `/login` — вход по email и паролю (JWT access-токен в Zustand);
 - `/chat` — защищённый маршрут: создаёт диалог через
   `POST /api/v1/chat/conversations`, подключает Socket.IO с токеном в
-  `handshake.auth` и отправляет сообщения событием `send_message`.
+  `handshake.auth` и отправляет сообщения событием `send_message`;
+- `/skills` — защищённый каталог навыков.
+
+## Навыки
+
+Страница `/skills` использует TanStack Query (`GET /api/v1/skills`, ключ
+`['skills']`) и показывает карточки с названием, версией, автором,
+описанием и ценой Pay-per-Call. Переключатель включения вызывает
+`PATCH /api/v1/skills/:id/toggle` с `{ isEnabled }`, оптимистично обновляет
+кэш и инвалидирует его после ответа.
+
+`PATCH /toggle` на бэкенде защищён ролью `admin`: обычный пользователь
+получит 403 и локализованный тост, а Switch вернётся в исходное состояние.
 
 Access-токен хранится только в памяти вкладки: после перезагрузки страницы
 нужно войти заново, пока не реализована ротация refresh-токена.

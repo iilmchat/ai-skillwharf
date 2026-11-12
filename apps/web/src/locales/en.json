@@ -32,6 +32,40 @@
   "errors": {
     "insufficient_funds": "Insufficient funds to run the agent. Top up your balance."
   },
+  "nav": {
+    "primary": "Primary navigation",
+    "chat": "Chat",
+    "skills": "Skills"
+  },
+  "skills": {
+    "title": "Skills",
+    "subtitle": "Installed agent skills. Enable or disable them for new conversations.",
+    "count": "Installed: {{count}}",
+    "loading": "Loading skills…",
+    "emptyTitle": "No installed skills yet",
+    "emptyBody": "Install a skill through the API or catalog and it will appear here.",
+    "errorTitle": "Could not load skills",
+    "retry": "Retry",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "versionAuthor": "v{{version}} · {{author}}",
+    "toggleLabel": "Toggle skill {{name}}",
+    "backToChat": "Back to chat",
+    "pricing": {
+      "free": "Free",
+      "subscription": "Subscription",
+      "freemium": "Freemium",
+      "payPerCall": "{{price}} {{currency}} per call"
+    },
+    "errors": {
+      "load": "Could not load skills. Please try again.",
+      "toggle": "Could not update the skill. Please try again.",
+      "adminOnly": "Only an administrator can manage skills.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "notFound": "Skill not found.",
+      "network": "The server is unreachable. Check your connection."
+    }
+  },
   "theme": {
     "toggleLabel": "Dark theme",
     "switchToDark": "Switch to dark theme",
