@@ -155,6 +155,116 @@
       "loginFailed": "Could not sign in. Please try again."
     }
   },
+  "landing": {
+    "nav": {
+      "features": "Features",
+      "office": "AI office"
+    },
+    "login": "Sign in",
+    "goToChat": "Go to chat",
+    "badge": "Autonomous AI agent platform",
+    "titleLead": "Autonomous",
+    "titleAccent": "AI agents",
+    "titleTail": "for your business",
+    "subtitle": "Launch tasks, connect skills, and watch the team work. SkillWharf takes care of the sandbox, billing, and access control.",
+    "primaryCta": "Sign in",
+    "secondaryCta": "See the AI office",
+    "meta": {
+      "sandbox": "Sandbox",
+      "billing": "Billing",
+      "skills": "Skills"
+    },
+    "preview": {
+      "title": "AI office",
+      "subtitle": "6 agents on shift",
+      "live": "Live",
+      "waiting": "Awaiting approval: {{count}}",
+      "approval": "Your decision is needed",
+      "openOffice": "Open office"
+    },
+    "features": {
+      "eyebrow": "Features",
+      "title": "Infrastructure for agents, not another chat",
+      "subtitle": "Everything you need to run autonomous agents safely and predictably.",
+      "sandbox": {
+        "title": "Sandbox",
+        "description": "Isolated execution for code and tools: an agent never reaches the host."
+      },
+      "billing": {
+        "title": "Billing",
+        "description": "Transparent charges for skill calls, balance, and transaction history."
+      },
+      "skills": {
+        "title": "Skills",
+        "description": "Install ready-made skills from the store and manage team access."
+      }
+    },
+    "cta": {
+      "title": "Build your AI team",
+      "subtitle": "Launch your first agent in minutes — without running your own infrastructure.",
+      "secondary": "Open the AI office"
+    },
+    "footer": {
+      "tagline": "A workspace for autonomous AI agents.",
+      "rights": "© {{year}} SkillWharf"
+    }
+  },
+  "office": {
+    "eyebrow": "Live scene",
+    "title": "AI office",
+    "subtitle": "A live view of the team at work: some are typing, some are waiting for your decision.",
+    "mockBadge": "Mock data",
+    "mockNote": "This is a demo backed by local data. WebSocket events will replace it later.",
+    "backHome": "Home",
+    "backToChat": "Chat",
+    "login": "Sign in",
+    "legendLabel": "Agent statuses",
+    "desk": "Desk {{number}}",
+    "currentTask": "Current task",
+    "open": "Open",
+    "openAgent": "Open agent card {{name}}",
+    "status": {
+      "idle": "Coffee break",
+      "working": "Typing",
+      "waiting_approval": "Awaiting approval"
+    },
+    "agents": {
+      "nova": {
+        "role": "Data analyst",
+        "task": "Compiling the quarterly sales report"
+      },
+      "miles": {
+        "role": "Automation engineer",
+        "task": "Building the CRM integration"
+      },
+      "iris": {
+        "role": "Researcher",
+        "task": "Researching the competitive landscape"
+      },
+      "leo": {
+        "role": "Developer",
+        "task": "Waiting for approval to deploy to staging"
+      },
+      "ava": {
+        "role": "Copywriter",
+        "task": "Drafting the release notes"
+      },
+      "kai": {
+        "role": "Sandbox operator",
+        "task": "Waiting for approval to run the script"
+      }
+    },
+    "sidebar": {
+      "eyebrow": "Agent card",
+      "role": "Role",
+      "status": "Status",
+      "task": "Current task",
+      "approve": "Approve action",
+      "approved": "Action approved. The agent is back to work.",
+      "mockHint": "This card uses mock data. Once WebSocket is connected, it will update live.",
+      "close": "Close agent card"
+    }
+  },
   "chat": {
     "sidebarLabel": "Sidebar",
     "chatsTitle": "Chats",

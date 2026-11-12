@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -82,7 +82,13 @@ export function LoginPage() {
         aria-labelledby="login-hero-title"
         className="relative hidden w-1/2 flex-col justify-between border-r border-outline-variant p-12 lg:flex"
       >
-        <Brand />
+        <Link
+          to="/"
+          aria-label="SkillWharf"
+          className="w-fit rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <Brand />
+        </Link>
 
         <div className="max-w-md">
           <p className="inline-flex items-center gap-2 rounded-full border border-tertiary/30 bg-tertiary-container px-3 py-1 text-xs font-medium text-on-tertiary-container">
@@ -146,7 +152,13 @@ export function LoginPage() {
       <main className="relative flex w-full flex-1 items-center justify-center px-5 py-10 sm:px-8 lg:w-1/2">
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden">
-            <Brand />
+            <Link
+              to="/"
+              aria-label="SkillWharf"
+              className="w-fit rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <Brand />
+            </Link>
           </div>
 
           <div className="rounded-2xl border border-outline-variant bg-surface-container p-6 shadow-xl shadow-primary/5 sm:p-8">

@@ -3,9 +3,21 @@ import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
+const LandingPage = lazy(() =>
+  import('./pages/LandingPage').then((module) => ({
+    default: module.LandingPage,
+  })),
+);
+
 const LoginPage = lazy(() =>
   import('./pages/LoginPage').then((module) => ({
     default: module.LoginPage,
+  })),
+);
+
+const OfficePage = lazy(() =>
+  import('./pages/OfficePage').then((module) => ({
+    default: module.OfficePage,
   })),
 );
 
@@ -45,6 +57,9 @@ function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/welcome" element={<LandingPage />} />
+        <Route path="/office" element={<OfficePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/chat"
@@ -70,7 +85,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );

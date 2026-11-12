@@ -178,10 +178,16 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.describe('Дымовые сценарии UI', () => {
-  test('неавторизованный пользователь видит страницу входа', async ({
+  test('неавторизованный пользователь видит лендинг и страницу входа', async ({
     page,
   }) => {
     await page.goto('/');
+
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(
+      /Автономные|Autonomous/,
+    );
+
+    await page.getByRole('link', { name: /Войти|Sign in/i }).first().click();
 
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.locator('#email')).toBeVisible();
