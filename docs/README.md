@@ -14,6 +14,9 @@
 - [Спецификация Skill Manifest](ecosystem/Manifest-Specification.md)
 - [Матрица монетизации](ecosystem/Monetization-Matrix.md)
 - [Спецификации бизнес-треков (use-cases)](ecosystem/use-cases/)
+- [Трек F: Контент-конвейер](ecosystem/use-cases/track-f-content-pipeline.md)
+- [Трек G: HR-Рекрутинг](ecosystem/use-cases/track-g-hr-recruiting.md)
+- [Трек H: Документооборот](ecosystem/use-cases/track-h-document-flow.md)
 
 ## 💳 Биллинг (`billing/`)
 
