@@ -38,9 +38,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        # Vite вшивает значения на этапе сборки.
+        # Vite вшивает базовый URL API на этапе сборки.
         VITE_API_URL: /api/v1
-        VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
     ports:
       # Caddy слушает 80 внутри контейнера; на хосте оставляем 8080.
       - "8080:80"

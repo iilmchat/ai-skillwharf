@@ -18,11 +18,10 @@ RUN pnpm install --frozen-lockfile
 COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
 
-# Vite вшивает переменные на этапе сборки.
+# Vite вшивает базовый URL API на этапе сборки. WebSocket идёт на тот же
+# origin (window.location.origin), поэтому отдельная переменная не нужна.
 ARG VITE_API_URL=/api/v1
-ARG VITE_WS_URL=http://localhost:3001
-ENV VITE_API_URL=${VITE_API_URL} \
-    VITE_WS_URL=${VITE_WS_URL}
+ENV VITE_API_URL=${VITE_API_URL}
 
 RUN pnpm --filter web build
 
