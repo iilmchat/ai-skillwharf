@@ -37,6 +37,13 @@ export const MAX_TOOL_ROUNDS = 5;
 export const INSUFFICIENT_FUNDS_REPLY =
   'Недостаточно средств для выполнения кода. Пополните баланс.';
 
+/** Минимальный баланс, с которым разрешено запускать агента. */
+export const MIN_AGENT_BALANCE = 0.5;
+
+/** Ошибка, если баланса не хватает на запуск агента. */
+export const INSUFFICIENT_BALANCE_MESSAGE =
+  'Недостаточно средств для запуска агента. Пополните баланс.';
+
 const TOOL_LIMIT_REPLY =
   'Достигнут лимит вызовов инструментов. Уточните запрос и попробуйте снова.';
 
@@ -203,6 +210,9 @@ export class ChatService {
       throw new ForbiddenException('Диалог принадлежит другому пользователю');
     }
 
+    // Cost control: не запускаем даже LLM, если на счету меньше порога.
+    await this.assertSufficientBalance(userId);
+
     await this.prisma.message.create({
       data: { conversationId, role: 'user', content },
     });
@@ -218,7 +228,7 @@ export class ChatService {
       .reverse()
       .map((message) => toLangChainMessage(message));
 
-    const tools = [this.buildSandboxTool(userId)];
+    const tools = this.buildTools(userId);
 
     let reply: string;
 
@@ -246,17 +256,33 @@ export class ChatService {
     return { conversationId, reply };
   }
 
-  /** Инструмент песочницы со списанием средств перед каждым запуском. */
-  private buildSandboxTool(userId: string): StructuredToolInterface {
-    return this.llmService.createSandboxTool({
-      beforeExecute: async () => {
-        await this.billingService.chargeForSkill(
-          userId,
-          SANDBOX_CALL_PRICE,
-          SANDBOX_CALL_DESCRIPTION,
-          randomUUID(),
-        );
-      },
-    });
+  /** Проверяет минимальный баланс перед запуском графа. */
+  private async assertSufficientBalance(userId: string): Promise<void> {
+    const { balance } = await this.billingService.getBalance(userId);
+
+    if (Number.parseFloat(balance) < MIN_AGENT_BALANCE) {
+      throw new BadRequestException(INSUFFICIENT_BALANCE_MESSAGE);
+    }
+  }
+
+  /**
+   * Инструменты, доступные агенту. Каждый запуск песочницы оплачивается,
+   * поэтому у всех инструментов общий paywall-хук.
+   */
+  private buildTools(userId: string): StructuredToolInterface[] {
+    const beforeExecute = async (): Promise<void> => {
+      await this.billingService.chargeForSkill(
+        userId,
+        SANDBOX_CALL_PRICE,
+        SANDBOX_CALL_DESCRIPTION,
+        randomUUID(),
+      );
+    };
+
+    return [
+      this.llmService.createSandboxTool({ beforeExecute }),
+      this.llmService.createWebSearchTool({ beforeExecute }),
+      this.llmService.createExecTool({ beforeExecute }),
+    ];
   }
 }

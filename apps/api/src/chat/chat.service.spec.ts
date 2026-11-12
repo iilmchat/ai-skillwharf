@@ -8,13 +8,16 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { BillingService } from '../billing/billing.service.js';
 import {
+  EXEC_TOOL_NAME,
   LlmService,
   SANDBOX_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { SandboxService } from '../sandbox/sandbox.service.js';
 import {
   ChatService,
+  INSUFFICIENT_BALANCE_MESSAGE,
   INSUFFICIENT_FUNDS_REPLY,
   SANDBOX_CALL_DESCRIPTION,
   SANDBOX_CALL_PRICE,
@@ -37,6 +40,7 @@ interface SandboxMock {
 
 interface BillingMock {
   chargeForSkill: MockFn;
+  getBalance: MockFn;
 }
 
 function toolCallMessage(code: string): AIMessage {
@@ -64,7 +68,7 @@ describe('ChatService', () => {
       message: { create: vi.fn(), findMany: vi.fn() },
     };
     sandbox = { runCommand: vi.fn() };
-    billing = { chargeForSkill: vi.fn() };
+    billing = { chargeForSkill: vi.fn(), getBalance: vi.fn() };
 
     // Настоящий LlmService нужен, чтобы граф получил реальный инструмент
     // песочницы; сам вызов модели подменяем.
@@ -116,6 +120,7 @@ describe('ChatService', () => {
       });
       prisma.message.create.mockResolvedValue({});
       prisma.conversation.update.mockResolvedValue({});
+      billing.getBalance.mockResolvedValue({ balance: '10.00' });
     });
 
     it('сохраняет сообщения и возвращает ответ LLM', async () => {
@@ -171,9 +176,46 @@ describe('ChatService', () => {
       expect(messages[1]).toBeInstanceOf(AIMessage);
       expect(messages[1]?.content).toBe('предыдущий ответ');
 
-      // LLM получает инструмент песочницы.
-      expect(tools.map((tool) => tool.name)).toEqual([SANDBOX_TOOL_NAME]);
+      // LLM получает инструменты песочницы, поиска и shell-команд.
+      expect(tools.map((tool) => tool.name)).toEqual([
+        SANDBOX_TOOL_NAME,
+        WEB_SEARCH_TOOL_NAME,
+        EXEC_TOOL_NAME,
+      ]);
+      expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
       expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+
+    it('не запускает агента при балансе ниже минимального', async () => {
+      billing.getBalance.mockResolvedValue({ balance: '0.49' });
+
+      const attempt = service.handleMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'привет',
+      );
+
+      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+      await expect(attempt).rejects.toThrow(INSUFFICIENT_BALANCE_MESSAGE);
+
+      expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(chatWithTools).not.toHaveBeenCalled();
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+
+    it('разрешает запуск при балансе ровно 0.50', async () => {
+      billing.getBalance.mockResolvedValue({ balance: '0.50' });
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'привет' },
+      ]);
+      chatWithTools.mockResolvedValue(new AIMessage('ответ'));
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'привет'),
+      ).resolves.toEqual({
+        conversationId: CONVERSATION_ID,
+        reply: 'ответ',
+      });
     });
 
     it('выполняет инструмент песочницы и списывает средства', async () => {
@@ -267,6 +309,7 @@ describe('ChatService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.message.create).not.toHaveBeenCalled();
       expect(chatWithTools).not.toHaveBeenCalled();
+      expect(billing.getBalance).not.toHaveBeenCalled();
     });
 
     it('отклоняет сообщение в несуществующий диалог', async () => {

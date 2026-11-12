@@ -63,6 +63,8 @@ COPY --from=builder /prod/api/package.json ./package.json
 COPY --from=builder /prod/api/node_modules ./node_modules
 COPY --from=builder /prod/api/dist ./dist
 COPY --from=builder /prod/api/prisma ./prisma
+# Стартовые навыки: SkillsService загружает их в БД на старте (onModuleInit).
+COPY starter-skills ./starter-skills
 COPY apps/api/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 

@@ -1,9 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
-import type { SandboxService } from '../sandbox/sandbox.service.js';
 import {
+  SANDBOX_NETWORK_FLAG,
+  type SandboxService,
+} from '../sandbox/sandbox.service.js';
+import {
+  EXEC_TOOL_NAME,
   LlmService,
   SANDBOX_TOOL_DESCRIPTION,
   SANDBOX_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
 } from './llm.service.js';
 
 const ENV_KEYS = [
@@ -148,6 +153,91 @@ describe('LlmService', () => {
         BadRequestException,
       );
       expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createWebSearchTool', () => {
+    it('ищет через Tavily API в песочнице', async () => {
+      process.env.TAVILY_API_KEY = 'tavily-key';
+
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('{"results":[]}');
+      const service = createService(sandbox);
+
+      const tool = service.createWebSearchTool();
+
+      expect(tool.name).toBe(WEB_SEARCH_TOOL_NAME);
+      await expect(tool.invoke({ query: 'погода в Москве' })).resolves.toBe(
+        '{"results":[]}',
+      );
+
+      const [command, env] = sandbox.runCommand.mock.calls[0] as [
+        string,
+        Record<string, string>,
+      ];
+
+      expect(command).toContain('curl');
+      expect(command).toContain('https://api.tavily.com/search');
+      expect(command).toContain('$TAVILY_REQUEST_BODY');
+      expect(env).toEqual({
+        [SANDBOX_NETWORK_FLAG]: 'true',
+        TAVILY_REQUEST_BODY: expect.any(String),
+      });
+      expect(JSON.parse(env.TAVILY_REQUEST_BODY ?? '{}')).toEqual({
+        api_key: 'tavily-key',
+        query: 'погода в Москве',
+        search_depth: 'basic',
+        max_results: 5,
+      });
+    });
+
+    it('не запускает песочницу без TAVILY_API_KEY', async () => {
+      const sandbox = createSandbox();
+      const service = createService(sandbox);
+
+      await expect(
+        service.createWebSearchTool().invoke({ query: 'тест' }),
+      ).resolves.toContain('TAVILY_API_KEY');
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+
+    it('вызывает paywall-хук до поиска', async () => {
+      process.env.TAVILY_API_KEY = 'tavily-key';
+
+      const order: string[] = [];
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockImplementation(async () => {
+        order.push('run');
+        return '{}';
+      });
+      const service = createService(sandbox);
+      const beforeExecute = vi.fn(async () => {
+        order.push('charge');
+      });
+
+      await service
+        .createWebSearchTool({ beforeExecute })
+        .invoke({ query: 'тест' });
+
+      expect(order).toEqual(['charge', 'run']);
+    });
+  });
+
+  describe('createExecTool', () => {
+    it('выполняет команду через песочницу', async () => {
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('gh version 2.0.0\n');
+      const service = createService(sandbox);
+
+      const tool = service.createExecTool();
+
+      expect(tool.name).toBe(EXEC_TOOL_NAME);
+      await expect(tool.invoke({ command: 'gh --version' })).resolves.toBe(
+        'gh version 2.0.0\n',
+      );
+      expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {
+        [SANDBOX_NETWORK_FLAG]: 'true',
+      });
     });
   });
 });

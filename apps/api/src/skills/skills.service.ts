@@ -1,10 +1,14 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma, type InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema, type SkillManifest } from '@skillwharf/shared';
+import { existsSync, globSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -20,9 +24,30 @@ type ManifestParseResult =
 /** YAML frontmatter: блок между первыми строками `---`. */
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
+/** Каталог стартовых навыков в корне репозитория. */
+const STARTER_SKILLS_DIRNAME = 'starter-skills';
+
+/** Насколько глубоко подниматься от рабочей директории в поисках каталога. */
+const MAX_PARENT_LOOKUP_DEPTH = 5;
+
 @Injectable()
-export class SkillsService {
+export class SkillsService implements OnModuleInit {
+  private readonly logger = new Logger(SkillsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /** При старте API подхватывает навыки «из коробки». */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.seedStarterSkills();
+    } catch (error) {
+      // Недоступная БД не должна превращать старт API в падение:
+      // health-эндпоинт покажет проблему, а навыки загрузятся при рестарте.
+      this.logger.error(
+        `Не удалось загрузить стартовые навыки: ${String(error)}`,
+      );
+    }
+  }
 
   /**
    * Парсит YAML-заголовок SKILL.md и валидирует его Zod-схемой
@@ -77,6 +102,43 @@ export class SkillsService {
     return this.prisma.installedSkill.findMany({
       orderBy: { installedAt: 'desc' },
     });
+  }
+
+  /**
+   * Загружает стартовый каталог навыков: читает все `SKILL.md` из
+   * `starter-skills/`, валидирует манифесты и делает upsert по имени.
+   * Возвращает количество успешно загруженных навыков.
+   */
+  async seedStarterSkills(): Promise<number> {
+    const directory = findStarterSkillsDir();
+
+    if (!directory) {
+      this.logger.warn(
+        `Каталог ${STARTER_SKILLS_DIRNAME} не найден — стартовые навыки не загружены`,
+      );
+      return 0;
+    }
+
+    const files = globSync('**/SKILL.md', { cwd: directory }).sort();
+    let seeded = 0;
+
+    for (const file of files) {
+      try {
+        await this.installSkill(readFileSync(join(directory, file), 'utf8'));
+        seeded += 1;
+      } catch (error) {
+        // Битый манифест логируем, но не блокируем старт API.
+        if (!(error instanceof BadRequestException)) {
+          throw error;
+        }
+
+        this.logger.error(`Не удалось загрузить ${file}: ${String(error)}`);
+      }
+    }
+
+    this.logger.log(`Стартовые навыки загружены: ${seeded}/${files.length}`);
+
+    return seeded;
   }
 
   /** Включает или выключает установленный навык. */
@@ -148,4 +210,30 @@ export class SkillsService {
       }),
     };
   }
+}
+
+/**
+ * Ищет каталог `starter-skills` вверх от рабочей директории: так путь
+ * находится и в dev-режиме (`apps/api`), и в runtime-образе (`/app`).
+ */
+function findStarterSkillsDir(): string | null {
+  let current = process.cwd();
+
+  for (let depth = 0; depth <= MAX_PARENT_LOOKUP_DEPTH; depth += 1) {
+    const candidate = join(current, STARTER_SKILLS_DIRNAME);
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parent = dirname(current);
+
+    if (parent === current) {
+      return null;
+    }
+
+    current = parent;
+  }
+
+  return null;
 }

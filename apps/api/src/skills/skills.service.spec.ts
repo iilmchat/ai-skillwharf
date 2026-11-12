@@ -207,6 +207,29 @@ version: 1
     });
   });
 
+  describe('seedStarterSkills', () => {
+    it('загружает стартовые навыки из каталога starter-skills', async () => {
+      prisma.installedSkill.upsert.mockResolvedValue({ id: 'skill-1' });
+
+      const seeded = await service.seedStarterSkills();
+
+      expect(seeded).toBe(4);
+
+      const names = (
+        prisma.installedSkill.upsert.mock.calls as [UpsertArgs][]
+      )
+        .map(([args]) => args.where.name)
+        .sort();
+
+      expect(names).toEqual([
+        'cron-automation',
+        'github',
+        'skill-vetter',
+        'tavily-search',
+      ]);
+    });
+  });
+
   describe('toggleSkill', () => {
     it('включает и выключает установленный навык', async () => {
       prisma.installedSkill.findUnique.mockResolvedValue({ id: 'skill-1' });

@@ -11,7 +11,10 @@ import {
 } from '@langchain/core/tools';
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
-import { SandboxService } from '../sandbox/sandbox.service.js';
+import {
+  SANDBOX_NETWORK_FLAG,
+  SandboxService,
+} from '../sandbox/sandbox.service.js';
 
 export interface ChatHistoryMessage {
   role: string;
@@ -29,6 +32,38 @@ export const SANDBOX_TOOL_DESCRIPTION =
 export const SandboxToolSchema = z.object({
   code: z.string().describe('Код для выполнения'),
 });
+
+/** Имя инструмента поиска в интернете. */
+export const WEB_SEARCH_TOOL_NAME = 'web_search';
+
+/** Описание инструмента поиска для LLM. */
+export const WEB_SEARCH_TOOL_DESCRIPTION =
+  'Ищет актуальную информацию в интернете через Tavily и возвращает результаты';
+
+/** Схема аргументов инструмента поиска. */
+export const WebSearchToolSchema = z.object({
+  query: z.string().describe('Поисковый запрос'),
+});
+
+/** Имя инструмента выполнения shell-команд. */
+export const EXEC_TOOL_NAME = 'exec';
+
+/** Описание инструмента `exec` для LLM. */
+export const EXEC_TOOL_DESCRIPTION =
+  'Выполняет shell-команду в изолированной среде и возвращает stdout';
+
+/** Схема аргументов инструмента `exec`. */
+export const ExecToolSchema = z.object({
+  command: z.string().describe('Shell-команда для выполнения'),
+});
+
+/**
+ * Запрос к Tavily. Тело собирается в JSON в Gateway и передаётся в песочницу
+ * переменной окружения, поэтому пользовательский запрос не попадает в
+ * shell-строку и не может её сломать.
+ */
+const TAVILY_SEARCH_COMMAND =
+  "curl -sS -X POST 'https://api.tavily.com/search' -H 'Content-Type: application/json' -d \"$TAVILY_REQUEST_BODY\"";
 
 /**
  * Секреты из окружения Gateway, которые разрешено передавать в песочницу.
@@ -94,6 +129,63 @@ export class LlmService {
         await options.beforeExecute?.();
 
         return this.sandboxService.runCommand(code, sandboxEnv());
+      },
+    });
+  }
+
+  /**
+   * Инструмент `web_search`: ищет через Tavily API в песочнице. Тело запроса
+   * сериализуется в JSON здесь, а ключ берётся из `TAVILY_API_KEY`.
+   */
+  createWebSearchTool(
+    options: SandboxToolOptions = {},
+  ): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: WEB_SEARCH_TOOL_NAME,
+      description: WEB_SEARCH_TOOL_DESCRIPTION,
+      schema: WebSearchToolSchema,
+      func: async ({ query }) => {
+        const apiKey = process.env.TAVILY_API_KEY;
+
+        if (!apiKey) {
+          return 'Ошибка: TAVILY_API_KEY не задан в окружении Gateway';
+        }
+
+        await options.beforeExecute?.();
+
+        const requestBody = JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: 'basic',
+          max_results: 5,
+        });
+
+        return this.sandboxService.runCommand(TAVILY_SEARCH_COMMAND, {
+          [SANDBOX_NETWORK_FLAG]: 'true',
+          TAVILY_REQUEST_BODY: requestBody,
+        });
+      },
+    });
+  }
+
+  /**
+   * Инструмент `exec`: выполняет shell-команду в песочнице. Нужен навыкам
+   * вроде `github`, которые работают через `gh` CLI.
+   */
+  createExecTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: EXEC_TOOL_NAME,
+      description: EXEC_TOOL_DESCRIPTION,
+      schema: ExecToolSchema,
+      func: async ({ command }) => {
+        await options.beforeExecute?.();
+
+        return this.sandboxService.runCommand(command, {
+          ...sandboxEnv(),
+          // `github` и подобные навыки требуют egress; сеть остаётся под
+          // контролем SandboxService (флаг не попадает в контейнер).
+          [SANDBOX_NETWORK_FLAG]: 'true',
+        });
       },
     });
   }
