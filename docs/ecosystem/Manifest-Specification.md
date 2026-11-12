@@ -21,6 +21,29 @@ Gateway использует эту схему (через библиотеку 
   "type": "object",
   "required": ["name", "version", "description", "author", "permissions"],
   "properties": {
+    "mcp_endpoint": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL к MCP-серверу, если навык работает как коннектор."
+    },
+    "egress_allowlist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Список FQDN-доменов, к которым разрешен доступ."
+    },
+    "pricing": {
+      "properties": {
+        "model": {
+          "enum": ["Free", "Pay-per-Call", "Subscription", "Freemium", "Pay-per-Outcome"]
+        },
+        "outcome": {
+          "type": "object",
+          "properties": {
+            "requires_human_approval": { "type": "boolean" }
+          }
+        }
+      }
+    },    
     "name": {
       "type": "string",
       "pattern": "^[a-z0-9-]+$",
