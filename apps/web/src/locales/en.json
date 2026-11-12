@@ -89,6 +89,17 @@
     "title": "Skills store",
     "subtitle": "Community skills for your agents. Install the one you need in a single click.",
     "count": "Available: {{count}}",
+    "categories": {
+      "label": "Skill categories",
+      "all": "All",
+      "search": "Search",
+      "dev": "Development",
+      "communication": "Communication",
+      "productivity": "Productivity",
+      "emptyTitle": "No skills in this category yet",
+      "emptyBody": "Choose another category or show all skills.",
+      "reset": "Show all"
+    },
     "loading": "Loading the store…",
     "emptyTitle": "The store has no skills yet",
     "emptyBody": "New skills will appear here as soon as they are published.",

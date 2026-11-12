@@ -314,6 +314,29 @@ test.describe('Дымовые сценарии UI', () => {
     await expect(dialog).toContainText(/Печатает|Typing/);
   });
 
+  test('в магазине работают категории навыков', async ({ page }) => {
+    await loginViaUi(page);
+
+    await page.locator('a[href="/app/store"]:visible').first().click();
+    await expect(page).toHaveURL(/\/app\/store$/);
+    await expect(page.getByRole('tab')).toHaveCount(5);
+
+    await page.getByRole('tab', { name: /Поиск/ }).click();
+    await expect(page.locator('main ul > li > article')).toHaveCount(2);
+
+    await page.getByRole('tab', { name: /Коммуникации/ }).click();
+    await expect(page.locator('main ul > li > article')).toHaveCount(1);
+    await expect(
+      page.locator('main ul > li > article'),
+    ).toContainText('messenger-connector');
+
+    await page.getByRole('tab', { name: /Продуктивность/ }).click();
+    await expect(page.locator('main ul > li > article')).toHaveCount(5);
+
+    await page.getByRole('tab', { name: /Разработка/ }).click();
+    await expect(page.locator('main ul > li > article')).toHaveCount(6);
+  });
+
   test('в магазине отображаются карточки и работает установка', async ({
     page,
   }) => {

@@ -3,6 +3,83 @@ import i18n from '../i18n';
 import { api } from './api';
 import type { SkillManifest, SkillPricing } from './skills';
 
+export type StoreCategory =
+  | 'all'
+  | 'search'
+  | 'dev'
+  | 'communication'
+  | 'productivity';
+
+interface CategoryRule {
+  category: Exclude<StoreCategory, 'all'>;
+  keywords: readonly string[];
+}
+
+/** Порядок важен: поиск должен сработать раньше разработки. */
+const CATEGORY_RULES: readonly CategoryRule[] = [
+  {
+    category: 'search',
+    keywords: ['search', 'tavily', 'weather', 'web', 'research'],
+  },
+  {
+    category: 'communication',
+    keywords: [
+      'messenger',
+      'telegram',
+      'slack',
+      'discord',
+      'whatsapp',
+      'vk',
+      'email',
+      'connector',
+    ],
+  },
+  {
+    category: 'dev',
+    keywords: [
+      'github',
+      'code',
+      'sql',
+      'cron',
+      'workflow',
+      'orchestrat',
+      'vetter',
+      'sandbox',
+    ],
+  },
+  {
+    category: 'productivity',
+    keywords: [
+      'workspace',
+      'google',
+      'ozon',
+      'wb',
+      'wildberries',
+      'midjourney',
+      'notion',
+      'calendar',
+      'document',
+      'sheet',
+      'image',
+      'creative',
+      'pdf',
+    ],
+  },
+];
+
+/** Простой маппинг категории по имени навыка (ТЗ магазина). */
+export function getSkillCategory(name: string): StoreCategory {
+  const normalized = name.toLowerCase();
+
+  for (const rule of CATEGORY_RULES) {
+    if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
+      return rule.category;
+    }
+  }
+
+  return 'all';
+}
+
 /** Карточка навыка из публичного реестра. */
 export interface RegistrySkill {
   /** Есть у реестров, которые устанавливают навык по идентификатору. */

@@ -1,5 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink } from 'react-router-dom';
 import { Brand } from '../components/Brand';
@@ -17,14 +22,24 @@ import { isAdminRole } from '../lib/roles';
 import {
   getRegistryPricing,
   getRegistryVetterReport,
+  getSkillCategory,
   getStoreErrorMessage,
   getVetterReportFromError,
   installRegistrySkill,
   type InstallRegistrySkillResult,
   type RegistrySkill,
+  type StoreCategory,
   type VetterReport,
 } from '../lib/registry';
 import { useAuthStore } from '../store/auth.store';
+
+const STORE_CATEGORIES: readonly StoreCategory[] = [
+  'all',
+  'search',
+  'dev',
+  'communication',
+  'productivity',
+];
 
 interface InstallVariables {
   skill: RegistrySkill;
@@ -162,6 +177,7 @@ export function StorePage() {
   const [successName, setSuccessName] = useState<string | null>(null);
   const [pendingSkill, setPendingSkill] = useState<RegistrySkill | null>(null);
   const [vetterReport, setVetterReport] = useState<VetterReport | null>(null);
+  const [category, setCategory] = useState<StoreCategory>('all');
 
   const clearNotice = useCallback(() => setNotice(null), []);
   const closeVetter = useCallback(() => {
@@ -235,9 +251,93 @@ export function StorePage() {
     installMutation.mutate({ skill: pendingSkill, ignoreWarnings: true });
   }
 
-  const skills = registryQuery.data ?? [];
-  const installedNames = new Set(
-    (skillsQuery.data ?? []).map((skill) => skill.name),
+  function handleCategoryKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const currentIndex = STORE_CATEGORIES.indexOf(category);
+    let nextIndex = currentIndex;
+
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % STORE_CATEGORIES.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex =
+        (currentIndex - 1 + STORE_CATEGORIES.length) %
+        STORE_CATEGORIES.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = STORE_CATEGORIES.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    const nextCategory = STORE_CATEGORIES[nextIndex];
+    setCategory(nextCategory);
+    document.getElementById(`store-category-${nextCategory}`)?.focus();
+  }
+
+  const installedSkills = useMemo<RegistrySkill[]>(
+    () =>
+      (skillsQuery.data ?? []).map((skill) => ({
+        name: skill.name,
+        author: skill.author,
+        version: skill.version,
+        description: skill.manifest.description,
+        pricing: skill.manifest.pricing,
+      })),
+    [skillsQuery.data],
+  );
+
+  // Реестр — основной источник; установленные mock-навыки (Ozon, WB,
+  // Telegram, Google, Midjourney) добираем, пока их нет в реестре.
+  const allSkills = useMemo<RegistrySkill[]>(() => {
+    const byName = new Map<string, RegistrySkill>();
+
+    for (const skill of registryQuery.data ?? []) {
+      byName.set(skill.name, skill);
+    }
+
+    for (const skill of installedSkills) {
+      if (!byName.has(skill.name)) {
+        byName.set(skill.name, skill);
+      }
+    }
+
+    return [...byName.values()];
+  }, [registryQuery.data, installedSkills]);
+
+  const categoryCounts = useMemo<Record<StoreCategory, number>>(() => {
+    const counts: Record<StoreCategory, number> = {
+      all: allSkills.length,
+      search: 0,
+      dev: 0,
+      communication: 0,
+      productivity: 0,
+    };
+
+    for (const skill of allSkills) {
+      const skillCategory = getSkillCategory(skill.name);
+
+      if (skillCategory !== 'all') {
+        counts[skillCategory] += 1;
+      }
+    }
+
+    return counts;
+  }, [allSkills]);
+
+  const visibleSkills = useMemo(
+    () =>
+      category === 'all'
+        ? allSkills
+        : allSkills.filter(
+            (skill) => getSkillCategory(skill.name) === category,
+          ),
+    [allSkills, category],
+  );
+
+  const installedNames = useMemo(
+    () => new Set(installedSkills.map((skill) => skill.name)),
+    [installedSkills],
   );
 
   return (
@@ -314,12 +414,57 @@ export function StorePage() {
             </p>
           </div>
 
-          {registryQuery.data !== undefined && (
+          {(registryQuery.data !== undefined ||
+            skillsQuery.data !== undefined) && (
             <span className="rounded-full border border-outline-variant bg-surface-container px-3 py-1 text-xs font-medium text-on-surface-variant">
-              {t('store.count', { count: skills.length })}
+              {t('store.count', { count: allSkills.length })}
             </span>
           )}
         </div>
+
+        {!registryQuery.isPending &&
+          !registryQuery.isError &&
+          allSkills.length > 0 && (
+            <div
+              role="tablist"
+              aria-label={t('store.categories.label')}
+              className="mt-6 flex flex-wrap gap-1 rounded-2xl border border-outline-variant bg-surface-container p-1"
+            >
+              {STORE_CATEGORIES.map((storeCategory) => {
+                const isActive = category === storeCategory;
+
+                return (
+                  <button
+                    key={storeCategory}
+                    id={`store-category-${storeCategory}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-controls="store-grid"
+                    tabIndex={isActive ? 0 : -1}
+                    onClick={() => setCategory(storeCategory)}
+                    onKeyDown={handleCategoryKeyDown}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                      isActive
+                        ? 'bg-primary text-on-primary shadow-lg shadow-primary/20'
+                        : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                  >
+                    {t(`store.categories.${storeCategory}`)}
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        isActive
+                          ? 'bg-on-primary/20 text-on-primary'
+                          : 'bg-surface-container-high text-on-surface-variant'
+                      }`}
+                    >
+                      {categoryCounts[storeCategory]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
         {successName !== null && (
           <div
@@ -377,7 +522,7 @@ export function StorePage() {
               {t('store.retry')}
             </button>
           </div>
-        ) : skills.length === 0 ? (
+        ) : allSkills.length === 0 ? (
           <div className="mt-8 rounded-2xl border border-dashed border-outline px-6 py-16 text-center">
             <div
               aria-hidden="true"
@@ -404,21 +549,45 @@ export function StorePage() {
             </p>
           </div>
         ) : (
-          <ul className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {skills.map((skill) => (
-              <StoreSkillCard
-                key={skill.name}
-                skill={skill}
-                isInstalled={installedNames.has(skill.name)}
-                isInstalling={
-                  installMutation.isPending &&
-                  installMutation.variables?.skill.name === skill.name
-                }
-                isDisabled={installMutation.isPending}
-                onInstall={handleInstall}
-              />
-            ))}
-          </ul>
+          <div
+            id="store-grid"
+            role="tabpanel"
+            aria-labelledby={`store-category-${category}`}
+          >
+            {visibleSkills.length === 0 ? (
+              <div className="mt-8 rounded-2xl border border-dashed border-outline px-6 py-14 text-center">
+                <h2 className="font-display text-xl font-bold text-on-surface">
+                  {t('store.categories.emptyTitle')}
+                </h2>
+                <p className="mx-auto mt-2 max-w-md text-sm text-on-surface-variant">
+                  {t('store.categories.emptyBody')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCategory('all')}
+                  className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('store.categories.reset')}
+                </button>
+              </div>
+            ) : (
+              <ul className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleSkills.map((skill) => (
+                  <StoreSkillCard
+                    key={skill.name}
+                    skill={skill}
+                    isInstalled={installedNames.has(skill.name)}
+                    isInstalling={
+                      installMutation.isPending &&
+                      installMutation.variables?.skill.name === skill.name
+                    }
+                    isDisabled={installMutation.isPending}
+                    onInstall={handleInstall}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </main>
 
