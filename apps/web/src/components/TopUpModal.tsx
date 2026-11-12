@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { balanceQueryKey } from '../hooks/useBalance';
 import {
   getBillingErrorMessage,
+  ledgerQueryKey,
   topUpBalance,
   type TopUpPayload,
 } from '../lib/billing';
@@ -51,6 +52,7 @@ export function TopUpModal({
     onSuccess: (data) => {
       queryClient.setQueryData(balanceQueryKey, data.balance);
       void queryClient.invalidateQueries({ queryKey: balanceQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ledgerQueryKey });
       onClose();
     },
   });

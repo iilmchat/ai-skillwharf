@@ -7,6 +7,7 @@ interface BalanceWidgetProps {
   isError: boolean;
   onRetry: () => void;
   onTopUp: () => void;
+  onHistory: () => void;
   variant?: 'card' | 'inline';
 }
 
@@ -16,6 +17,7 @@ export function BalanceWidget({
   isError,
   onRetry,
   onTopUp,
+  onHistory,
   variant = 'card',
 }: BalanceWidgetProps) {
   const { t, i18n } = useTranslation();
@@ -56,6 +58,13 @@ export function BalanceWidget({
               {t('billing.retry')}
             </button>
           )}
+          <button
+            type="button"
+            onClick={onHistory}
+            className="rounded-lg border border-outline px-2.5 py-1 text-xs font-medium text-on-surface-variant transition hover:border-primary/40 hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            {t('billing.history.button')}
+          </button>
           <button
             type="button"
             onClick={onTopUp}
@@ -105,13 +114,22 @@ export function BalanceWidget({
         </button>
       )}
 
-      <button
-        type="button"
-        onClick={onTopUp}
-        className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-      >
-        {t('billing.topUp')}
-      </button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onTopUp}
+          className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          {t('billing.topUp')}
+        </button>
+        <button
+          type="button"
+          onClick={onHistory}
+          className="rounded-lg border border-outline px-3 py-2 text-sm font-medium text-on-surface-variant transition hover:border-primary/40 hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          {t('billing.history.button')}
+        </button>
+      </div>
     </div>
   );
 }

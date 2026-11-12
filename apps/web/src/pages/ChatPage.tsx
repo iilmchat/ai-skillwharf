@@ -12,6 +12,7 @@ import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TopUpModal } from '../components/TopUpModal';
 import {
@@ -144,10 +145,13 @@ export function ChatPage() {
   const balanceQuery = useBalance();
   const [draft, setDraft] = useState('');
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const openTopUp = useCallback(() => setIsTopUpOpen(true), []);
   const closeTopUp = useCallback(() => setIsTopUpOpen(false), []);
+  const openHistory = useCallback(() => setIsHistoryOpen(true), []);
+  const closeHistory = useCallback(() => setIsHistoryOpen(false), []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
@@ -259,6 +263,7 @@ export function ChatPage() {
                 void balanceQuery.refetch();
               }}
               onTopUp={openTopUp}
+              onHistory={openHistory}
             />
 
             <div className="mt-4 flex items-center justify-between gap-3">
@@ -375,6 +380,7 @@ export function ChatPage() {
                 void balanceQuery.refetch();
               }}
               onTopUp={openTopUp}
+              onHistory={openHistory}
             />
           </div>
 
@@ -539,6 +545,8 @@ export function ChatPage() {
         userId={user?.id ?? ''}
         balance={balanceQuery.data}
       />
+
+      <LedgerHistoryModal open={isHistoryOpen} onClose={closeHistory} />
 
       {notice !== null && (
         <ErrorToast

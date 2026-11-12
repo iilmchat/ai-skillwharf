@@ -6,7 +6,8 @@
   "common": {
     "closeNotification": "Close notification",
     "cancel": "Cancel",
-    "close": "Close"
+    "close": "Close",
+    "loading": "Loading…"
   },
   "billing": {
     "balance": "Balance",
@@ -20,13 +21,27 @@
     "processing": "Processing…",
     "loading": "Loading balance…",
     "retry": "Retry",
+    "history": {
+      "button": "History",
+      "title": "Transaction history",
+      "subtitle": "The last 50 transactions on your wallet.",
+      "loading": "Loading history…",
+      "emptyTitle": "No transactions yet",
+      "emptyBody": "Top-ups and charges will appear here.",
+      "errorTitle": "Could not load history",
+      "retry": "Retry",
+      "credit": "Credit",
+      "debit": "Debit",
+      "balanceAfter": "Balance after: {{amount}} ₽"
+    },
     "errors": {
       "network": "Could not reach the billing service.",
       "load": "Could not load the balance.",
       "adminOnly": "Only an administrator can top up the balance.",
       "topUp": "Could not top up the balance. Please try again.",
       "invalidAmount": "Enter an amount greater than zero with at most two decimal places.",
-      "sessionExpired": "Your session has expired. Please sign in again."
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "ledger": "Could not load transaction history."
     }
   },
   "errors": {
@@ -39,7 +54,8 @@
   },
   "skills": {
     "title": "Skills",
-    "subtitle": "Installed agent skills. Enable or disable them for new conversations.",
+    "subtitle": "Installed agent skills and their availability for new conversations.",
+    "adminOnlyHint": "Only an administrator can manage skills.",
     "count": "Installed: {{count}}",
     "loading": "Loading skills…",
     "emptyTitle": "No installed skills yet",

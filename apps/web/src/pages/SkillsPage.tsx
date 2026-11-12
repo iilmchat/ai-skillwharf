@@ -14,6 +14,7 @@ import {
   type SkillPricing,
 } from '../lib/skills';
 import { formatMoney, getCurrencySymbol } from '../lib/money';
+import { useAuthStore } from '../store/auth.store';
 
 interface ToggleContext {
   previous: InstalledSkill[] | undefined;
@@ -115,10 +116,12 @@ function PricingBadge({ pricing }: { pricing: SkillPricing | undefined }) {
 
 function SkillCard({
   skill,
+  canManage,
   isToggling,
   onToggle,
 }: {
   skill: InstalledSkill;
+  canManage: boolean;
   isToggling: boolean;
   onToggle: (id: string, isEnabled: boolean) => void;
 }) {
@@ -144,12 +147,14 @@ function SkillCard({
             </p>
           </div>
 
-          <SkillSwitch
-            checked={skill.isEnabled}
-            disabled={isToggling}
-            label={t('skills.toggleLabel', { name: skill.name })}
-            onChange={(isEnabled) => onToggle(skill.id, isEnabled)}
-          />
+          {canManage && (
+            <SkillSwitch
+              checked={skill.isEnabled}
+              disabled={isToggling}
+              label={t('skills.toggleLabel', { name: skill.name })}
+              onChange={(isEnabled) => onToggle(skill.id, isEnabled)}
+            />
+          )}
         </div>
 
         {description !== undefined && (
@@ -187,6 +192,8 @@ export function SkillsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const skillsQuery = useSkills();
+  const role = useAuthStore((state) => state.user?.role);
+  const canManage = role === 'admin';
   const [notice, setNotice] = useState<string | null>(null);
 
   const clearNotice = useCallback(() => setNotice(null), []);
@@ -292,6 +299,11 @@ export function SkillsPage() {
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-on-surface-variant">
               {t('skills.subtitle')}
             </p>
+            {!canManage && (
+              <p className="mt-2 text-xs text-on-surface-variant">
+                {t('skills.adminOnlyHint')}
+              </p>
+            )}
           </div>
 
           {skillsQuery.data !== undefined && (
@@ -359,6 +371,7 @@ export function SkillsPage() {
               <SkillCard
                 key={skill.id}
                 skill={skill}
+                canManage={canManage}
                 isToggling={toggleMutation.isPending}
                 onToggle={(id, isEnabled) => {
                   toggleMutation.mutate({ id, isEnabled });

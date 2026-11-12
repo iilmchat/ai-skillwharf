@@ -10,11 +10,23 @@ export interface LedgerOperationResult extends WalletBalance {
   entryId: string;
 }
 
+export interface LedgerEntry {
+  id: string;
+  amount: string;
+  balanceAfter: string;
+  type: string;
+  description: string;
+  createdAt: string;
+}
+
 export interface TopUpPayload {
   userId: string;
   amount: number;
   idempotencyKey: string;
 }
+
+/** Ключ кэша истории операций. */
+export const ledgerQueryKey = ['ledger'] as const;
 
 interface MessagePayload {
   message: string | string[];
@@ -67,9 +79,16 @@ export async function topUpBalance(
   return data;
 }
 
+export async function fetchLedger(): Promise<LedgerEntry[]> {
+  const { data } = await api.get<LedgerEntry[]>('/billing/ledger');
+
+  return data;
+}
+
 export function getBillingErrorMessage(
   error: unknown,
-  fallbackKey: 'billing.errors.load' | 'billing.errors.topUp',
+  fallbackKey:
+    'billing.errors.load' | 'billing.errors.topUp' | 'billing.errors.ledger',
 ): string {
   if (isAxiosError(error)) {
     if (error.response === undefined) {

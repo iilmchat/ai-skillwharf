@@ -28,6 +28,7 @@
   --color-on-error: var(--brand-on-error);
   --color-error-container: var(--brand-error-container);
   --color-on-error-container: var(--brand-on-error-container);
+  --color-success: var(--brand-success);
 }
 
 :root {
@@ -56,6 +57,7 @@
   --brand-on-error: #ffffff;
   --brand-error-container: #fee2e2;
   --brand-on-error-container: #7f1d1d;
+  --brand-success: #047857;
 
   color-scheme: light;
 }
@@ -80,6 +82,7 @@
   --brand-on-error: #450a0a;
   --brand-error-container: #450a0a;
   --brand-on-error-container: #fecaca;
+  --brand-success: #34d399;
 
   color-scheme: dark;
 }
