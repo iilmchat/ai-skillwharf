@@ -1,0 +1,9 @@
+# Артефакты сборки и зависимости
+dist/
+node_modules/
+
+# Lockfile генерируется pnpm, руками не форматируем
+pnpm-lock.yaml
+
+# docs — источник правды, форматирование контролирует markdownlint
+docs/

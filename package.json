@@ -5,7 +5,9 @@
   "description": "SkillWharf — монорепозиторий (NestJS + pnpm workspaces)",
   "main": "index.js",
   "scripts": {
+    "lint": "oxlint .",
     "lint:docs": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\"",
+    "format": "prettier --write .",
     "build:api": "pnpm --filter api build",
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck"
@@ -25,6 +27,8 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^5.1.0",
     "markdownlint-cli2": "^0.24.0",
+    "oxlint": "^1.93.0",
+    "prettier": "3.9.6",
     "vitest": "^5.1.0"
   }
 }
