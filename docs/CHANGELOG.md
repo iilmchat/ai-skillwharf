@@ -25,6 +25,8 @@
 - REST API диалогов: `POST /api/v1/chat/conversations` (создание чата текущего пользователя).
 - Аутентификация WebSocket по JWT из `handshake.auth.token` и проверка владельца диалога.
 - Валидация `SKILL.md`: парсинг YAML frontmatter и Zod-схема `@skillwharf/shared`, эндпоинт `POST /api/v1/skills/validate` (только `admin`).
+- Sandbox: эндпоинт `POST /api/v1/sandbox/execute` (только `admin`) для запуска команд в изолированном Docker-контейнере.
+- Биллинг: модели `Wallet` и append-only `LedgerEntry`, `GET /api/v1/billing/balance` и `POST /api/v1/billing/topup` (только `admin`) с атомарным начислением через `prisma.$transaction`.
 - Сборка `packages/shared` в ESM-`dist` (пакет импортируется в API рантайме).
 - Roadmap проекта и структура спринтов (`docs/development/ROADMAP.md`).
 

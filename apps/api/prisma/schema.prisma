@@ -22,6 +22,7 @@ model User {
   sessions      Session[]
   transactions  Transaction[]
   conversations Conversation[]
+  wallet        Wallet?
 }
 
 model Session {
@@ -62,4 +63,26 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+}
+
+model Wallet {
+  id        String        @id @default(uuid())
+  userId    String        @unique
+  balance   Decimal       @default(0)
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries   LedgerEntry[]
+}
+
+/// Append-only ledger: записи только создаются, не обновляются и не удаляются.
+model LedgerEntry {
+  id          String   @id @default(uuid())
+  walletId    String
+  amount      Decimal
+  type        String
+  description String
+  createdAt   DateTime @default(now())
+  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
 }
