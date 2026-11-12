@@ -33,6 +33,12 @@ import {
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SkillsService } from '../skills/skills.service.js';
+import {
+  DEFAULT_OFFICE_AGENT_ID,
+  OFFICE_TASKS,
+  type ChatOfficeEvent,
+  type OfficeEvent,
+} from './office-events.js';
 
 /** Сколько последних сообщений диалога передаём в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
@@ -75,6 +81,9 @@ export interface ChatStreamDelta {
   type: 'delta';
   text: string;
 }
+
+/** Все события, которые граф отдаёт в custom-стрим. */
+export type ChatStreamEvent = ChatStreamDelta | ChatOfficeEvent;
 
 interface ToolPrice {
   price: number;
@@ -221,15 +230,26 @@ function buildChatGraph(llmService: LlmService) {
         reply,
       };
     })
-    .addNode('tools', async (state: ChatState) => ({
-      messages: [
-        ...state.messages,
-        ...(await executeToolCalls(
-          state.availableTools,
-          toolCallsOf(lastMessage(state.messages)),
-        )),
-      ],
-    }))
+    .addNode('tools', async (state: ChatState, config) => {
+      // AI-Офис показывает, что агент ушёл в песочницу. Событие уходит в
+      // custom-стрим до фактического запуска инструментов.
+      getWriter(config)?.({
+        type: 'office',
+        agentId: DEFAULT_OFFICE_AGENT_ID,
+        status: 'working',
+        task: OFFICE_TASKS.sandbox,
+      } satisfies ChatOfficeEvent);
+
+      return {
+        messages: [
+          ...state.messages,
+          ...(await executeToolCalls(
+            state.availableTools,
+            toolCallsOf(lastMessage(state.messages)),
+          )),
+        ],
+      };
+    })
     .addEdge(START, 'llm')
     .addConditionalEdges('llm', (state: ChatState) => {
       if (toolCallsOf(lastMessage(state.messages)).length === 0) {
@@ -313,6 +333,7 @@ export class ChatService {
     conversationId: string,
     content: string,
     onDelta: (text: string) => void,
+    onOfficeEvent?: (event: OfficeEvent) => void,
   ): Promise<ChatReply> {
     const { messages, tools } = await this.prepareMessage(
       userId,
@@ -332,10 +353,25 @@ export class ChatService {
         const [mode, chunk] = event as [string, unknown];
 
         if (mode === 'custom') {
-          const delta = chunk as Partial<ChatStreamDelta>;
+          const event = chunk as Partial<ChatStreamEvent>;
 
-          if (delta.type === 'delta' && typeof delta.text === 'string') {
-            onDelta(delta.text);
+          if (event.type === 'delta' && typeof event.text === 'string') {
+            onDelta(event.text);
+          } else if (event.type === 'office') {
+            const officeEvent = event as ChatOfficeEvent;
+
+            if (
+              typeof officeEvent.agentId === 'string' &&
+              (officeEvent.status === 'working' ||
+                officeEvent.status === 'waiting_approval') &&
+              typeof officeEvent.task === 'string'
+            ) {
+              onOfficeEvent?.({
+                agentId: officeEvent.agentId,
+                status: officeEvent.status,
+                task: officeEvent.task,
+              });
+            }
           }
         } else if (mode === 'values') {
           reply = (chunk as ChatState).reply;

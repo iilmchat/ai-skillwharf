@@ -11,6 +11,11 @@ import {
 import type { Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/jwt.strategy.js';
 import { ChatService, type ChatReply } from './chat.service.js';
+import {
+  DEFAULT_OFFICE_AGENT_ID,
+  OFFICE_TASKS,
+  type OfficeEvent,
+} from './office-events.js';
 
 export interface SendMessagePayload {
   conversationId: string;
@@ -48,6 +53,29 @@ export class ChatGateway implements OnGatewayConnection {
     }
   }
 
+  /**
+   * Отправляет событие AI-Офису. Визуальный слой опционален: если клиент
+   * его не слушает, событие просто игнорируется.
+   */
+  sendOfficeEvent(client: Socket, event: OfficeEvent): void {
+    client.emit('office_event', event);
+  }
+
+  /**
+   * Ручной статус ожидания одобрения. Нужен до появления approval-flow:
+   * плагин и тесты могут выставить статус явно.
+   */
+  sendWaitingApproval(
+    client: Socket,
+    task: string = OFFICE_TASKS.waitingApproval,
+  ): void {
+    this.sendOfficeEvent(client, {
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      status: 'waiting_approval',
+      task,
+    });
+  }
+
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
@@ -68,6 +96,12 @@ export class ChatGateway implements OnGatewayConnection {
       throw new WsException('Ожидается { conversationId, content }');
     }
 
+    this.sendOfficeEvent(client, {
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      status: 'working',
+      task: OFFICE_TASKS.analyzing,
+    });
+
     try {
       const reply = await this.chatService.streamMessage(
         userId,
@@ -79,6 +113,7 @@ export class ChatGateway implements OnGatewayConnection {
             text,
           });
         },
+        (event) => this.sendOfficeEvent(client, event),
       );
 
       client.emit('stream_end', { conversationId: payload.conversationId });

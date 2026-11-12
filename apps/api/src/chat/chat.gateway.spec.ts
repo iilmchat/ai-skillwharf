@@ -113,17 +113,83 @@ describe('ChatGateway', () => {
         CONVERSATION_ID,
         'привет',
         expect.any(Function),
+        expect.any(Function),
       );
-      expect(socket.emit).toHaveBeenNthCalledWith(1, 'stream_delta', {
+      expect(socket.emit).toHaveBeenNthCalledWith(1, 'office_event', {
+        agentId: 'default',
+        status: 'working',
+        task: 'Анализ запроса',
+      });
+      expect(socket.emit).toHaveBeenNthCalledWith(2, 'stream_delta', {
         conversationId: CONVERSATION_ID,
         text: 'При',
       });
-      expect(socket.emit).toHaveBeenNthCalledWith(2, 'stream_delta', {
+      expect(socket.emit).toHaveBeenNthCalledWith(3, 'stream_delta', {
         conversationId: CONVERSATION_ID,
         text: 'вет',
       });
       expect(socket.emit).toHaveBeenLastCalledWith('stream_end', {
         conversationId: CONVERSATION_ID,
+      });
+    });
+
+    it('отправляет office_event при вызове инструмента', async () => {
+      const socket = createSocket();
+      socket.data.userId = USER_ID;
+      chatService.streamMessage.mockImplementation(
+        async (
+          _userId: string,
+          conversationId: string,
+          _content: string,
+          _onDelta: (text: string) => void,
+          onOfficeEvent: (event: {
+            agentId: string;
+            status: string;
+            task: string;
+          }) => void,
+        ) => {
+          onOfficeEvent({
+            agentId: 'default',
+            status: 'working',
+            task: 'Выполнение кода в песочнице',
+          });
+
+          return { conversationId, reply: 'Готово' };
+        },
+      );
+
+      await gateway.handleSendMessage(socket as unknown as Socket, {
+        conversationId: CONVERSATION_ID,
+        content: 'запусти код',
+      });
+
+      const officeEvents = socket.emit.mock.calls
+        .filter(([event]) => event === 'office_event')
+        .map(([, event]) => event);
+
+      expect(officeEvents).toEqual([
+        {
+          agentId: 'default',
+          status: 'working',
+          task: 'Анализ запроса',
+        },
+        {
+          agentId: 'default',
+          status: 'working',
+          task: 'Выполнение кода в песочнице',
+        },
+      ]);
+    });
+
+    it('умеет отправлять статус waiting_approval вручную', () => {
+      const socket = createSocket();
+
+      gateway.sendWaitingApproval(socket as unknown as Socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('office_event', {
+        agentId: 'default',
+        status: 'waiting_approval',
+        task: 'Ожидание подтверждения',
       });
     });
 

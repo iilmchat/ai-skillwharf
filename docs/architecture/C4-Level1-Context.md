@@ -25,18 +25,21 @@ flowchart LR
     Payments["Платежные шлюзы\n[Software System]\nЮKassa, Тинькофф, СБП, Карты Мир"]
     Registry["Публичный реестр SkillWharf\n[Software System]\nХостинг навыков и плагинов, версионирование, рейтинги"]
     Messengers["Мессенджеры\n[Software System]\nTelegram, VK, WhatsApp, Discord"]
+    Office["AI-Офис\n[Plugin]\nОпциональный визуальный слой:\nстатусы агентов и выполняемых задач"]
     ExternalTools["Внешние инструменты\n[Software System]\nMCP-серверы, внешние агенты (ACP)"]
 
     %% Связи
     Admin -->|Разворачивает, настраивает политики безопасности, подключает шлюзы| SkillWharf
     Dev -->|Публикует Skills/Plugins, устанавливает цены| Registry
     EndUser -->|Общается с агентами через веб/CLI/мессенджеры| Messengers
+    EndUser -->|Наблюдает за работой агентов| Office
     Messengers -->|Входящие сообщения| SkillWharf
 
     SkillWharf -->|Запросы к моделям по HTTP| LLMs
     SkillWharf -->|Списание средств, проверка баланса| Payments
     SkillWharf -->|Скачивание навыков, проверка обновлений| Registry
     SkillWharf -->|Вызов внешних инструментов| ExternalTools
+    SkillWharf -->|События office_event по WebSocket| Office
 
     Registry -->|Анализ безопасности и проверка подписей| SkillWharf
 
@@ -44,10 +47,12 @@ flowchart LR
     classDef actorStyle fill:#f9f9f9,stroke:#333,stroke-width:2px;
     classDef systemStyle fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     classDef externalStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef pluginStyle fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
 
     class Admin,Dev,EndUser actorStyle;
     class SkillWharf systemStyle;
     class LLMs,Payments,Registry,Messengers,ExternalTools externalStyle;
+    class Office pluginStyle;
 ```
 
 ## 3. Описание акторов и внешних систем
@@ -91,9 +96,16 @@ flowchart LR
    * **Назначение:** Расширение возможностей агентов за пределами платформы.
    * **Интеграция:** Model Context Protocol (MCP) для подключения внешних Tool-серверов; Agent Communication Protocol (ACP) для делегирования задач внешним агентам.
 
+### Плагины
+
+1. **AI-Офис (опциональный плагин визуализации):**
+   * **Назначение:** Показывает агентов и их статусы в реальном времени: анализ запроса, выполнение инструментов, ожидание одобрения.
+   * **Интеграция:** Подписывается на WebSocket-события `office_event` от Gateway и рендерит их на React + CSS. Не входит в ядро и может быть отключён без влияния на обработку задач.
+
 ## 4. Ключевые архитектурные решения (Связь с ADR)
 
 * Изоляция внешних вызовов через Gateway ([ADR 0001: Выбор паттерна Hub-and-Spoke](ADR/0001-hub-and-spoke.md)).
+* AI-Офис как опциональный плагин визуализации, а не часть ядра ([ADR 0003: AI-Офис как опциональный плагин](ADR/0003-ai-office-plugin.md)).
 * Использование абстракций для LLM, памяти и биллинга (ADR 0004, ADR 0005).
 
 ## 5. Связанные документы

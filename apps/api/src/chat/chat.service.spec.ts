@@ -28,6 +28,7 @@ import {
 } from '../sandbox/sandbox.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import { ChatService } from './chat.service.js';
+import type { OfficeEvent } from './office-events.js';
 
 const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
@@ -539,6 +540,36 @@ describe('ChatService', () => {
           content: 'Привет',
         },
       });
+    });
+
+    it('отправляет office_event при выполнении инструмента', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'запусти echo hi' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово: hi')));
+      sandbox.runCommand.mockResolvedValue('hi\n');
+
+      const officeEvents: OfficeEvent[] = [];
+      const result = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'запусти echo hi',
+        () => {},
+        (event) => officeEvents.push(event),
+      );
+
+      expect(officeEvents).toEqual([
+        {
+          agentId: 'default',
+          status: 'working',
+          task: 'Выполнение кода в песочнице',
+        },
+      ]);
+      expect(result.reply).toBe('Готово: hi');
     });
 
     it('отправляет ошибку paywall в стрим и сохраняет её', async () => {
