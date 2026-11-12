@@ -184,3 +184,71 @@ docker compose -f docker-compose.yml -f docker-compose.sandbox-dev.yml up -d
 
 CI собирает только базовый образ (`docker compose build api`) и не использует
 `docker-compose.sandbox-dev.yml`, поэтому оверрайд не влияет на пайплайн.
+
+## 8. Настройка биллинга
+
+Для локальной разработки в `.env` используются mock-значения из
+`.env.example`:
+
+```text
+# Billing (YooKassa Mock)
+YOOKASSA_SHOP_ID=mock_shop_id
+YOOKASSA_SECRET_KEY=mock_secret_key
+YOOKASSA_RETURN_URL=http://localhost:3001/billing/success
+```
+
+### Реальные ключи ЮKassa
+
+1. Получите `shopId` и секретный ключ в личном кабинете ЮKassa
+   (раздел «Настройки» → «Магазин» → API-ключи).
+2. Пропишите их в `.env`:
+
+   ```text
+   YOOKASSA_SHOP_ID=<shopId из личного кабинета>
+   YOOKASSA_SECRET_KEY=<секретный ключ>
+   YOOKASSA_RETURN_URL=https://<домен>/billing/success
+   ```
+
+3. Перезапустите API, чтобы он перечитал переменные:
+
+   ```bash
+   docker compose up -d api
+   ```
+
+> Секретный ключ ЮKassa — это платёжный секрет. Не коммитьте `.env` и не
+> передавайте ключ в открытом виде; в production используйте секрет-хранилище.
+
+### Проверка пополнения и списания
+
+Перед тестами примените миграции (включая триггеры append-only для Ledger):
+
+```bash
+docker compose exec api prisma migrate deploy
+```
+
+Эндпоинты требуют JWT администратора (`Authorization: Bearer <token>`).
+
+**Пополнение баланса (админка):**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/billing/topup \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"<uuid>","amount":500.00,"description":"Пополнение баланса","idempotencyKey":"topup-001"}'
+```
+
+**Списание за вызов Skill:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/billing/charge \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"<uuid>","amount":10.00,"description":"Списание за вызов Skill","idempotencyKey":"charge-001"}'
+```
+
+`idempotencyKey` обязателен: повторный запрос с тем же ключом не создаёт
+вторую запись в Ledger. Баланс кошелька можно проверить через
+`GET /api/v1/billing/balance`.
+
+Записи Ledger неизменяемы: миграция создаёт триггеры, которые запрещают
+`UPDATE` и `DELETE` для `LedgerEntry`.
