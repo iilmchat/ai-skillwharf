@@ -23,6 +23,7 @@ export interface ChatSession {
   conversationId: string | null;
   isReady: boolean;
   isSending: boolean;
+  isStreaming: boolean;
   connectionState: ConnectionState;
   setupError: string | null;
   notice: string | null;
@@ -38,9 +39,18 @@ interface ChatReply {
 }
 
 interface PendingReply {
-  timeoutId: number;
-  resolve: (reply: string) => void;
+  /** `null` — ответ пришёл потоком и уже добавлен в стейт. */
+  resolve: (reply: string | null) => void;
   reject: (error: Error) => void;
+  /** Продлевает ожидание: стрим может идти дольше одного ack-таймаута. */
+  refresh: () => void;
+  /** Отмена без reject — например, при размонтировании компонента. */
+  cancel: () => void;
+}
+
+interface StreamDelta {
+  text: string;
+  conversationId?: string;
 }
 
 interface MessagePayload {
@@ -67,6 +77,37 @@ function isMessagePayload(value: unknown): value is MessagePayload {
 
 function isChatReply(value: unknown): value is ChatReply {
   return isRecord(value) && 'reply' in value && typeof value.reply === 'string';
+}
+
+/** Идентификатор диалога в payload события, если он там есть. */
+function getPayloadConversationId(value: unknown): string | undefined {
+  if (!isRecord(value) || typeof value.conversationId !== 'string') {
+    return undefined;
+  }
+
+  return value.conversationId;
+}
+
+/**
+ * Текст дельты из события `stream_delta`. Бэкенд может называть поле
+ * `delta`, `text`, `content` или `chunk` — принимаем любой из вариантов.
+ */
+function parseStreamDelta(value: unknown): StreamDelta | null {
+  if (typeof value === 'string') {
+    return value === '' ? null : { text: value };
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const text = value.delta ?? value.text ?? value.content ?? value.chunk;
+
+  if (typeof text !== 'string' || text === '') {
+    return null;
+  }
+
+  return { text, conversationId: getPayloadConversationId(value) };
 }
 
 /** Бэкенд может вернуть ключ ошибки (`errors.*`) вместо готового текста. */
@@ -174,6 +215,7 @@ export function useChatSession(): ChatSession {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isSocketOnline, setIsSocketOnline] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(
     null,
@@ -187,6 +229,13 @@ export function useChatSession(): ChatSession {
   const pendingRef = useRef<PendingReply | null>(null);
   const pendingTopUpRef = useRef(false);
   const conversationRequestedRef = useRef(false);
+  const conversationIdRef = useRef<string | null>(null);
+  const streamMessageIdRef = useRef<string | null>(null);
+  const streamedTextRef = useRef('');
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   const clearNotice = useCallback(() => {
     setNotice(null);
@@ -195,12 +244,15 @@ export function useChatSession(): ChatSession {
 
   const retry = useCallback(() => {
     conversationRequestedRef.current = false;
+    streamMessageIdRef.current = null;
+    streamedTextRef.current = '';
     setNotice(null);
     setNoticeTopUp(false);
     setConversationError(null);
     setSocketError(null);
     setConversationId(null);
     setMessages([]);
+    setIsStreaming(false);
     setAttempt((value) => value + 1);
   }, []);
 
@@ -258,11 +310,13 @@ export function useChatSession(): ChatSession {
       const pending = pendingRef.current;
 
       if (pending !== null) {
-        window.clearTimeout(pending.timeoutId);
-        pendingRef.current = null;
         pendingTopUpRef.current = false;
         pending.reject(new Error(i18n.t('chat.errors.disconnected')));
       }
+
+      streamMessageIdRef.current = null;
+      streamedTextRef.current = '';
+      setIsStreaming(false);
 
       setSocketError(
         reason === 'io server disconnect'
@@ -285,8 +339,6 @@ export function useChatSession(): ChatSession {
       const pending = pendingRef.current;
 
       if (pending !== null) {
-        window.clearTimeout(pending.timeoutId);
-        pendingRef.current = null;
         pendingTopUpRef.current = needsTopUp;
         pending.reject(new Error(message));
         return;
@@ -296,26 +348,91 @@ export function useChatSession(): ChatSession {
       setNoticeTopUp(needsTopUp);
     };
 
+    const handleStreamDelta = (payload: unknown) => {
+      const pending = pendingRef.current;
+      const delta = parseStreamDelta(payload);
+
+      if (pending === null || delta === null) {
+        return;
+      }
+
+      const activeConversationId = conversationIdRef.current;
+
+      if (
+        delta.conversationId !== undefined &&
+        delta.conversationId !== activeConversationId
+      ) {
+        return;
+      }
+
+      // Стрим может быть длиннее ack-таймаута — продлеваем ожидание.
+      pending.refresh();
+      streamedTextRef.current += delta.text;
+
+      const streamMessageId = streamMessageIdRef.current;
+
+      if (streamMessageId === null) {
+        const messageId = crypto.randomUUID();
+
+        streamMessageIdRef.current = messageId;
+        setIsStreaming(true);
+        setMessages((current) => [
+          ...current,
+          { id: messageId, role: 'assistant', content: delta.text },
+        ]);
+        return;
+      }
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === streamMessageId
+            ? { ...message, content: message.content + delta.text }
+            : message,
+        ),
+      );
+    };
+
+    const handleStreamEnd = (payload: unknown) => {
+      const pending = pendingRef.current;
+      const eventConversationId = getPayloadConversationId(payload);
+
+      if (
+        eventConversationId !== undefined &&
+        eventConversationId !== conversationIdRef.current
+      ) {
+        return;
+      }
+
+      setIsStreaming(false);
+
+      if (pending !== null) {
+        // Поток уже отрисован в стейте; ack с полным текстом больше не нужен.
+        pending.resolve(null);
+      }
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleConnectError);
     socket.on('exception', handleException);
+    socket.on('stream_delta', handleStreamDelta);
+    socket.on('stream_end', handleStreamEnd);
 
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleConnectError);
       socket.off('exception', handleException);
+      socket.off('stream_delta', handleStreamDelta);
+      socket.off('stream_end', handleStreamEnd);
       socket.disconnect();
       socketRef.current = null;
       setIsSocketOnline(false);
 
-      const pending = pendingRef.current;
-
-      if (pending !== null) {
-        window.clearTimeout(pending.timeoutId);
-        pendingRef.current = null;
-      }
+      pendingRef.current?.cancel();
+      pendingRef.current = null;
+      streamMessageIdRef.current = null;
+      streamedTextRef.current = '';
     };
   }, [accessToken, attempt]);
 
@@ -339,25 +456,43 @@ export function useChatSession(): ChatSession {
         { id: crypto.randomUUID(), role: 'user', content: trimmed },
       ]);
       setIsSending(true);
+      setIsStreaming(false);
+      streamMessageIdRef.current = null;
+      streamedTextRef.current = '';
       setNotice(null);
       setNoticeTopUp(false);
       pendingTopUpRef.current = false;
 
-      new Promise<string>((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
+      new Promise<string | null>((resolve, reject) => {
+        let timeoutId = 0;
+
+        const handleTimeout = () => {
           pendingRef.current = null;
           reject(new Error(i18n.t('chat.errors.timeout')));
-        }, ACK_TIMEOUT_MS);
+        };
+
+        const clearTimer = () => window.clearTimeout(timeoutId);
+
+        const settle = (callback: () => void) => {
+          clearTimer();
+          pendingRef.current = null;
+          callback();
+        };
+
+        const armTimer = () => {
+          clearTimer();
+          timeoutId = window.setTimeout(handleTimeout, ACK_TIMEOUT_MS);
+        };
+
+        armTimer();
 
         pendingRef.current = {
-          timeoutId,
-          resolve: (reply) => {
-            window.clearTimeout(timeoutId);
-            resolve(reply);
-          },
-          reject: (error) => {
-            window.clearTimeout(timeoutId);
-            reject(error);
+          resolve: (reply) => settle(() => resolve(reply)),
+          reject: (error) => settle(() => reject(error)),
+          refresh: armTimer,
+          cancel: () => {
+            clearTimer();
+            pendingRef.current = null;
           },
         };
 
@@ -366,9 +501,13 @@ export function useChatSession(): ChatSession {
           { conversationId, content: trimmed },
           (response: unknown) => {
             const pending = pendingRef.current;
-            pendingRef.current = null;
 
             if (pending === null) {
+              return;
+            }
+
+            // Уже пришли `stream_delta`: полный ответ в ack — дубль.
+            if (streamMessageIdRef.current !== null) {
               return;
             }
 
@@ -382,6 +521,32 @@ export function useChatSession(): ChatSession {
         );
       })
         .then((reply) => {
+          // `null` — текст уже отрисован из событий `stream_delta`.
+          if (reply === null) {
+            const streamedText = streamedTextRef.current;
+            const normalized = normalizeAssistantReply(streamedText);
+            const messageId = streamMessageIdRef.current;
+
+            // Служебные ответы вроде `errors.insufficient_funds` приходят
+            // потоком как обычный текст — переводим их и показываем notice.
+            if (messageId !== null && normalized.content !== streamedText) {
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === messageId
+                    ? { ...message, content: normalized.content }
+                    : message,
+                ),
+              );
+            }
+
+            if (normalized.notice !== null) {
+              setNotice(normalized.notice);
+            }
+
+            setNoticeTopUp(normalized.needsTopUp);
+            return;
+          }
+
           const normalized = normalizeAssistantReply(reply);
 
           setMessages((current) => [
@@ -406,7 +571,12 @@ export function useChatSession(): ChatSession {
           setNotice(getErrorMessage(error, i18n.t('chat.errors.sendFailed')));
           setNoticeTopUp(needsTopUp);
         })
-        .finally(() => setIsSending(false));
+        .finally(() => {
+          setIsSending(false);
+          setIsStreaming(false);
+          streamMessageIdRef.current = null;
+          streamedTextRef.current = '';
+        });
     },
     [conversationId],
   );
@@ -423,6 +593,7 @@ export function useChatSession(): ChatSession {
     conversationId,
     isReady,
     isSending,
+    isStreaming,
     connectionState,
     setupError: conversationError ?? socketError,
     notice,

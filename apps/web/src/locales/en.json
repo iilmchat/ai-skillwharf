@@ -50,7 +50,8 @@
   "nav": {
     "primary": "Primary navigation",
     "chat": "Chat",
-    "skills": "Skills"
+    "skills": "Skills",
+    "store": "Store"
   },
   "skills": {
     "title": "Skills",
@@ -80,6 +81,40 @@
       "sessionExpired": "Your session has expired. Please sign in again.",
       "notFound": "Skill not found.",
       "network": "The server is unreachable. Check your connection."
+    }
+  },
+  "store": {
+    "title": "Skills store",
+    "subtitle": "Community skills for your agents. Install the one you need in a single click.",
+    "count": "Available: {{count}}",
+    "loading": "Loading the store…",
+    "emptyTitle": "The store has no skills yet",
+    "emptyBody": "New skills will appear here as soon as they are published.",
+    "errorTitle": "Could not load the store",
+    "retry": "Retry",
+    "author": "By {{author}}",
+    "install": "Install",
+    "installing": "Installing…",
+    "installed": "Installed",
+    "installSuccess": "Skill “{{name}}” has been installed.",
+    "dismiss": "Dismiss notification",
+    "vetter": {
+      "title": "Warning!",
+      "body": "This skill requests dangerous permissions. Are you sure you want to install “{{name}}”?",
+      "permissions": "Requested permissions: {{permissions}}",
+      "dangers": "Dangerous permissions",
+      "warnings": "Warnings",
+      "confirm": "Install anyway",
+      "cancel": "Cancel"
+    },
+    "errors": {
+      "load": "Could not load the list of skills.",
+      "install": "Could not install the skill. Please try again.",
+      "vetter": "The server rejected the installation after the warnings were confirmed.",
+      "adminOnly": "Only an administrator can install skills.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "network": "The server is unreachable. Check your connection.",
+      "notFound": "The store is unavailable: the server could not find the skill registry."
     }
   },
   "theme": {

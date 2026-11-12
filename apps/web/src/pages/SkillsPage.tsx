@@ -5,15 +5,14 @@ import { Link, NavLink } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { SkillPricingBadge } from '../components/SkillPricingBadge';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { skillsQueryKey, useSkills } from '../hooks/useSkills';
 import {
   getSkillsErrorMessage,
   toggleSkill,
   type InstalledSkill,
-  type SkillPricing,
 } from '../lib/skills';
-import { formatMoney, getCurrencySymbol } from '../lib/money';
 import { useAuthStore } from '../store/auth.store';
 
 interface ToggleContext {
@@ -84,36 +83,6 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
   );
 }
 
-function PricingBadge({ pricing }: { pricing: SkillPricing | undefined }) {
-  const { t, i18n } = useTranslation();
-  const isPayPerCall =
-    pricing?.model === 'Pay-per-Call' && typeof pricing.price === 'number';
-  let label: string = t('skills.pricing.free');
-
-  if (isPayPerCall) {
-    label = t('skills.pricing.payPerCall', {
-      price: formatMoney(String(pricing.price), i18n.language),
-      currency: getCurrencySymbol(pricing.currency),
-    });
-  } else if (pricing?.model === 'Subscription') {
-    label = t('skills.pricing.subscription');
-  } else if (pricing?.model === 'Freemium') {
-    label = t('skills.pricing.freemium');
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-        isPayPerCall
-          ? 'bg-tertiary-container text-on-tertiary-container'
-          : 'bg-surface-container-high text-on-surface-variant'
-      }`}
-    >
-      {label}
-    </span>
-  );
-}
-
 function SkillCard({
   skill,
   canManage,
@@ -165,7 +134,7 @@ function SkillCard({
 
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
           <StatusBadge enabled={skill.isEnabled} />
-          <PricingBadge pricing={skill.manifest.pricing} />
+          <SkillPricingBadge pricing={skill.manifest.pricing} />
         </div>
       </article>
     </li>
@@ -280,10 +249,33 @@ export function SkillsPage() {
               <NavLink to="/skills" className={navLinkClasses}>
                 {t('nav.skills')}
               </NavLink>
+              <NavLink to="/store" className={navLinkClasses}>
+                {t('nav.store')}
+              </NavLink>
             </nav>
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              to="/store"
+              aria-label={t('nav.store')}
+              title={t('nav.store')}
+              className="inline-flex size-10 items-center justify-center rounded-full border border-outline text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-5"
+              >
+                <path d="M6 7h12l1 13H5L6 7Z" />
+                <path d="M9 7a3 3 0 0 1 6 0" />
+              </svg>
+            </Link>
             <LanguageSwitcher />
             <ThemeToggle />
           </div>

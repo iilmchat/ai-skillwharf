@@ -21,6 +21,12 @@ const SkillsPage = lazy(() =>
   })),
 );
 
+const StorePage = lazy(() =>
+  import('./pages/StorePage').then((module) => ({
+    default: module.StorePage,
+  })),
+);
+
 function RouteFallback() {
   const { t } = useTranslation();
 
@@ -53,6 +59,14 @@ function App() {
           element={
             <ProtectedRoute>
               <SkillsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/store"
+          element={
+            <ProtectedRoute>
+              <StorePage />
             </ProtectedRoute>
           }
         />
