@@ -5,12 +5,14 @@
 ## 🏗 Архитектура (`architecture/`)
 
 - [C4 Level 1: Контекст](architecture/C4-Level1-Context.md)
+- [Спецификация Wharf Control Plane](architecture/Control-Plane-Specification.md)
 - [ADR 0001: Hub-and-Spoke](architecture/ADR/0001-hub-and-spoke.md)
 - [ADR 0002: Технологический стек](architecture/ADR/0002-tech-stack.md)
 
 ## 🧩 Экосистема (`ecosystem/`)
 
 - [Спецификация Skill Manifest](ecosystem/Manifest-Specification.md)
+- [Матрица монетизации](ecosystem/Monetization-Matrix.md)
 
 ## 💳 Биллинг (`billing/`)
 
@@ -32,7 +34,7 @@
 
 ## 📣 Маркетинг и презентации (`marketing/`)
 
-- [Концепция AI-Офиса и Лендинга](marketing/LANDING_CONCEPT.md)
+- [Концепция AI-Офиса и Лендинга (треки A–E)](marketing/LANDING_CONCEPT.md)
 
 ## 🐞 Релизы и баги
 
