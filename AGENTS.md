@@ -7,7 +7,7 @@
 ## 1. Контекст проекта
 
 | Параметр | Значение |
-|---|---|
+| --- | --- |
 | Репозиторий | `C:\Projects\AI\ai-skillwharf` |
 | Remote | `https://github.com/iilmchat/ai-skillwharf.git`, ветка `main` |
 | Стек | TypeScript, NestJS, pnpm workspaces |
@@ -49,25 +49,29 @@
 3. **Реализация.** Правь файлы инструментами, а не heredoc в shell. Сохраняй
    стиль и форматирование окружающего кода и документации.
 4. **Проверка.** Минимум:
+
    ```bash
    pnpm install --frozen-lockfile   # если менялись зависимости
    pnpm run lint:docs               # Markdown
    ```
+
    Для пакетов, где есть скрипты, — `pnpm --filter <pkg> test` / `build`.
 5. **Git.** Conventional Commits: `chore:`, `ci:`, `docs:`, `feat:`, `fix:`.
    Пуш в `main` — только если задача это предполагает.
 6. **CI.** После пуша дождись результата:
+
    ```bash
    gh run list --repo iilmchat/ai-skillwharf --limit 1
    gh run watch <id> --repo iilmchat/ai-skillwharf --exit-status
    ```
+
 7. **Отчёт.** Файлы, коммиты, команды проверки и их результат, ссылка на CI,
    оставшиеся риски.
 
 ## 4. Формат отчёта
 
 | Шаг | Результат |
-|---|---|
+| --- | --- |
 | Изменено | файлы/директории |
 | Коммит | `hash` — сообщение |
 | Проверка | команда → результат |

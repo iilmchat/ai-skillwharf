@@ -23,4 +23,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint Markdown
-        run: pnpm exec markdownlint-cli2 "docs/**/*.md"
+        run: pnpm exec markdownlint-cli2 "*.md" "docs/**/*.md"

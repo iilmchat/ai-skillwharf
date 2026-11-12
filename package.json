@@ -5,7 +5,9 @@
   "description": "SkillWharf — монорепозиторий (NestJS + pnpm workspaces)",
   "main": "index.js",
   "scripts": {
-    "lint:docs": "markdownlint-cli2 \"docs/**/*.md\""
+    "lint:docs": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\"",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck"
   },
   "keywords": [],
   "author": "",
