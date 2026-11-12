@@ -452,12 +452,11 @@ test.describe('Дымовые сценарии UI', () => {
 
     await page.locator('a[href="/admin"]').click();
     await expect(page).toHaveURL(/\/admin$/);
-    await page
-      .getByRole('tab', { name: /LLM Роутер|LLM Router/ })
-      .click();
+    await page.getByRole('tab', { name: /LLM Роутер|LLM Router/ }).click();
 
     await page
       .getByRole('button', { name: /Добавить правило|Add rule/ })
+      .first()
       .click();
 
     const dialog = page.getByRole('dialog');
