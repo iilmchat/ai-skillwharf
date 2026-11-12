@@ -309,8 +309,12 @@
       "approved": "Resuming after approval"
     },
     "payment": {
-      "title": "Payment pending",
+      "title": "Payment pending (Pay-per-Outcome)",
       "body": "The Pay-per-Outcome tool holds funds until the action is confirmed."
+    },
+    "approval": {
+      "title": "Approval pending",
+      "body": "The agent paused before an action and is waiting for your confirmation."
     },
     "backHome": "Home",
     "backToChat": "Chat",
@@ -323,7 +327,8 @@
     "status": {
       "idle": "Coffee break",
       "working": "Typing",
-      "waiting_approval": "Awaiting approval"
+      "waiting_approval": "Awaiting approval",
+      "waiting_payment": "Awaiting payment"
     },
     "agents": {
       "nova": {

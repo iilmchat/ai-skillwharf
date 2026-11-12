@@ -67,25 +67,7 @@ function formatServerMessage(message: string | string[]): string {
 export async function fetchBalance(): Promise<WalletBalance> {
   const { data } = await api.get<WalletBalance>('/billing/balance');
 
-  if (data.heldBalance !== undefined) {
-    return data;
-  }
-
-  // Обратная совместимость: пока API не отдаёт heldBalance, считаем его
-  // по незавершённым PENDING-записям Ledger.
-  try {
-    const ledger = await api.get<LedgerEntry[]>('/billing/ledger');
-    const held = ledger.data
-      .filter((entry) => entry.type.toUpperCase() === 'PENDING')
-      .reduce((sum, entry) => sum + Number(entry.amount), 0);
-
-    return {
-      balance: data.balance,
-      heldBalance: Number.isFinite(held) ? held.toFixed(2) : undefined,
-    };
-  } catch {
-    return data;
-  }
+  return data;
 }
 
 export async function topUpBalance(

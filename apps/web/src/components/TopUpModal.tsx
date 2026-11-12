@@ -7,6 +7,7 @@ import {
   ledgerQueryKey,
   topUpBalance,
   type TopUpPayload,
+  type WalletBalance,
 } from '../lib/billing';
 import { CURRENCY_SYMBOL, formatMoney } from '../lib/money';
 
@@ -50,7 +51,13 @@ export function TopUpModal({
   const mutation = useMutation({
     mutationFn: (payload: TopUpPayload) => topUpBalance(payload),
     onSuccess: (data) => {
-      queryClient.setQueryData(balanceQueryKey, { balance: data.balance });
+      queryClient.setQueryData<WalletBalance>(
+        balanceQueryKey,
+        (current) => ({
+          balance: data.balance,
+          heldBalance: data.heldBalance ?? current?.heldBalance,
+        }),
+      );
       void queryClient.invalidateQueries({ queryKey: balanceQueryKey });
       void queryClient.invalidateQueries({ queryKey: ledgerQueryKey });
       onClose();

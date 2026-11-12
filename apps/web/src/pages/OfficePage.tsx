@@ -17,6 +17,7 @@ import {
   parseOfficeEvent,
   readConversationId,
   type OfficeAgentStatus,
+  type OfficeApprovalReason,
 } from '../lib/office-events';
 import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
@@ -30,6 +31,8 @@ interface OfficeAgent {
   /** Задача, пришедшая с бэкенда; важнее локализованного mock-текста. */
   task?: string;
   status: OfficeAgentStatus;
+  /** Причина waiting_approval: оплата или обычное одобрение. */
+  reason?: OfficeApprovalReason;
   desk: string;
   live?: boolean;
 }
@@ -74,6 +77,7 @@ const INITIAL_AGENTS: readonly OfficeAgent[] = [
     roleKey: 'office.agents.leo.role',
     taskKey: 'office.agents.leo.task',
     status: 'waiting_approval',
+    reason: 'approval',
     desk: '04',
   },
   {
@@ -90,6 +94,7 @@ const INITIAL_AGENTS: readonly OfficeAgent[] = [
     roleKey: 'office.agents.kai.role',
     taskKey: 'office.agents.kai.task',
     status: 'waiting_approval',
+    reason: 'payment',
     desk: '06',
   },
 ];
@@ -135,6 +140,7 @@ interface LiveAgentUpdate {
   agentId: string;
   status: OfficeAgentStatus;
   task: string;
+  reason?: OfficeApprovalReason;
 }
 
 function applyLiveEvent(
@@ -151,6 +157,8 @@ function applyLiveEvent(
           ...agent,
           status: event.status,
           task: event.task,
+          reason:
+            event.status === 'waiting_approval' ? event.reason : undefined,
           live: true,
         }
       : agent,
@@ -203,6 +211,7 @@ function AgentDesk({
   const meta = STATUS_META[agent.status];
   const isWorking = agent.status === 'working';
   const isWaiting = agent.status === 'waiting_approval';
+  const isPayment = isWaiting && agent.reason === 'payment';
 
   return (
     <motion.li variants={deskVariants} className="h-full">
@@ -244,7 +253,7 @@ function AgentDesk({
                   }}
                 />
               )}
-              {isWaiting && (
+              {isPayment && (
                 <span
                   aria-hidden="true"
                   className="absolute -bottom-1 -right-1 grid size-5 place-items-center rounded-full bg-warning-container text-[11px] shadow ring-2 ring-surface"
@@ -263,7 +272,9 @@ function AgentDesk({
                   isWorking ? 'animate-pulse' : ''
                 }`}
               />
-              {t(meta.labelKey)}
+              {isPayment
+                ? t('office.status.waiting_payment')
+                : t(meta.labelKey)}
             </span>
           </div>
 
@@ -340,6 +351,11 @@ function AgentSidebar({
   const { t } = useTranslation();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const meta = STATUS_META[agent.status];
+  const isPayment =
+    agent.status === 'waiting_approval' && agent.reason === 'payment';
+  const statusLabel = isPayment
+    ? t('office.status.waiting_payment')
+    : t(meta.labelKey);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -409,7 +425,7 @@ function AgentSidebar({
                 aria-hidden="true"
                 className={`size-1.5 rounded-full ${meta.dot}`}
               />
-              {t(meta.labelKey)}
+              {statusLabel}
             </span>
             <p className="mt-2 text-xs text-on-surface-variant">
               {t('office.desk', { number: agent.desk })}
@@ -431,7 +447,7 @@ function AgentSidebar({
               {t('office.sidebar.status')}
             </dt>
             <dd className="mt-1 text-sm font-medium text-on-surface">
-              {t(meta.labelKey)}
+              {statusLabel}
             </dd>
           </div>
           <div>
@@ -457,14 +473,18 @@ function AgentSidebar({
         {agent.status === 'waiting_approval' && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-warning/30 bg-warning-container/40 p-3">
             <span aria-hidden="true" className="text-lg leading-none">
-              💳
+              {isPayment ? '💳' : '✋'}
             </span>
             <div>
               <p className="text-sm font-semibold text-on-warning-container">
-                {t('office.payment.title')}
+                {isPayment
+                  ? t('office.payment.title')
+                  : t('office.approval.title')}
               </p>
               <p className="mt-0.5 text-xs leading-relaxed text-on-warning-container">
-                {t('office.payment.body')}
+                {isPayment
+                  ? t('office.payment.body')
+                  : t('office.approval.body')}
               </p>
             </div>
           </div>
