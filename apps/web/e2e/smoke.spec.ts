@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createServer, type ServerResponse } from 'node:http';
 import {
   expect,
+  request as playwrightRequest,
   test,
   type APIRequestContext,
   type Page,
@@ -391,6 +392,7 @@ async function createMockRoute(
 
 let suiteMockLlm: MockLlmServer | null = null;
 let suiteMockRoute: Awaited<ReturnType<typeof createMockRoute>> | null = null;
+let suiteApi: APIRequestContext | null = null;
 
 test.beforeAll(async ({ request }) => {
   await ensureTestUser(request);
@@ -399,10 +401,13 @@ test.beforeAll(async ({ request }) => {
   // Все LLM-зависимые сценарии работают с детерминированным мок-провайдером,
   // а не с локальным LM Studio/Ollama. Реальные маршруты отключаются на время
   // прогона и восстанавливаются в afterAll.
-  const accessToken = await loginViaApi(request);
+  // Отдельный контекст нужен, чтобы не переиспользовать fixture request из
+  // beforeAll в afterAll (Playwright это запрещает).
+  suiteApi = await playwrightRequest.newContext({ baseURL: WEB_BASE_URL });
+  const accessToken = await loginViaApi(suiteApi);
   suiteMockLlm = await startMockLlmServer();
   suiteMockRoute = await createMockRoute(
-    request,
+    suiteApi,
     accessToken,
     suiteMockLlm.baseUrl,
   );
@@ -411,6 +416,7 @@ test.beforeAll(async ({ request }) => {
 test.afterAll(async () => {
   await suiteMockRoute?.restore();
   await suiteMockLlm?.close();
+  await suiteApi?.dispose();
 });
 
 test.describe('Дымовые сценарии UI', () => {
