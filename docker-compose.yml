@@ -59,9 +59,16 @@ services:
     environment:
       PORT: 4000
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-skillwharf-sandbox:latest}
-      SANDBOX_ALLOW_NETWORK: ${SANDBOX_ALLOW_NETWORK:-false}
+      # Egress задаётся `egress_allowlist` в манифесте навыка (deny by
+      # default); глобального флага включения сети нет.
+      # Пусто — профиль Docker по умолчанию (локальная разработка).
+      # В staging путь задаётся в docker-compose.staging.yml.
+      SANDBOX_SECCOMP_PROFILE: ${SANDBOX_SECCOMP_PROFILE:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Worker читает профиль сам и передаёт демону inline JSON: путь внутри
+      # контейнера worker демону Docker не виден.
+      - ./sandbox/seccomp-profile.json:/etc/sandbox/seccomp-profile.json:ro
     # Наружу порт не публикуется: доступ только из compose-сети.
 
   web:

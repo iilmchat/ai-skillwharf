@@ -30,8 +30,7 @@ Gateway использует эту схему (через библиотеку 
       "type": "array",
       "items": { "type": "string" },
       "description": "Список FQDN-доменов, к которым разрешен доступ."
-    },
-    "pricing": {
+    },    "pricing": {
       "properties": {
         "model": {
           "enum": ["Free", "Pay-per-Call", "Subscription", "Freemium", "Pay-per-Outcome"]
@@ -116,6 +115,22 @@ Gateway использует эту схему (через библиотеку 
   }
 }
 ```
+
+### 2.1 Runtime-семантика `mcp_endpoint` и `egress_allowlist`
+
+- `mcp_endpoint` — источник истины для подключения навыка-коннектора:
+  MCP Gateway не хардкодит адреса серверов и использует endpoint из
+  манифеста включённого навыка. Допустимы только `http://` и `https://`.
+- `egress_allowlist` — точные FQDN в нижнем регистре, без схемы, порта,
+  пути и wildcard (`*.example.com` запрещён). Максимум 50 уникальных
+  доменов. Пустой или отсутствующий список означает **полный запрет сети**
+  (deny by default), даже если в окружении включён `SANDBOX_ALLOW_NETWORK`.
+  При наличии списка sandbox-контейнеру разрешены только домены из него:
+  `sandbox-worker` настраивает iptables внутри сетевого namespace контейнера
+  и резолвит FQDN в IP на старте (DNS — `127.0.0.11` Docker).
+- Оба поля проверяются Zod-схемой `SkillManifestSchema` из
+  `@skillwharf/shared` при установке навыка и при сборке runtime-контекста
+  Agent Gateway.
 
 ## 3. Пример валидного SKILL.md
 

@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### Security & Sandbox (Sprint 14)
+
+- Кастомный seccomp-профиль `sandbox/seccomp-profile.json` (default-deny, `SCMP_ACT_ERRNO`): allowlist для Node/V8, Python, bash/curl/jq/gh; явный запрет `ptrace`, `mount`, `unshare`, `setns`, `bpf`, `keyctl`, `perf_event_open`, `kexec_*`, `reboot`, `swapon/off`, `init_module`, `pivot_root`, `chroot`, `personality`, `userfaultfd`, `process_vm_*`. `clone` разрешён только без namespace-флагов, `clone3` → `ENOSYS`. `sandbox-worker` читает `SANDBOX_SECCOMP_PROFILE`, валидирует Zod, передаёт inline JSON в Docker `SecurityOpt`. Fail closed при невалидном профиле. Staging — обязателен. Закрывает KI-005.
+- Декларативный policy engine вместо regex: `apps/api/src/security/policy/` — strict Zod-схемы аргументов для 18 инструментов, структурный shell-анализатор (кавычки, `${IFS}`, ANSI-C, `; && || |`, `eval`, вложенный shell, `child_process`, `/proc/*/environ`), secret-taint (GitHub/OpenAI/AWS/JWT/Bearer/PEM), deny-by-default для неизвестных инструментов, роли, taint из `web_search`/MCP блокируется в `exec`/песочнице/MCP/каналах и маскируется в поиске. Блокировки — 403 `errors.policy_blocked`, аудит в append-only Ledger. Закрывает KI-013.
+- FQDN-aware egress: `egress_allowlist` из манифеста → egress-gateway; навык без allowlist не имеет сети даже при `SANDBOX_ALLOW_NETWORK=true`. `sandbox-worker` поднимает `NET_ADMIN`, root-entrypoint настраивает iptables (ACCEPT tcp 80/443 только на IP разрешённых FQDN, DROP по умолчанию), далее `su-exec 65534`. `SANDBOX_ALLOW_NETWORK`/`ALLOW_NETWORK` больше не включают сеть. Закрывает KI-008.
+
+### MCP Gateway & LLM (Sprint 14)
+
+- MCP Gateway: strict-валидация `action`/`params` до `client.callTool`, per-action strict-схемы для известных ozon/wb-действий, единые ошибки 400/502/503/504, таймауты 15 с/попытка, retry 1×250 мс только для transient transport/5xx. `mcp_endpoint` из манифеста — источник адреса (env — fallback). Закрывает ADR 0004 п.1–2.
+
+### RAG Memory API (Sprint 14)
+
+- `GET /api/v1/chat/memory`: `{ items: [{ id, content, createdAt }], total }`, Zod-валидация query/response, сортировка `createdAt desc`, `limit`/`offset` с 400 `errors.invalid_request`, только записи JWT-пользователя. Закрывает KI-023 (backend).
+- Web UI: панель «Память» за флагом `VITE_RAG_MEMORY_ENABLED` (default false) делает реальный запрос к `GET /api/v1/chat/memory`, Zod-валидация, состояния загрузки/пусто/ошибки/retry, `apps/web/Dockerfile` принимает build-arg `VITE_RAG_MEMORY_ENABLED`. Закрывает KI-023 (UI).
+
+### Web UI (Sprint 14)
+
+- Ошибки распознаются по машиночитаемому `code` (`errors.daily_token_limit`, `errors.insufficient_funds`) с полным fallback на текстовые маркеры старого API. Логика вынесена в `apps/web/src/lib/chat-errors.ts`, покрыта 15 тестами.
+- Новые KI: KI-025 (не все ошибки API имеют `code`), KI-026 (seccomp профиль — только amd64), KI-027 (MCP structural-only actions), KI-028 (egress IP-pinning/DNS-tunneling/ip6tables), KI-029 (shell-анализатор — эвристика, не полный POSIX-парсер), KI-030 (VITE_RAG_MEMORY_ENABLED не проброшен в compose).
+
+### MCP Gateway
+
+- Отдельный слой проверки MCP-вызовов (`apps/api/src/llm/tools/mcp-gateway.ts`): аргументы `ozon_mcp_call`/`wb_mcp_call` валидируются Zod-схемой до отправки на MCP-сервер — `action` по шаблону, `params` только плоские примитивы (≤50 ключей, строки ≤4096, без вложенных объектов), для известных действий ozon/wb действуют strict-схемы. Невалидный вызов → 400 `errors.invalid_request`, клиент MCP не вызывается.
+- `mcp_endpoint` из манифеста навыка стал источником истины для подключения MCP-сервера (env `OZON_MCP_URL`/`WB_MCP_URL` — только fallback для совместимости); адреса в коде не хардкодятся.
+- Ошибки MCP-провайдера маппятся в единый JSON: 502 `errors.mcp_provider`, таймаут 504 `errors.mcp_timeout`, не сконфигурированный сервер 503 `errors.mcp_unavailable`. Таймауты осознанные: 15 с на попытку, один retry (250 мс) только для временных транспортных ошибок/5xx; JSON-RPC-ошибки провайдера и таймауты не повторяются.
+- `McpClient` получил типизированные ошибки (`McpTransportError`, `McpProviderError`, `McpTimeoutError`), маскирование секретов в сообщениях и корректное закрытие SSE-сессии при неудачной инициализации.
+
+### RAG Memory API
+
+- `GET /api/v1/chat/memory` (KI-023): read-API памяти отдаёт `{ items: [{ id, content, createdAt }], total }` с сортировкой по `createdAt desc`; пагинация `limit`/`offset` валидируется Zod (400 `errors.invalid_request` для невалидного query), ответ проверяется Zod-схемой. Права: только записи текущего пользователя из JWT, `userId` из query не принимается, без аутентификации — 401. Запись, поиск и удаление памяти не изменялись.
+- UI-панель памяти (`apps/web`) уже валидировала контракт и теперь получает реальные данные; включение флага в Docker-сборке вынесено в KI-030.
+
 ### Infrastructure & Security
 
 - Grafana и Prometheus в staging закрыты HTTP Basic Auth. Caddy защищает `/grafana/` и `/prometheus/`, Prometheus дополнительно использует нативный `web.config.file` с `basic_auth_users` и bcrypt-хэшем; без кредов оба пути отдают `401`.
@@ -12,10 +44,16 @@
 - Добавлена ротация бэкапов БД `scripts/rotate-backups.sh`: `BACKUP_KEEP_DAYS` дней, но не меньше `BACKUP_KEEP_MIN` последних дампов, удаление только просроченных файлов, лог каждого удаления и режим `--dry-run`/`-DryRun`.
 - `scripts/backup-db.sh` проверяет свободное место (`BACKUP_MIN_FREE_MB`), пишет дамп во временный `.partial`, проверяет непустоту и запускает ротацию только после успешного `pg_dump`.
 - Runbook обновлён: включение бэкапов и ротации, проверка, восстановление, изменение retention, генерация bcrypt-хэша и проверка `401`/`200` для мониторинга.
+- Добавлен кастомный default-deny seccomp-профиль `sandbox/seccomp-profile.json` (allowlist для Node.js/V8, Python, curl, jq, gh и bash). Опасные сисколлы (`ptrace`, `mount`, `unshare`, `setns`, `bpf`, `keyctl`, `perf_event_open`, `kexec_*`, `reboot`, `swapon/swapoff`, `init_module`, `delete_module`, `pivot_root`, `chroot`, `personality`, `userfaultfd` и др.) запрещены явно, `clone` ограничен маской namespace-флагов; KI-005 закрыт.
+- `sandbox-worker` применяет профиль через `SANDBOX_SECCOMP_PROFILE`: файл читается внутри worker, валидируется Zod и передаётся Docker API как inline `seccomp=<json>` в `HostConfig.SecurityOpt`. Пустая переменная сохраняет профиль Docker по умолчанию, в staging профиль обязателен; ошибка чтения/валидации останавливает worker (fail closed).
+- `scripts/test-sandbox.sh` проверяет bash/curl/jq/gh/Python и Node.js/V8 с worker_threads под профилем, а также `EPERM` для ptrace, mount, unshare, keyctl, perf_event_open, personality, bpf и userfaultfd. Runbook дополнен включением, проверкой и откатом профиля.
 
 ### Web UI
 
-- Страница настроек дополнена разделом «Память»: feature-flag `VITE_RAG_MEMORY_ENABLED` (по умолчанию выключен) управляет показом списка записей RAG-памяти. Пока в API нет read-эндпоинта `GET /api/v1/chat/memory`, раздел скрыт, не делает запросов и не подменяется моками (KI-023).
+- Ошибки чата распознаются по машиночитаемому `code` из `WsException` и JSON-тела ошибки API: `errors.daily_token_limit` и `errors.insufficient_funds` больше не зависят от текста сообщения. HTTP 429 и текстовые маркеры (`Too Many Requests`, `Недостаточно средств`) сохранены как fallback для старого API без `code` (KI-025). Логика вынесена в `apps/web/src/lib/chat-errors.ts` и покрыта тестами: ошибка с `code` распознаётся при произвольном тексте, без `code` — по статусу и тексту.
+- Zod-схема RAG-панели закреплена за контрактом Sprint 14 `{ items: [{ id, content, createdAt }], total? }`: при расхождении API панель показывает ошибку валидации и не подменяет данные. `fetchMemoryEntries` запрашивает `GET /api/v1/chat/memory`; тесты проверяют запрос, невалидный ответ, отрицательный `total` и отбрасывание лишних полей.
+- `apps/web/Dockerfile` принимает build-arg `VITE_RAG_MEMORY_ENABLED` (по умолчанию `false`), поэтому раздел «Память» можно включить и в Docker-сборке. Проброс аргумента через `docker-compose.yml` остаётся отдельной задачей (KI-023).
+- Страница настроек дополнена разделом «Память»: feature-flag `VITE_RAG_MEMORY_ENABLED` (по умолчанию выключен) управляет показом списка записей RAG-памяти. После появления `GET /api/v1/chat/memory` (см. раздел «RAG Memory API») раздел работает с реальными данными, вымышленные записи не подставляются (KI-023).
 - Ответ памяти валидируется Zod (`id`, `content`, `createdAt`); панель показывает краткое содержание, тип «фрагмент памяти» и дату создания через `<time>`, поддерживает состояния загрузки, пустоты, ошибки (401/404/сеть/невалидный ответ) и повторную загрузку.
 - Полировка страницы настроек: единый контейнер и отступы секций, `aria-labelledby`/`aria-describedby`, `aria-busy`/`aria-live`, focus-visible у новых кнопок, адаптивная вёрстка; строки добавлены в RU/EN-словари.
 - `apps/web/README.md` дополнен разделом о настройках, памяти и переменной `VITE_RAG_MEMORY_ENABLED`.

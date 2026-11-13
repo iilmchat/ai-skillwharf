@@ -1,6 +1,17 @@
 import Docker from 'dockerode';
 import express, { type Request, type Response } from 'express';
 import { Writable } from 'node:stream';
+import {
+  buildContainerConfig,
+  isCodeTooLong,
+  parseExecutePayload,
+  type SandboxContainerConfig,
+} from './egress.js';
+import {
+  buildSecurityOpts,
+  loadSeccompProfile,
+  type LoadedSeccompProfile,
+} from './seccomp.js';
 
 /**
  * Worker — единственный сервис, у которого смонтирован Docker-сокет.
@@ -12,16 +23,14 @@ const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE ?? 'skillwharf-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_MEMORY_LIMIT_BYTES = 128 * 1024 * 1024;
 const SANDBOX_NANO_CPUS = 500_000_000;
-const MAX_CODE_LENGTH = 256 * 1024;
 
-/** Флаг в env, который не должен попадать внутрь sandbox-контейнера. */
-const SANDBOX_NETWORK_FLAG = 'ALLOW_NETWORK';
-
-interface ExecutePayload {
-  code?: unknown;
-  env?: unknown;
-  network?: unknown;
-}
+/**
+ * Feature flag: путь к seccomp-профилю внутри контейнера worker.
+ * Пусто/не задано — прежнее поведение (профиль Docker по умолчанию).
+ * В staging профиль обязателен, см. docker-compose.staging.yml.
+ */
+const seccompProfile = loadSeccompProfileOrExit();
+const SANDBOX_SECURITY_OPTS = buildSecurityOpts(seccompProfile);
 
 interface ExecuteResponse {
   stdout: string;
@@ -39,23 +48,29 @@ app.get('/health', (_request: Request, response: Response) => {
 });
 
 app.post('/execute', async (request: Request, response: Response) => {
-  const payload = request.body as ExecutePayload;
-
-  if (typeof payload.code !== 'string' || payload.code.length === 0) {
-    response.status(400).json({ message: 'Поле code обязательно' });
-    return;
-  }
-
-  if (payload.code.length > MAX_CODE_LENGTH) {
+  if (isCodeTooLong(request.body)) {
     response.status(413).json({ message: 'Код превышает допустимый размер' });
     return;
   }
 
-  const env = sanitizeEnv(payload.env);
-  const network = payload.network === 'bridge' ? 'bridge' : 'none';
+  let payload;
+  try {
+    payload = parseExecutePayload(request.body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    response.status(400).json({ message });
+    return;
+  }
 
   try {
-    const result = await runInSandbox(payload.code, env, network);
+    // Сеть: none без allowlist; bridge + iptables только для разрешённых FQDN.
+    const containerConfig = buildContainerConfig(payload, {
+      image: SANDBOX_IMAGE,
+      securityOpts: SANDBOX_SECURITY_OPTS,
+      memoryLimitBytes: SANDBOX_MEMORY_LIMIT_BYTES,
+      nanoCpus: SANDBOX_NANO_CPUS,
+    });
+    const result = await runInSandbox(containerConfig);
     response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -65,30 +80,9 @@ app.post('/execute', async (request: Request, response: Response) => {
 });
 
 async function runInSandbox(
-  code: string,
-  env: Record<string, string>,
-  network: 'bridge' | 'none',
+  config: SandboxContainerConfig,
 ): Promise<ExecuteResponse> {
-  const container = await docker.createContainer({
-    Image: SANDBOX_IMAGE,
-    Cmd: ['sh', '-c', code],
-    User: '65534:65534',
-    Tty: false,
-    AttachStdout: true,
-    AttachStderr: true,
-    Env: Object.entries(env)
-      .filter(([key]) => key !== SANDBOX_NETWORK_FLAG)
-      .map(([key, value]) => `${key}=${value}`),
-    HostConfig: {
-      NetworkMode: network,
-      ReadonlyRootfs: true,
-      CapDrop: ['ALL'],
-      SecurityOpt: ['no-new-privileges:true'],
-      Tmpfs: { '/tmp': '' },
-      Memory: SANDBOX_MEMORY_LIMIT_BYTES,
-      NanoCpus: SANDBOX_NANO_CPUS,
-    },
-  });
+  const container = await docker.createContainer(config);
 
   let stdout = '';
   let stderr = '';
@@ -140,20 +134,24 @@ async function runInSandbox(
   return { stdout, stderr, timedOut };
 }
 
-function sanitizeEnv(value: unknown): Record<string, string> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return {};
+function loadSeccompProfileOrExit(): LoadedSeccompProfile | undefined {
+  try {
+    return loadSeccompProfile(process.env.SANDBOX_SECCOMP_PROFILE);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`sandbox-worker: ${message}`);
+    process.exit(1);
   }
+}
 
-  const env: Record<string, string> = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === 'string') {
-      env[key] = item;
-    }
-  }
-
-  return env;
+if (seccompProfile) {
+  console.log(
+    `sandbox-worker: seccomp profile enabled (${seccompProfile.path}, ${seccompProfile.ruleCount} rules)`,
+  );
+} else {
+  console.log(
+    'sandbox-worker: seccomp profile disabled (SANDBOX_SECCOMP_PROFILE is not set)',
+  );
 }
 
 app.listen(PORT, '0.0.0.0', () => {

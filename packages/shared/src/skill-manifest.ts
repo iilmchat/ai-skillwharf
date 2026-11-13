@@ -61,6 +61,39 @@ export const skillPricingSchema = z.object({
 /** Хеш Markdown Body (sha256) для защиты от подмены. */
 export const skillChecksumSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
+/**
+ * FQDN без схемы, порта, пути и wildcard.
+ *
+ * Пример: `api.tavily.com`. Wildcard-домены запрещены: egress-политика
+ * разрешает только точные домены из манифеста (deny by default).
+ */
+export const fqdnSchema = z
+  .string()
+  .max(253)
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/,
+    'ожидается FQDN в нижнем регистре без схемы, порта и wildcard',
+  );
+
+/** FQDN-allowlist egress: только точные домены, без wildcard. */
+export const egressAllowlistSchema = z
+  .array(fqdnSchema)
+  .max(50)
+  .refine(
+    (domains) => new Set(domains).size === domains.length,
+    'домены не должны повторяться',
+  );
+
+/** URL MCP-сервера, с которым работает навык-коннектор. */
+export const mcpEndpointSchema = z
+  .url()
+  .max(2048)
+  .refine(
+    (endpoint) =>
+      endpoint.startsWith('http://') || endpoint.startsWith('https://'),
+    'mcp_endpoint должен использовать http или https',
+  );
+
 /** Манифест Skill из YAML Frontmatter. */
 export const skillManifestSchema = z.object({
   name: skillNameSchema,
@@ -76,6 +109,17 @@ export const skillManifestSchema = z.object({
    */
   requiresApproval: z.boolean().optional(),
   checksum: skillChecksumSchema.optional(),
+  /**
+   * URL MCP-сервера навыка-коннектора (`mcp_endpoint` в SKILL.md).
+   * Источник истины для подключения: Gateway не хардкодит адреса серверов.
+   */
+  mcp_endpoint: mcpEndpointSchema.optional(),
+  /**
+   * FQDN-домены, к которым навыку разрешён egress (`egress_allowlist`).
+   * Пустой/отсутствующий список означает полный запрет сети, даже если
+   * глобальный флаг `SANDBOX_ALLOW_NETWORK` включён.
+   */
+  egress_allowlist: egressAllowlistSchema.optional(),
 });
 
 /** Алиас в PascalCase для использования в коде Gateway/API. */
@@ -87,6 +131,8 @@ export type SkillDependencies = z.infer<typeof skillDependenciesSchema>;
 export type SkillPermission = z.infer<typeof skillPermissionSchema>;
 export type SkillPricing = z.infer<typeof skillPricingSchema>;
 export type SkillChecksum = z.infer<typeof skillChecksumSchema>;
+export type EgressAllowlist = z.infer<typeof egressAllowlistSchema>;
+export type McpEndpoint = z.infer<typeof mcpEndpointSchema>;
 
 /** Типизированный манифест, выведенный из Zod-схемы. */
 export type SkillManifest = z.infer<typeof skillManifestSchema>;

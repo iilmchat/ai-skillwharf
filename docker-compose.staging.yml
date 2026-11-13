@@ -46,12 +46,15 @@ services:
       # Без mock_key/mock_token: ключи навыков должны быть реальными.
       TAVILY_API_KEY: ${TAVILY_API_KEY:?TAVILY_API_KEY is required in .env}
       GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN is required in .env}
-      SANDBOX_ALLOW_NETWORK: "false"
       SANDBOX_WORKER_URL: http://sandbox-worker:4000
 
   sandbox-worker:
     environment:
-      SANDBOX_ALLOW_NETWORK: "false"
+      # Egress задаётся egress_allowlist в манифесте навыка (deny by default);
+      # глобального флага включения сети нет.
+      # В staging профиль обязателен: без него worker не запустится (fail
+      # closed), а файл смонтирован в базовом docker-compose.yml.
+      SANDBOX_SECCOMP_PROFILE: /etc/sandbox/seccomp-profile.json
 
   web:
     ports:

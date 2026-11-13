@@ -23,6 +23,12 @@ COPY apps/web ./apps/web
 ARG VITE_API_URL=/api/v1
 ENV VITE_API_URL=${VITE_API_URL}
 
+# Раздел «Память» (RAG) включается на этапе сборки: Vite вшивает значение
+# флага. По умолчанию выключен — read-API `GET /api/v1/chat/memory` появится
+# в Sprint 14 (KI-023). Включение: `--build-arg VITE_RAG_MEMORY_ENABLED=true`.
+ARG VITE_RAG_MEMORY_ENABLED=false
+ENV VITE_RAG_MEMORY_ENABLED=${VITE_RAG_MEMORY_ENABLED}
+
 RUN pnpm --filter web build
 
 # --- Stage 2: раздача статики и прокси на API ---

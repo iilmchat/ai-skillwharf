@@ -1,3 +1,7 @@
+# Smoke-тест изоляции из scripts/test-sandbox.sh: сеть выключена, все
+# capabilities сняты. Контейнеры с egress worker создаёт динамически через
+# Docker API (bridge + NET_ADMIN + root-entrypoint sandbox-egress-setup.sh),
+# этот сервис в таких запусках не участвует.
 services:
   sandbox-runner:
     build: ./sandbox

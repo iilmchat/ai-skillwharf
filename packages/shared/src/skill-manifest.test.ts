@@ -137,4 +137,64 @@ describe("skillManifestSchema", () => {
       expect("unexpected" in result.data).toBe(false);
     }
   });
+
+  it("принимает mcp_endpoint и egress_allowlist из спецификации манифеста", () => {
+    const manifest = {
+      ...documentedManifest,
+      mcp_endpoint: "http://ozon-mcp:5001",
+      egress_allowlist: ["api.tavily.com", "api.github.com"],
+    };
+
+    const result = skillManifestSchema.safeParse(manifest);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.mcp_endpoint).toBe("http://ozon-mcp:5001");
+      expect(result.data.egress_allowlist).toEqual([
+        "api.tavily.com",
+        "api.github.com",
+      ]);
+    }
+  });
+
+  it("отклоняет wildcard, схему и порт в egress_allowlist", () => {
+    const invalidDomains = [
+      "*.tavily.com",
+      "https://api.tavily.com",
+      "api.tavily.com:443",
+      "API.Tavily.COM",
+      "localhost",
+      "../api.tavily.com",
+    ];
+
+    for (const domain of invalidDomains) {
+      const manifest = {
+        ...documentedManifest,
+        egress_allowlist: [domain],
+      };
+
+      expect(skillManifestSchema.safeParse(manifest).success, domain).toBe(
+        false,
+      );
+    }
+  });
+
+  it("отклоняет повторяющиеся домены и не-http(s) mcp_endpoint", () => {
+    expect(
+      skillManifestSchema.safeParse({
+        ...documentedManifest,
+        egress_allowlist: ["api.tavily.com", "api.tavily.com"],
+      }).success,
+    ).toBe(false);
+
+    for (const endpoint of ["ftp://mcp.local", "not-a-url", "file:///etc/passwd"]) {
+      expect(
+        skillManifestSchema.safeParse({
+          ...documentedManifest,
+          mcp_endpoint: endpoint,
+        }).success,
+        endpoint,
+      ).toBe(false);
+    }
+  });
 });

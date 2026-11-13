@@ -35,14 +35,18 @@ import type {
 import { YandexAdapter } from './adapters/yandex.adapter.js';
 import { DailyTokenLimitException } from './daily-token-limit.exception.js';
 import { McpClient } from './tools/mcp-client.js';
+import {
+  McpGateway,
+  mcpToolCallSchema,
+  mcpUnavailableError,
+  type McpProvider,
+} from './tools/mcp-gateway.js';
 import { MetricsService } from '../metrics/metrics.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
-import {
-  SANDBOX_NETWORK_FLAG,
-  SandboxService,
-} from '../sandbox/sandbox.service.js';
+import { SandboxService } from '../sandbox/sandbox.service.js';
+import type { EgressPolicy } from '../sandbox/egress.js';
 
 export interface ChatHistoryMessage {
   role: string;
@@ -161,13 +165,14 @@ export const WB_MCP_TOOL_NAME = 'wb_mcp_call';
 export const WB_MCP_TOOL_DESCRIPTION =
   'Вызывает реальный MCP-сервер Wildberries Seller. Передайте имя MCP-инструмента в action (например, wb_cards_list) и аргументы в params';
 
-/** Схема аргументов marketplace MCP-инструментов. */
-export const McpToolSchema = z.object({
-  action: z
-    .string()
-    .describe('Точное имя MCP-инструмента, например ozon_get_prices'),
-  params: z.record(z.string(), z.any()).describe('Параметры действия'),
-});
+/**
+ * Схема аргументов marketplace MCP-инструментов.
+ *
+ * Реальная Zod-валидация аргументов выполняется MCP Gateway до отправки на
+ * MCP-сервер; здесь та же схема ограничивает вход модели (плоские примитивы,
+ * лимиты размеров) и запрещает произвольные вложенные структуры.
+ */
+export const McpToolSchema = mcpToolCallSchema;
 
 /** Имя mock-инструмента отправки сообщений. */
 export const SEND_MESSAGE_TOOL_NAME = 'send_message';
@@ -356,11 +361,45 @@ export interface SandboxToolOptions {
    * код в песочнице не запускается.
    */
   beforeExecute?: () => Promise<void>;
+  /**
+   * Egress-политика навыка, объявившего инструмент: FQDN-allowlist из
+   * манифеста. Отсутствие политики означает полный запрет сети
+   * (deny by default, ADR 0004 п.3).
+   */
+  egress?: EgressPolicy;
 }
 
 /** Опции MCP-инструмента; client позволяет подменить транспорт в тестах. */
 export interface McpToolOptions extends SandboxToolOptions {
   client?: Pick<McpClient, 'callTool'>;
+  /**
+   * `mcp_endpoint` из манифеста навыка-коннектора. Это основной источник
+   * адреса MCP-сервера; env-переменная используется только как fallback для
+   * обратной совместимости.
+   */
+  endpoint?: string;
+  /** Bearer-токен MCP-сервера; по умолчанию `MCP_AUTH_TOKEN` из env. */
+  authToken?: string;
+}
+
+/**
+ * Адрес MCP-сервера: `mcp_endpoint` из манифеста навыка в приоритете,
+ * env-переменная — только fallback. Адреса в коде не хардкодятся.
+ */
+export function resolveMcpEndpoint(
+  platform: McpProvider,
+  manifestEndpoint?: string,
+): string | null {
+  const fromManifest = manifestEndpoint?.trim() ?? '';
+
+  if (fromManifest !== '') {
+    return fromManifest;
+  }
+
+  const fromEnv =
+    platform === 'ozon' ? process.env.OZON_MCP_URL : process.env.WB_MCP_URL;
+
+  return fromEnv === undefined || fromEnv.trim() === '' ? null : fromEnv.trim();
 }
 
 export interface DzenPublishOptions extends SandboxToolOptions {
@@ -424,7 +463,9 @@ export class LlmService {
       func: async ({ code }) => {
         await options.beforeExecute?.();
 
-        return this.sandboxService.runCommand(code, sandboxEnv());
+        return this.sandboxService.runCommand(code, sandboxEnv(), {
+          egress: options.egress,
+        });
       },
     });
   }
@@ -454,10 +495,13 @@ export class LlmService {
           max_results: 5,
         });
 
-        return this.sandboxService.runCommand(TAVILY_SEARCH_COMMAND, {
-          [SANDBOX_NETWORK_FLAG]: 'true',
-          TAVILY_REQUEST_BODY: requestBody,
-        });
+        return this.sandboxService.runCommand(
+          TAVILY_SEARCH_COMMAND,
+          {
+            TAVILY_REQUEST_BODY: requestBody,
+          },
+          { egress: options.egress },
+        );
       },
     });
   }
@@ -474,11 +518,10 @@ export class LlmService {
       func: async ({ command }) => {
         await options.beforeExecute?.();
 
-        return this.sandboxService.runCommand(command, {
-          ...sandboxEnv(),
-          // `github` и подобные навыки требуют egress; сеть остаётся под
-          // контролем SandboxService (флаг не попадает в контейнер).
-          [SANDBOX_NETWORK_FLAG]: 'true',
+        return this.sandboxService.runCommand(command, sandboxEnv(), {
+          // Сеть включается только явным egress-allowlist навыка; для
+          // локальных команд разрешено выполняться без сети.
+          egress: options.egress,
         });
       },
     });
@@ -495,7 +538,7 @@ export class LlmService {
   }
 
   private createMarketplaceMcpTool(
-    platform: 'ozon' | 'wb',
+    platform: McpProvider,
     options: McpToolOptions,
   ): DynamicStructuredTool {
     const config =
@@ -505,14 +548,12 @@ export class LlmService {
             description: OZON_MCP_TOOL_DESCRIPTION,
             keyVars: ['OZON_CLIENT_ID', 'OZON_API_KEY'],
             missingKeys: 'Ozon API keys not configured',
-            missingUrl: 'Ozon MCP server not configured',
           }
         : {
             name: WB_MCP_TOOL_NAME,
             description: WB_MCP_TOOL_DESCRIPTION,
             keyVars: ['WB_API_TOKEN'],
             missingKeys: 'WB API token not configured',
-            missingUrl: 'WB MCP server not configured',
           };
 
     return new DynamicStructuredTool({
@@ -520,43 +561,55 @@ export class LlmService {
       description: config.description,
       schema: McpToolSchema,
       func: async ({ action, params }) => {
-        const client = options.client ?? this.getMcpClient(platform);
-
-        if (options.client === undefined) {
-          if (!hasEnv(...config.keyVars)) {
-            return config.missingKeys;
-          }
-
-          if (client === null) {
-            return config.missingUrl;
-          }
+        // Ключи проверяем только для реального клиента: в тестах транспорт
+        // подменяется через `options.client`.
+        if (
+          options.client === undefined &&
+          !hasEnv(...config.keyVars)
+        ) {
+          return config.missingKeys;
         }
 
-        if (client === null) {
-          return config.missingUrl;
+        const gateway = this.getMcpGateway(platform, options);
+
+        if (gateway === null) {
+          // Единый JSON-формат: ошибка конфигурации MCP-сервера (503).
+          throw mcpUnavailableError();
         }
 
         await options.beforeExecute?.();
 
-        try {
-          return await client.callTool(action, params);
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-
-          this.logger.warn(`MCP ${platform}: ${message}`);
-
-          return `MCP error: ${message}`;
-        }
+        // Ошибки провайдера/таймауты — ApiException с единым телом ошибки;
+        // не превращаем их в текст для модели, чтобы клиент получил код.
+        return gateway.call({ action, params });
       },
     });
   }
 
-  private getMcpClient(platform: 'ozon' | 'wb'): McpClient | null {
-    const url =
-      platform === 'ozon' ? process.env.OZON_MCP_URL : process.env.WB_MCP_URL;
+  /** Gateway одного провайдера: валидация аргументов + вызов транспорта. */
+  private getMcpGateway(
+    platform: McpProvider,
+    options: McpToolOptions,
+  ): McpGateway | null {
+    if (options.client !== undefined) {
+      return new McpGateway({ provider: platform, client: options.client });
+    }
 
-    if (url === undefined || url.trim() === '') {
+    const client = this.getMcpClient(platform, options.endpoint, options.authToken);
+
+    return client === null
+      ? null
+      : new McpGateway({ provider: platform, client });
+  }
+
+  private getMcpClient(
+    platform: McpProvider,
+    manifestEndpoint?: string,
+    authToken?: string,
+  ): McpClient | null {
+    const url = resolveMcpEndpoint(platform, manifestEndpoint);
+
+    if (url === null) {
       return null;
     }
 
@@ -566,13 +619,11 @@ export class LlmService {
       return cached;
     }
 
+    const token = authToken ?? process.env.MCP_AUTH_TOKEN;
+
     const client = new McpClient({
       baseUrl: url,
-      authToken:
-        process.env.MCP_AUTH_TOKEN === undefined ||
-        process.env.MCP_AUTH_TOKEN === ''
-          ? undefined
-          : process.env.MCP_AUTH_TOKEN,
+      ...(token === undefined || token === '' ? {} : { authToken: token }),
     });
 
     this.mcpClients.set(url, client);

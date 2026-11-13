@@ -10,6 +10,8 @@ dependencies:
     - ozon_mcp_call
 permissions:
   - network
+# MCP-сервер навыка: Gateway берёт endpoint из манифеста, а не из env.
+mcp_endpoint: http://ozon-mcp:5001
 pricing:
   model: Free
 ---

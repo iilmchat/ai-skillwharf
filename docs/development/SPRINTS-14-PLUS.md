@@ -27,7 +27,7 @@
 **Цель:** закрыть эксфильтрацию и уйти от regex-защиты.
 
 | Задача | Закрывает |
-|---|---|
+| --- | --- |
 | `AgentGateway` → декларативный policy engine (schema-based validation, allowlist команд, taint tracking, роли/контекст) | KI-013, ADR 0004 п.2 |
 | FQDN-aware egress: `egress_allowlist` из манифеста → egress-gateway с allowlist доменов; без allowlist — блок | KI-008, ADR 0004 п.3 |
 | MCP Gateway как отдельный слой проверки вызовов `ozon_mcp_call`/`wb_mcp_call` | ADR 0004 п.1–2 |
@@ -43,7 +43,7 @@
 **Цель:** 2 реплики API без гонок, HITL переживает рестарт, деньги не списываются некорректно.
 
 | Задача | Закрывает |
-|---|---|
+| --- | --- |
 | Init-container для `prisma migrate deploy`; реплики API стартуют без миграций | KI-007 |
 | LangGraph Checkpointer в PostgreSQL: `waiting_approval` и escrow-hold переживают рестарт | ROADMAP Sprint 11 |
 | Резервирование токенов до вызова LLM с последующим reconcile (вместо проверки после генерации) | KI-021 |
@@ -57,7 +57,7 @@
 ## 4. Sprint 16 — LLM Router v2 & AgentOps
 
 | Задача | Закрывает |
-|---|---|
+| --- | --- |
 | Fallback-цепочки, budget guardrails, классификация задач в `LlmRouter` | KI-010 |
 | OTel-коллектор + Sentry; спаны `gen_ai.*` по `AgentOps-Specification.md` | AgentOps Spec |
 | Cost attribution по `gen_ai.tenant.id` в Grafana | Control Plane Блок 4 |
@@ -65,7 +65,7 @@
 ## 5. Sprint 17 — LLM Worker & Queues
 
 | Задача | Закрывает |
-|---|---|
+| --- | --- |
 | LangChain/LangGraph → отдельный LLM-воркер (Spoke) | KI-006 |
 | Redis/BullMQ для фоновых задач | ROADMAP Sprint 12 |
 | Нагрузочное тестирование 2+ реплик | POST-MVP п. Sprint 12 |
@@ -77,7 +77,7 @@
 Разблокирует треки **A, B, C, E, G**.
 
 | Задача | Треки |
-|---|---|
+| --- | --- |
 | Реальный Telegram Bot API вместо `send_message` mock | A, B, C, E, G |
 | Реальный Google Workspace (Sheets, Docs, Calendar) через OAuth | A, E, G |
 | Верификация Ozon/WB MCP в staging; закрыть KI-011 | C, J |
@@ -87,7 +87,7 @@
 Разблокирует **C, D, J**.
 
 | Задача | Треки |
-|---|---|
+| --- | --- |
 | Реальный `unit-economics` на данных Ozon/WB | J |
 | `profit-leak-detector`, `price-monitor` на реальных данных | J |
 | `fraud-shield-audit` (UTM, ERID, договоры) | J |
@@ -101,7 +101,7 @@
 Разблокирует **F, G, H, I**.
 
 | Задача | Треки |
-|---|---|
+| --- | --- |
 | `pdf-extractor`, `docx-writer` | H, I |
 | OCR Smart Document Engine | H, I |
 | `document-analyzer` (реальный RAG по документам) | H, I |
@@ -119,7 +119,7 @@
 ## 10. Post-pilot (Sprints 22+)
 
 | Спринт | Тема |
-|---|---|
+| --- | --- |
 | 22 | Firecracker (ADR 0002/0005), gVisor fallback для K8s |
 | 23 | Публичный реестр, Ed25519-подписи, Revenue Share 85/15 |
 | 24 | Marketplace UI, A/B промптов (если не в 21) |
@@ -128,7 +128,7 @@
 ## 11. Блокеры и ограничения пилота
 
 | Ограничение | Трек | Решение |
-|---|---|---|
+| --- | --- | --- |
 | Нет публичного API Дзена | F | Markdown + ручная загрузка через HITL (официально) |
 | Нет 1С | H, J | Post-pilot |
 | OCR Smart Document Engine | H, I | Начать переговоры/получить ключи до Sprint 20; fallback — Tesseract |

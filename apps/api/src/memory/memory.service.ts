@@ -8,6 +8,25 @@ export const MEMORY_TOP_K = 3;
 /** Максимальная длина одного фрагмента памяти (защита от раздувания промпта). */
 export const MEMORY_CHUNK_MAX_CHARS = 2_000;
 
+/** Фрагмент памяти в ответе read-API (`createdAt` — ISO 8601). */
+export interface MemoryItem {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+/** Параметры страницы read-API памяти (уже провалидированы Zod). */
+export interface MemoryListQuery {
+  limit: number;
+  offset: number;
+}
+
+/** Страница памяти пользователя: записи и их общее количество. */
+export interface MemoryList {
+  items: MemoryItem[];
+  total: number;
+}
+
 /**
  * Долговременная память агента поверх pgvector.
  *
@@ -120,6 +139,34 @@ export class MemoryService {
     this.logger.log(`Удалено ${count} фрагментов памяти user=${userId}`);
 
     return count;
+  }
+
+  /**
+   * Постраничный список фрагментов памяти пользователя (read-API).
+   * Сортировка — от новых к старым, `total` — общее количество записей,
+   * а не длина страницы. `createdAt` сериализуется в строку ISO 8601.
+   */
+  async list(userId: string, query: MemoryListQuery): Promise<MemoryList> {
+    const where = { userId };
+    const [rows, total] = await Promise.all([
+      this.prisma.memoryChunk.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: query.offset,
+        take: query.limit,
+        select: { id: true, content: true, createdAt: true },
+      }),
+      this.prisma.memoryChunk.count({ where }),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        content: row.content,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
 }
 

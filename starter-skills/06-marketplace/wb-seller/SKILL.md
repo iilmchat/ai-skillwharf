@@ -10,6 +10,8 @@ dependencies:
     - wb_mcp_call
 permissions:
   - network
+# MCP-сервер навыка: Gateway берёт endpoint из манифеста, а не из env.
+mcp_endpoint: http://wb-mcp:5002
 pricing:
   model: Free
 ---

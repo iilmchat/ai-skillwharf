@@ -5,10 +5,11 @@ import { api } from './api';
 /**
  * Контракт чтения RAG-памяти.
  *
- * Эндпоинт `GET /api/v1/chat/memory` пока не реализован (KI-023). Схема
- * описывает только те поля, которые реально есть в модели `MemoryChunk`:
- * `id`, `content` и `createdAt`. Ответ валидируется Zod, поэтому при
- * расхождении контракта UI покажет ошибку, а не вымышленные записи.
+ * Sprint 14 фиксирует контракт `GET /api/v1/chat/memory`:
+ * `{ items: [{ id, content, createdAt }], total? }`. Схема описывает только
+ * те поля, которые реально есть в модели `MemoryChunk` (KI-024), и валидирует
+ * ответ Zod: при расхождении контракта панель показывает ошибку, а не
+ * вымышленные или частично распарсенные записи.
  */
 export const memoryEntrySchema = z.object({
   id: z.string().min(1),
@@ -53,7 +54,8 @@ export function getRagMemoryErrorKind(error: unknown): RagMemoryErrorKind {
     }
 
     if (error.response.status === 404) {
-      // Эндпоинт ещё не появился в API — это ожидаемое состояние до KI-023.
+      // Read-эндпоинт ещё не задеплоен (KI-023) — это ожидаемое состояние,
+      // пока бэкенд Sprint 14 не выкатил `GET /api/v1/chat/memory`.
       return 'unavailable';
     }
   }

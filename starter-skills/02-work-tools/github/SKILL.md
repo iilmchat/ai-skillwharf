@@ -11,6 +11,10 @@ dependencies:
 permissions:
   - network
   - shell
+# gh CLI ходит в GitHub API и на github.com; остальные домены запрещены.
+egress_allowlist:
+  - api.github.com
+  - github.com
 pricing:
   model: Freemium
   price: 0.02

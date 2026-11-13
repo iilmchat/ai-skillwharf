@@ -23,6 +23,8 @@ function createPrisma() {
     memoryChunk: {
       create: vi.fn().mockResolvedValue({ id: 'chunk-1' }),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
     },
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
@@ -165,5 +167,64 @@ describe('MemoryService.clear', () => {
     expect(prisma.memoryChunk.deleteMany).toHaveBeenCalledWith({
       where: { userId: USER_ID },
     });
+  });
+});
+
+describe('MemoryService.list', () => {
+  it('отдаёт страницу памяти пользователя от новых к старым', async () => {
+    const { service, prisma } = createService();
+    const createdAt = new Date('2026-11-13T10:00:00.000Z');
+    prisma.memoryChunk.findMany.mockResolvedValue([
+      {
+        id: 'chunk-1',
+        content: 'Клиент предпочитает самовывоз',
+        createdAt,
+      },
+    ]);
+    prisma.memoryChunk.count.mockResolvedValue(7);
+
+    await expect(
+      service.list(USER_ID, { limit: 5, offset: 10 }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: 'chunk-1',
+          content: 'Клиент предпочитает самовывоз',
+          createdAt: '2026-11-13T10:00:00.000Z',
+        },
+      ],
+      total: 7,
+    });
+
+    expect(prisma.memoryChunk.findMany).toHaveBeenCalledWith({
+      where: { userId: USER_ID },
+      orderBy: { createdAt: 'desc' },
+      skip: 10,
+      take: 5,
+      select: { id: true, content: true, createdAt: true },
+    });
+    expect(prisma.memoryChunk.count).toHaveBeenCalledWith({
+      where: { userId: USER_ID },
+    });
+  });
+
+  it('возвращает пустую страницу, если памяти нет', async () => {
+    const { service } = createService();
+
+    await expect(
+      service.list(USER_ID, { limit: 20, offset: 0 }),
+    ).resolves.toEqual({ items: [], total: 0 });
+  });
+
+  it('сериализует createdAt в ISO 8601', async () => {
+    const { service, prisma } = createService();
+    prisma.memoryChunk.findMany.mockResolvedValue([
+      { id: 'chunk-1', content: 'скидка 10%', createdAt: new Date(0) },
+    ]);
+    prisma.memoryChunk.count.mockResolvedValue(1);
+
+    const page = await service.list(USER_ID, { limit: 1, offset: 0 });
+
+    expect(page.items[0]?.createdAt).toBe('1970-01-01T00:00:00.000Z');
   });
 });

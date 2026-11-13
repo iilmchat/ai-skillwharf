@@ -321,10 +321,124 @@ POST http://sandbox-worker:4000/execute
 * Express-сервер на порту `4000`, порт не публикуется на хост.
 * Ограничения контейнера: read-only rootfs, `cap_drop: ALL`,
   `no-new-privileges`, 128 МБ памяти, 0.5 CPU.
-* Сеть по умолчанию `none`; `bridge` включается только по флагу
-  `ALLOW_NETWORK=true` или `SANDBOX_ALLOW_NETWORK=true`.
+* Сеть по умолчанию `none` (deny by default). Egress включается только
+  `egress_allowlist` из манифеста навыка, объявившего инструмент, и только
+  при `permissions: [network]`: worker запускает контейнер на `bridge` с
+  `NET_ADMIN`/`SETUID`/`SETGID`, entrypoint `sandbox/egress-setup.sh`
+  настраивает iptables (DNS `127.0.0.11`, `ACCEPT` только на IP разрешённых
+  FQDN, `DROP` по умолчанию) и выполняет код от uid 65534.
+  `SANDBOX_ALLOW_NETWORK`/`ALLOW_NETWORK` сеть больше не включают (legacy,
+  игнорируются).
 * Worker запускается от root: GID `docker.sock` зависит от хоста. API при этом
   остаётся непривилегированным и не имеет доступа к Docker.
+
+### Egress по FQDN
+
+Навык объявляет домены в `egress_allowlist` манифеста (точные FQDN в нижнем
+регистре, без wildcard/схемы/порта, до 50 доменов). Пустой или отсутствующий
+список означает полный запрет сети. Остаточные риски (DNS rebinding/SSRF
+через разрешённый домен, DNS-туннель, ротация IP, best-effort IPv6) описаны
+в KI-028. Для диагностики: `docker exec <sandbox> iptables -S` недоступен
+после завершения контейнера, поэтому смотрите логи worker и результат
+команды внутри песочницы (`curl -sS https://<разрешённый-домен>`).
+
+### Seccomp-профиль
+
+Профиль лежит в `sandbox/seccomp-profile.json` и работает по принципу
+deny-by-default (`defaultAction: SCMP_ACT_ERRNO`): разрешены только сисколлы,
+нужные Node.js/V8, Python, bash, curl, jq и gh. `ptrace`, `mount`, `unshare`,
+`setns`, `bpf`, `keyctl`, `perf_event_open`, `kexec_*`, `reboot`,
+`swapon/swapoff`, `init_module`, `delete_module`, `pivot_root`, `chroot`,
+`personality`, `userfaultfd` и другие опасные вызовы запрещены явно, а
+`clone` разрешён только без namespace-флагов.
+
+**Включение.** В базовом `docker-compose.yml` файл уже смонтирован в
+`/etc/sandbox/seccomp-profile.json:ro`. Достаточно задать путь внутри
+worker-контейнера:
+
+```text
+SANDBOX_SECCOMP_PROFILE=/etc/sandbox/seccomp-profile.json
+```
+
+Локально переменную можно оставить пустой — тогда worker использует профиль
+Docker по умолчанию (прежнее поведение). В staging
+`docker-compose.staging.yml` задаёт этот путь жёстко, поэтому профиль
+обязателен. Путь указывается именно внутри контейнера worker: worker сам
+читает файл и передаёт демону inline JSON, потому что хостовый демон не
+видит файловую систему worker.
+
+Если путь задан, но файл отсутствует или не проходит валидацию, worker
+завершается с ошибкой (fail closed) и не запускает контейнеры без профиля.
+После правки профиля перезапустите worker:
+
+```bash
+docker compose up -d --force-recreate sandbox-worker
+```
+
+**Проверка.**
+
+1. В логах worker должна быть строка о включении профиля:
+
+   ```bash
+   docker compose logs sandbox-worker | grep 'seccomp profile enabled'
+   ```
+
+   Ожидаемо: путь `/etc/sandbox/seccomp-profile.json` и число правил.
+
+2. Запустите smoke-тест. Он проверяет утилиты, Python, Node.js/V8 с
+   `worker_threads` и `EPERM` для опасных сисколлов:
+
+   ```bash
+   bash scripts/test-sandbox.sh
+   ```
+
+   На Windows скрипт запускается через Git Bash. На не-amd64 хосте проверки
+   seccomp помечаются `SKIP`.
+
+3. Убедитесь, что профиль попал в контейнер, созданный worker. Запустите
+   долгую команду через API (не дольше таймаута worker) и на хосте:
+
+   ```bash
+   docker ps --filter ancestor=skillwharf-sandbox:latest
+   docker inspect --format '{{json .HostConfig.SecurityOpt}}' <container-id>
+   ```
+
+   В выводе должны быть `no-new-privileges:true` и `seccomp={...}` с
+   `SCMP_ACT_ERRNO`.
+
+**Откат.**
+
+* Если профиль сломал совместимость, верните предыдущую версию
+  `sandbox/seccomp-profile.json` и перезапустите worker:
+
+  ```bash
+  docker compose up -d --force-recreate sandbox-worker
+  ```
+
+* Аварийно отключить профиль локально: очистите `SANDBOX_SECCOMP_PROFILE` в
+  `.env` и пересоздайте worker. Это возвращает профиль Docker по умолчанию и
+  снова открывает KI-005, поэтому используйте только на время диагностики.
+
+* В staging значение задано в `docker-compose.staging.yml`. Для аварийного
+  отключения создайте локальный (не коммитьте его) override-файл:
+
+  ```yaml
+  services:
+    sandbox-worker:
+      environment:
+        SANDBOX_SECCOMP_PROFILE: ""
+  ```
+
+  и запустите compose с ним:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+    -f docker-compose.seccomp-off.yml --profile production \
+    up -d --force-recreate sandbox-worker
+  ```
+
+  После устранения причины верните профиль и перезапустите worker; не
+  оставляйте staging без seccomp.
 
 ### Production
 

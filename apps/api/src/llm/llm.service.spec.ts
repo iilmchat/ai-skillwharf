@@ -11,13 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
+import { ApiException } from '../common/api-error.js';
 import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
-import {
-  SANDBOX_NETWORK_FLAG,
-  type SandboxService,
-} from '../sandbox/sandbox.service.js';
+import type { SandboxService } from '../sandbox/sandbox.service.js';
+import { McpProviderError } from './tools/mcp-client.js';
 import {
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
@@ -33,6 +32,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
   calculateLlmCost,
   needsDailyTokenReset,
+  resolveMcpEndpoint,
   startOfUtcDay,
   withLanguageInstruction,
   withMemoryContext,
@@ -958,7 +958,23 @@ describe('LlmService', () => {
       await expect(tool.invoke({ code: 'echo hello' })).resolves.toBe(
         'hello\n',
       );
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello', {});
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello', {}, {
+        egress: undefined,
+      });
+    });
+
+    it('передаёт egress-allowlist навыка в песочницу', async () => {
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('hello\n');
+      const service = createService(sandbox);
+
+      await service
+        .createSandboxTool({ egress: { allowlist: ['api.github.com'] } })
+        .invoke({ code: 'echo hello' });
+
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hello', {}, {
+        egress: { allowlist: ['api.github.com'] },
+      });
     });
 
     it('передаёт в песочницу только разрешённые секреты', async () => {
@@ -973,10 +989,14 @@ describe('LlmService', () => {
 
       await service.createSandboxTool().invoke({ code: 'echo ok' });
 
-      expect(sandbox.runCommand).toHaveBeenCalledWith('echo ok', {
-        TAVILY_API_KEY: 'tavily-key',
-        GITHUB_TOKEN: 'gh-token',
-      });
+      expect(sandbox.runCommand).toHaveBeenCalledWith(
+        'echo ok',
+        {
+          TAVILY_API_KEY: 'tavily-key',
+          GITHUB_TOKEN: 'gh-token',
+        },
+        { egress: undefined },
+      );
     });
 
     it('вызывает paywall-хук до запуска кода', async () => {
@@ -1028,24 +1048,44 @@ describe('LlmService', () => {
         '{"results":[]}',
       );
 
-      const [command, env] = sandbox.runCommand.mock.calls[0] as [
+      const [command, env, runOptions] = sandbox.runCommand.mock.calls[0] as [
         string,
         Record<string, string>,
+        { egress?: { allowlist: readonly string[] } },
       ];
 
       expect(command).toContain('curl');
       expect(command).toContain('https://api.tavily.com/search');
       expect(command).toContain('$TAVILY_REQUEST_BODY');
       expect(env).toEqual({
-        [SANDBOX_NETWORK_FLAG]: 'true',
         TAVILY_REQUEST_BODY: expect.any(String),
       });
+      // Сеть включается только egress-политикой навыка (deny by default).
+      expect(runOptions).toEqual({ egress: undefined });
       expect(JSON.parse(env.TAVILY_REQUEST_BODY ?? '{}')).toEqual({
         api_key: 'tavily-key',
         query: 'погода в Москве',
         search_depth: 'basic',
         max_results: 5,
       });
+    });
+
+    it('передаёт egress-allowlist навыка в поиск', async () => {
+      process.env.TAVILY_API_KEY = 'tavily-key';
+
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('{"results":[]}');
+      const service = createService(sandbox);
+
+      await service
+        .createWebSearchTool({ egress: { allowlist: ['api.tavily.com'] } })
+        .invoke({ query: 'тест' });
+
+      expect(sandbox.runCommand).toHaveBeenCalledWith(
+        expect.stringContaining('https://api.tavily.com/search'),
+        { TAVILY_REQUEST_BODY: expect.any(String) },
+        { egress: { allowlist: ['api.tavily.com'] } },
+      );
     });
 
     it('не запускает песочницу без TAVILY_API_KEY', async () => {
@@ -1092,8 +1132,22 @@ describe('LlmService', () => {
       await expect(tool.invoke({ command: 'gh --version' })).resolves.toBe(
         'gh version 2.0.0\n',
       );
-      expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {
-        [SANDBOX_NETWORK_FLAG]: 'true',
+      expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {}, {
+        egress: undefined,
+      });
+    });
+
+    it('передаёт egress-allowlist навыка в exec', async () => {
+      const sandbox = createSandbox();
+      sandbox.runCommand.mockResolvedValue('ok');
+      const service = createService(sandbox);
+
+      await service
+        .createExecTool({ egress: { allowlist: ['api.github.com'] } })
+        .invoke({ command: 'gh --version' });
+
+      expect(sandbox.runCommand).toHaveBeenCalledWith('gh --version', {}, {
+        egress: { allowlist: ['api.github.com'] },
       });
     });
   });
@@ -1131,6 +1185,69 @@ describe('LlmService', () => {
         shop_id: 'default',
       });
       expect(beforeExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it('резолвит endpoint из манифеста, env — только fallback', () => {
+      vi.stubEnv('OZON_MCP_URL', 'http://env-ozon:5001');
+
+      expect(resolveMcpEndpoint('ozon', 'http://ozon-mcp:5001')).toBe(
+        'http://ozon-mcp:5001',
+      );
+      expect(resolveMcpEndpoint('ozon')).toBe('http://env-ozon:5001');
+      expect(resolveMcpEndpoint('ozon', '  ')).toBe('http://env-ozon:5001');
+    });
+
+    it('без mcp_endpoint и env-URL бросает 503 в едином JSON-формате', async () => {
+      vi.stubEnv('OZON_CLIENT_ID', 'client-id');
+      vi.stubEnv('OZON_API_KEY', 'api-key');
+      vi.stubEnv('OZON_MCP_URL', '');
+
+      const service = createService();
+      const error = await service
+        .createOzonMcpTool()
+        .invoke({ action: 'ozon_get_prices', params: {} })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(503);
+      expect((error as ApiException).getResponse()).toMatchObject({
+        code: 'errors.mcp_unavailable',
+      });
+    });
+
+    it('маппит ошибку MCP-провайдера в единый JSON (502)', async () => {
+      const callTool = vi
+        .fn()
+        .mockRejectedValue(
+          new McpProviderError('MCP provider error', { rpcCode: -32602 }),
+        );
+      const service = createService();
+
+      const error = await service
+        .createOzonMcpTool({ client: { callTool } })
+        .invoke({ action: 'ozon_get_prices', params: {} })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(502);
+      expect((error as ApiException).getResponse()).toMatchObject({
+        code: 'errors.mcp_provider',
+      });
+    });
+
+    it('не отправляет на MCP-сервер невалидные аргументы', async () => {
+      const callTool = vi.fn();
+      const service = createService();
+
+      await expect(
+        service
+          .createOzonMcpTool({ client: { callTool } })
+          .invoke({
+            action: 'ozon_get_prices',
+            params: { nested: { secret: true } },
+          }),
+      ).rejects.toThrow();
+      expect(callTool).not.toHaveBeenCalled();
     });
   });
 

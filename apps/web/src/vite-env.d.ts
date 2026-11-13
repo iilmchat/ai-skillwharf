@@ -5,7 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   /**
    * Включает раздел RAG-памяти на странице настроек.
-   * По умолчанию выключен: read-endpoint памяти ещё не реализован (KI-023).
+   * По умолчанию выключен: read-endpoint памяти ещё не задеплоен (KI-023).
    */
   readonly VITE_RAG_MEMORY_ENABLED?: string;
 }

@@ -11,6 +11,10 @@ dependencies:
     - web_fetch
 permissions:
   - network
+# Egress разрешён только к API поиска: без этого списка сеть песочницы
+# полностью запрещена (deny by default), даже если SANDBOX_ALLOW_NETWORK=true.
+egress_allowlist:
+  - api.tavily.com
 pricing:
   model: Pay-per-Call
   price: 0.10

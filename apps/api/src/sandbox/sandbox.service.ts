@@ -1,5 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import {
+  planSandboxNetwork,
+  SANDBOX_NETWORK_FLAG,
+  type EgressPolicy,
+} from './egress.js';
+
+// Реэкспорт для существующих импортов (`llm.service.ts`, `chat.service.spec.ts`):
+// флаг остаётся legacy-константой и только вычищается из env контейнера.
+export { SANDBOX_NETWORK_FLAG } from './egress.js';
 
 /**
  * Ограничения задаёт sandbox-worker: сеть по умолчанию выключена, корневая
@@ -10,32 +19,30 @@ const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_WORKER_URL =
   process.env.SANDBOX_WORKER_URL ?? 'http://sandbox-worker:4000';
 
-/** Флаг в `env`, разрешающий контейнеру доступ в сеть. */
-export const SANDBOX_NETWORK_FLAG = 'ALLOW_NETWORK';
-
 interface SandboxWorkerResponse {
   stdout: string;
   stderr: string;
   timedOut: boolean;
 }
 
-/**
- * Сеть включается по флагу `ALLOW_NETWORK=true` (запрос навыка) или глобально
- * через `SANDBOX_ALLOW_NETWORK=true` (локальная разработка). По умолчанию
- * контейнер запускается с `none`: это защищает от exfiltration секретов.
- */
-export function resolveNetworkMode(
-  env: Record<string, string>,
-): 'bridge' | 'none' {
-  const requested = env[SANDBOX_NETWORK_FLAG] === 'true';
-  const allowedGlobally = process.env.SANDBOX_ALLOW_NETWORK === 'true';
-
-  return requested || allowedGlobally ? 'bridge' : 'none';
+/** Опции запуска команды в песочнице. */
+export interface SandboxRunOptions {
+  /**
+   * Политика egress. Без неё (или с пустым allowlist) контейнер запускается
+   * без сети (`network: 'none'`), см. ADR 0004, п.3.
+   */
+  readonly egress?: EgressPolicy;
 }
 
 /**
  * Клиент sandbox-worker. У API нет Docker-сокета: он отправляет код по HTTP
  * доверенному worker'у, который запускает одноразовый контейнер.
+ *
+ * Сеть по умолчанию выключена (`network: 'none'`). Включает её только
+ * `options.egress.allowlist`: worker поднимает bridge и разрешает egress лишь
+ * к перечисленным FQDN. Legacy-флаги (`ALLOW_NETWORK` в env,
+ * `SANDBOX_ALLOW_NETWORK` в окружении API) в контейнер не передаются и сеть
+ * больше не включают.
  */
 @Injectable()
 export class SandboxService {
@@ -51,7 +58,11 @@ export class SandboxService {
   async runCommand(
     code: string,
     env: Record<string, string> = {},
+    options: SandboxRunOptions = {},
   ): Promise<string> {
+    // Валидация allowlist до HTTP-вызова: невалидный домен — ошибка запроса.
+    const plan = planSandboxNetwork(options.egress);
+
     const safeEnv = Object.fromEntries(
       Object.entries(env).filter(([key]) => key !== SANDBOX_NETWORK_FLAG),
     );
@@ -64,7 +75,8 @@ export class SandboxService {
         {
           code,
           env: safeEnv,
-          network: resolveNetworkMode(env),
+          network: plan.network,
+          egressAllowlist: plan.egressAllowlist,
         },
         { timeout: SANDBOX_TIMEOUT_MS + 5_000 },
       );

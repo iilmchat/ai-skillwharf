@@ -42,6 +42,89 @@ interface McpSession {
   closed: boolean;
 }
 
+/**
+ * Ошибка транспорта: сеть недоступна, HTTP-ответ не успешен или поток SSE
+ * прерван. `transient` говорит, имеет ли смысл повторять вызов: сетевые сбои
+ * и HTTP 5xx временные, HTTP 4xx (например, 401/403) — нет.
+ */
+export class McpTransportError extends Error {
+  /** HTTP-статус, если ошибка пришла на уровне HTTP. */
+  readonly statusCode: number | undefined;
+
+  /** Временная ли ошибка: сеть или HTTP >= 500. */
+  readonly transient: boolean;
+
+  constructor(message: string, options: { statusCode?: number } = {}) {
+    super(message);
+    this.name = 'McpTransportError';
+    this.statusCode = options.statusCode;
+    this.transient =
+      options.statusCode === undefined || options.statusCode >= 500;
+  }
+}
+
+/** Ошибка, которую MCP-сервер вернул в JSON-RPC-ответе. */
+export class McpProviderError extends Error {
+  /** Код ошибки JSON-RPC (например, -32602). */
+  readonly rpcCode: number;
+
+  constructor(message: string, options: { rpcCode: number }) {
+    super(message);
+    this.name = 'McpProviderError';
+    this.rpcCode = options.rpcCode;
+  }
+}
+
+/** Таймаут ожидания MCP-сервера (endpoint, ответ на запрос, поток). */
+export class McpTimeoutError extends Error {
+  /** Сколько миллисекунд ждали ответ. */
+  readonly timeoutMs: number;
+
+  constructor(message: string, options: { timeoutMs: number }) {
+    super(message);
+    this.name = 'McpTimeoutError';
+    this.timeoutMs = options.timeoutMs;
+  }
+}
+
+/**
+ * Текст внешней ошибки уходит клиенту в `message`, поэтому вырезаем из него
+ * похожие на секреты фрагменты (токены, `Authorization`) и ограничиваем
+ * длину. Тела запросов и заголовки в сообщения не попадают вовсе.
+ */
+function safeDetail(message: string): string {
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /((?:auth[-_]?token|api[-_]?key|client[-_]?secret|authorization|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi,
+      '$1[REDACTED]',
+    )
+    .slice(0, 200);
+}
+
+/** Оборачивает сетевой сбой `fetch` в типизированную ошибку транспорта. */
+function transportError(stage: string, error: unknown): McpTransportError {
+  const detail = error instanceof Error ? error.message : String(error);
+
+  return new McpTransportError(`${stage}: ошибка сети (${safeDetail(detail)})`);
+}
+
+/** Сохраняет типизированную ошибку как есть, остальное считает транспортом. */
+function asMcpError(
+  stage: string,
+  error: unknown,
+): McpTransportError | McpProviderError | McpTimeoutError {
+  if (
+    error instanceof McpTransportError ||
+    error instanceof McpProviderError ||
+    error instanceof McpTimeoutError
+  ) {
+    return error;
+  }
+
+  return transportError(stage, error);
+}
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 
@@ -105,13 +188,25 @@ export class McpClient {
 
   private async openSession(): Promise<McpSession> {
     const controller = new AbortController();
-    const response = await fetch(`${this.baseUrl}/sse`, {
-      headers: this.headers(),
-      signal: controller.signal,
-    });
+    let response: Response;
 
-    if (!response.ok || response.body === null) {
-      throw new Error(`MCP SSE: HTTP ${response.status}`);
+    try {
+      response = await fetch(`${this.baseUrl}/sse`, {
+        headers: this.headers(),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw transportError('MCP SSE', error);
+    }
+
+    if (!response.ok) {
+      throw new McpTransportError(`MCP SSE: HTTP ${response.status}`, {
+        statusCode: response.status,
+      });
+    }
+
+    if (response.body === null) {
+      throw new McpTransportError('MCP SSE: пустой поток');
     }
 
     let endpointResolve: (endpoint: string) => void = () => undefined;
@@ -141,15 +236,23 @@ export class McpClient {
 
     session.endpoint = new URL(endpoint, `${this.baseUrl}/`).toString();
 
-    await this.request(session, 'initialize', {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: {
-        name: this.clientName,
-        version: this.clientVersion,
-      },
-    });
-    await this.notify(session, 'notifications/initialized');
+    try {
+      await this.request(session, 'initialize', {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: {
+          name: this.clientName,
+          version: this.clientVersion,
+        },
+      });
+      await this.notify(session, 'notifications/initialized');
+    } catch (error) {
+      // Неудачный initialize не должен оставлять висеть SSE-поток: повторный
+      // вызов откроет новую сессию.
+      session.closed = true;
+      session.controller.abort();
+      throw error;
+    }
 
     this.session = session;
 
@@ -181,14 +284,14 @@ export class McpClient {
       }
     } catch (error) {
       if (!session.closed) {
-        this.failSession(
-          session,
-          error instanceof Error ? error : new Error(String(error)),
-        );
+        this.failSession(session, asMcpError('MCP SSE', error));
       }
     } finally {
       if (!session.closed) {
-        this.failSession(session, new Error('MCP SSE: поток закрыт'));
+        this.failSession(
+          session,
+          new McpTransportError('MCP SSE: поток закрыт'),
+        );
       }
     }
   }
@@ -250,13 +353,22 @@ export class McpClient {
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         session.pending.delete(id);
-        reject(new Error(`MCP: таймаут вызова ${method}`));
+        reject(
+          new McpTimeoutError(`MCP: таймаут вызова ${method}`, {
+            timeoutMs: this.timeoutMs,
+          }),
+        );
       }, this.timeoutMs);
 
       session.pending.set(id, {
         resolve: (message) => {
           if (message.error !== undefined) {
-            reject(new Error(`MCP ${method}: ${message.error.message}`));
+            reject(
+              new McpProviderError(
+                `MCP ${method}: ${safeDetail(message.error.message)}`,
+                { rpcCode: message.error.code },
+              ),
+            );
             return;
           }
 
@@ -274,7 +386,7 @@ export class McpClient {
       }).catch((error: unknown) => {
         clearTimeout(timer);
         session.pending.delete(id);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(asMcpError('MCP POST', error));
       });
     });
   }
@@ -288,21 +400,29 @@ export class McpClient {
     payload: JsonRpcMessage,
   ): Promise<void> {
     if (session.endpoint === null) {
-      throw new Error('MCP: endpoint ещё не получен');
+      throw new McpTransportError('MCP: endpoint ещё не получен');
     }
 
-    const response = await fetch(session.endpoint, {
-      method: 'POST',
-      headers: {
-        ...this.headers(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: session.controller.signal,
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(session.endpoint, {
+        method: 'POST',
+        headers: {
+          ...this.headers(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: session.controller.signal,
+      });
+    } catch (error) {
+      throw transportError('MCP POST', error);
+    }
 
     if (!response.ok) {
-      throw new Error(`MCP POST: HTTP ${response.status}`);
+      throw new McpTransportError(`MCP POST: HTTP ${response.status}`, {
+        statusCode: response.status,
+      });
     }
   }
 
@@ -373,7 +493,10 @@ async function withTimeout<T>(
   let timer: NodeJS.Timeout | undefined;
 
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer = setTimeout(
+      () => reject(new McpTimeoutError(message, { timeoutMs })),
+      timeoutMs,
+    );
   });
 
   try {
