@@ -24,6 +24,8 @@ export const ERROR_CODES = {
   mcpUnavailable: 'errors.mcp_unavailable',
   /** Все LLM-маршруты исчерпали бюджет/недоступны (502/503). */
   llmUnavailable: 'errors.llm_unavailable',
+  /** Внешний marketplace недоступен (502/503). */
+  marketplaceUnavailable: 'errors.marketplace_unavailable',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -121,7 +123,8 @@ export type ChatErrorKind =
   | 'mcpProvider'
   | 'mcpTimeout'
   | 'mcpUnavailable'
-  | 'llmUnavailable';
+  | 'llmUnavailable'
+  | 'marketplaceUnavailable';
 
 /** Ошибка внешнего marketplace/MCP-сервиса (например, Ozon). */
 export function isMarketplaceError(message: string): boolean {
@@ -143,6 +146,8 @@ function codeErrorKind(code: string | undefined): ChatErrorKind | null {
       return 'mcpUnavailable';
     case ERROR_CODES.llmUnavailable:
       return 'llmUnavailable';
+    case ERROR_CODES.marketplaceUnavailable:
+      return 'marketplaceUnavailable';
     default:
       return null;
   }

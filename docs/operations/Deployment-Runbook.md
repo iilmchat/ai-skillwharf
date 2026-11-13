@@ -22,6 +22,13 @@
 * `GIGACHAT_CLIENT_ID` / `GIGACHAT_CLIENT_SECRET`: Ключи для российских LLM (опционально).
 * `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY`: Ключи для биллинга (если включен).
 * `KVM_DEVICE_PATH`: Путь к устройству KVM (обычно `/dev/kvm`).
+* `LLM_WORKER_URL`: Внутренний адрес llm-worker (в compose —
+  `http://llm-worker:4100`); наружу порт не публикуется.
+* `INTERNAL_API_TOKEN`: Общий секрет внутренней сети API ↔ llm-worker.
+  В production задайте случайное значение; пустое значение допустимо только
+  для локальной разработки (см. KI-045).
+* `REDIS_URL`: Подключение к Redis для BullMQ (`redis://redis:6379`). Пусто —
+  API использует setInterval-таймеры вместо очередей.
 
 ## 3. Шаги развертывания (Docker Compose)
 
@@ -61,6 +68,20 @@
    Ожидаемо: `All migrations have been successfully applied` и
    `STATUS Exited (0)`. Если `db-migrate` упал, API не запустится; см.
    раздел 6 «Диагностика проблем».
+
+   В стек входят `llm-worker` и `redis`. API стартует после healthcheck'ов
+   обоих сервисов; `llm-worker` не публикует порт наружу и общается с API по
+   внутренней сети. Проверка:
+
+   ```bash
+   docker compose ps api llm-worker redis
+   docker compose logs -f llm-worker
+   # Ожидаемо: llm-worker слушает 4100, Redis отвечает PONG
+   docker exec skillwharf-redis-1 redis-cli ping
+   ```
+
+   Образ API не содержит `@langchain/*` (проверяется в CI, лимит 400 МБ);
+   LangGraph/LangChain живут только в образе `llm-worker`.
 
 4. **Проверка статуса:**
 

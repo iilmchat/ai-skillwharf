@@ -1,14 +1,12 @@
 import {
-  Inject,
   Injectable,
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import { BillingService } from '../../billing/billing.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
-import { GRAPH_CHECKPOINTER } from './graph-checkpointer.token.js';
+import { CheckpointStoreService } from '../../agent/checkpoint-store.service.js';
 import {
   PendingApprovalHoldsSchema,
   PendingApprovalService,
@@ -28,7 +26,7 @@ const logger = new Logger('ExpiredApprovalsService');
 export interface ExpiredApprovalsDeps {
   prisma: Pick<PrismaService, 'pendingApproval'>;
   pendingApprovals: Pick<PendingApprovalService, 'resolvePending'>;
-  checkpointer: Pick<BaseCheckpointSaver, 'deleteThread'>;
+  checkpointer: Pick<CheckpointStoreService, 'deleteThread'>;
   billing: Pick<BillingService, 'cancelHold'>;
 }
 
@@ -155,13 +153,20 @@ export class ExpiredApprovalsService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(GRAPH_CHECKPOINTER)
-    private readonly checkpointer: BaseCheckpointSaver,
+    private readonly checkpointer: CheckpointStoreService,
     private readonly billing: BillingService,
     private readonly pendingApprovals: PendingApprovalService,
   ) {}
 
   onModuleInit(): void {
+    if ((process.env.REDIS_URL?.trim() ?? '') !== '') {
+      this.logger.log(
+        'HITL: тик истечения выполняет BullMQ (REDIS_URL задан)',
+      );
+
+      return;
+    }
+
     const intervalMs = resolveExpiryCheckIntervalMs();
 
     void this.tick();

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LlmProviderBadge } from '../LlmProviderBadge';
 import {
+  LLM_TASK_TYPES,
   adminQueryKeys,
   createLlmRoute,
   fetchLlmRoutes,
@@ -10,9 +11,13 @@ import {
   getLlmRouteBaseUrl,
   getLlmRouteModel,
   getLlmRouteProvider,
+  getLlmRouteTaskType,
+  updateLlmRoute,
   type CreateLlmRouteInput,
   type LlmProviderType,
   type LlmRoute,
+  type LlmTaskType,
+  type UpdateLlmRouteInput,
 } from '../../lib/admin';
 import { normalizeProvider } from '../../lib/llm';
 
@@ -46,26 +51,45 @@ function RouteSkeleton() {
   );
 }
 
-function AddRouteModal({
+type RouteFormMode = 'create' | 'edit';
+
+function RouteFormModal({
+  mode,
+  route,
   isSaving,
   error,
   onClose,
   onSubmit,
 }: {
+  mode: RouteFormMode;
+  route: LlmRoute | null;
   isSaving: boolean;
   error: string | null;
   onClose: () => void;
-  onSubmit: (input: CreateLlmRouteInput) => void;
+  onSubmit: (input: UpdateLlmRouteInput) => void;
 }) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState('');
-  const [providerType, setProviderType] =
-    useState<LlmProviderType>('OpenAI');
-  const [modelName, setModelName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [priority, setPriority] = useState('100');
+  const [name, setName] = useState(route?.name ?? '');
+  const [providerType, setProviderType] = useState<LlmProviderType>(
+    route === null ? 'OpenAI' : getLlmRouteProvider(route),
+  );
+  const [modelName, setModelName] = useState(
+    route?.modelName ?? route?.model ?? '',
+  );
+  const [baseUrl, setBaseUrl] = useState(
+    route?.baseUrl ?? route?.baseURL ?? '',
+  );
+  const [priority, setPriority] = useState(String(route?.priority ?? 100));
+  const [taskType, setTaskType] = useState<LlmTaskType>(
+    route === null ? 'chat' : getLlmRouteTaskType(route),
+  );
+  const [dailyCostLimit, setDailyCostLimit] = useState(
+    route?.dailyCostLimit === undefined || route?.dailyCostLimit === null
+      ? ''
+      : String(route.dailyCostLimit),
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,14 +127,26 @@ function AddRouteModal({
     event.preventDefault();
 
     const parsedPriority = Number(priority);
+    const trimmedDailyCostLimit = dailyCostLimit.trim();
+    const parsedDailyCostLimit =
+      trimmedDailyCostLimit === '' ? undefined : Number(trimmedDailyCostLimit);
 
     if (
       name.trim() === '' ||
       modelName.trim() === '' ||
       baseUrl.trim() === '' ||
-      !Number.isFinite(parsedPriority)
+      !Number.isInteger(parsedPriority) ||
+      parsedPriority < 0
     ) {
       setValidationError(t('admin.router.modal.invalid'));
+      return;
+    }
+
+    if (
+      parsedDailyCostLimit !== undefined &&
+      (!Number.isFinite(parsedDailyCostLimit) || parsedDailyCostLimit < 0)
+    ) {
+      setValidationError(t('admin.router.modal.invalidDailyCostLimit'));
       return;
     }
 
@@ -121,6 +157,10 @@ function AddRouteModal({
       providerType,
       baseUrl: baseUrl.trim(),
       priority: parsedPriority,
+      taskType,
+      ...(parsedDailyCostLimit === undefined
+        ? {}
+        : { dailyCostLimit: parsedDailyCostLimit }),
     });
   }
 
@@ -138,13 +178,21 @@ function AddRouteModal({
           id="admin-route-title"
           className="font-display text-xl font-bold tracking-tight text-on-surface"
         >
-          {t('admin.router.modal.title')}
+          {t(
+            mode === 'edit'
+              ? 'admin.router.modal.editTitle'
+              : 'admin.router.modal.title',
+          )}
         </h2>
         <p
           id="admin-route-description"
           className="mt-1 text-sm text-on-surface-variant"
         >
-          {t('admin.router.modal.subtitle')}
+          {t(
+            mode === 'edit'
+              ? 'admin.router.modal.editSubtitle'
+              : 'admin.router.modal.subtitle',
+          )}
         </p>
 
         <div className="mt-5 space-y-4">
@@ -196,6 +244,35 @@ function AddRouteModal({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="admin-route-task-type"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t('admin.router.modal.taskType')}
+            </label>
+            <select
+              id="admin-route-task-type"
+              name="taskType"
+              value={taskType}
+              onChange={(event) => {
+                setTaskType(event.target.value as LlmTaskType);
+                setValidationError(null);
+              }}
+              disabled={isSaving}
+              className={INPUT_CLASSES}
+            >
+              {LLM_TASK_TYPES.map((value) => (
+                <option key={value} value={value}>
+                  {t(`admin.router.taskTypes.${value}`)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              {t('admin.router.modal.taskTypeHint')}
+            </p>
           </div>
 
           <div>
@@ -277,6 +354,37 @@ function AddRouteModal({
               className={INPUT_CLASSES}
             />
           </div>
+
+          <div>
+            <label
+              htmlFor="admin-route-daily-cost-limit"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t('admin.router.modal.dailyCostLimit')}
+            </label>
+            <input
+              id="admin-route-daily-cost-limit"
+              name="dailyCostLimit"
+              type="number"
+              min="0"
+              step="0.01"
+              value={dailyCostLimit}
+              onChange={(event) => {
+                setDailyCostLimit(event.target.value);
+                setValidationError(null);
+              }}
+              placeholder={t('admin.router.modal.dailyCostLimitPlaceholder')}
+              disabled={isSaving}
+              className={INPUT_CLASSES}
+            />
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              {t(
+                mode === 'edit'
+                  ? 'admin.router.modal.dailyCostLimitEditHint'
+                  : 'admin.router.modal.dailyCostLimitHint',
+              )}
+            </p>
+          </div>
         </div>
 
         {message !== null && (
@@ -327,8 +435,16 @@ function AddRouteModal({
               </svg>
             )}
             {isSaving
-              ? t('admin.router.modal.saving')
-              : t('admin.router.modal.save')}
+              ? t(
+                  mode === 'edit'
+                    ? 'admin.router.modal.updating'
+                    : 'admin.router.modal.saving',
+                )
+              : t(
+                  mode === 'edit'
+                    ? 'admin.router.modal.update'
+                    : 'admin.router.modal.save',
+                )}
           </button>
         </div>
       </form>
@@ -336,14 +452,31 @@ function AddRouteModal({
   );
 }
 
-function RouteRow({ route }: { route: LlmRoute }) {
+function formatRubles(value: number, language: string): string {
+  return new Intl.NumberFormat(language, {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function RouteRow({
+  route,
+  onEdit,
+}: {
+  route: LlmRoute;
+  onEdit: (route: LlmRoute) => void;
+}) {
+  const { t, i18n } = useTranslation();
   const provider = getLlmRouteProvider(route);
+  const dailyCostLimit = route.dailyCostLimit;
 
   return (
     <tr className="transition hover:bg-surface-container/60">
       <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-on-surface">{route.name}</span>
+          <span className="rounded-full border border-outline-variant px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+            {t(`admin.router.taskTypes.${getLlmRouteTaskType(route)}`)}
+          </span>
           {route.isActive === false && (
             <span className="rounded-full border border-outline-variant px-2 py-0.5 text-[10px] uppercase tracking-wide text-on-surface-variant">
               off
@@ -368,17 +501,40 @@ function RouteRow({ route }: { route: LlmRoute }) {
       >
         {getLlmRouteBaseUrl(route)}
       </td>
+      <td className="px-4 py-3 text-right tabular-nums text-on-surface-variant">
+        {dailyCostLimit === undefined || dailyCostLimit === null
+          ? t('admin.router.noDailyCostLimit')
+          : t('admin.router.dailyCostLimit', {
+              limit: formatRubles(dailyCostLimit, i18n.language),
+            })}
+      </td>
       <td className="px-4 py-3 text-right tabular-nums text-on-surface">
         {route.priority ?? '—'}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <button
+          type="button"
+          onClick={() => onEdit(route)}
+          aria-label={t('admin.router.editLabel', { name: route.name })}
+          className="rounded-lg border border-outline px-2.5 py-1.5 text-xs font-medium text-on-surface-variant transition hover:border-primary/40 hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          {t('admin.router.edit')}
+        </button>
       </td>
     </tr>
   );
 }
 
+type RouteSaveVariables =
+  | { mode: 'create'; input: CreateLlmRouteInput }
+  | { mode: 'edit'; id: string; input: UpdateLlmRouteInput };
+
 export function LlmRouterTab() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formMode, setFormMode] = useState<RouteFormMode>('create');
+  const [editingRoute, setEditingRoute] = useState<LlmRoute | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const routesQuery = useQuery({
@@ -387,23 +543,48 @@ export function LlmRouterTab() {
     staleTime: 30_000,
   });
 
-  const createRouteMutation = useMutation({
-    mutationFn: (input: CreateLlmRouteInput) => createLlmRoute(input),
-    onSuccess: () => {
+  const saveRouteMutation = useMutation({
+    mutationFn: (variables: RouteSaveVariables) =>
+      variables.mode === 'create'
+        ? createLlmRoute(variables.input)
+        : updateLlmRoute(variables.id, variables.input),
+    onSuccess: (_route, variables) => {
       void queryClient.invalidateQueries({
         queryKey: adminQueryKeys.llmRoutes,
       });
       setIsModalOpen(false);
-      setSuccessMessage(t('admin.router.modal.success'));
+      setEditingRoute(null);
+      setSuccessMessage(
+        t(
+          variables.mode === 'create'
+            ? 'admin.router.modal.success'
+            : 'admin.router.modal.updated',
+        ),
+      );
     },
   });
 
   const routes = routesQuery.data ?? [];
 
-  function openModal() {
-    createRouteMutation.reset();
+  function openCreateModal() {
+    saveRouteMutation.reset();
     setSuccessMessage(null);
+    setFormMode('create');
+    setEditingRoute(null);
     setIsModalOpen(true);
+  }
+
+  function openEditModal(route: LlmRoute) {
+    saveRouteMutation.reset();
+    setSuccessMessage(null);
+    setFormMode('edit');
+    setEditingRoute(route);
+    setIsModalOpen(true);
+  }
+
+  function closeModal() {
+    setIsModalOpen(false);
+    setEditingRoute(null);
   }
 
   return (
@@ -425,7 +606,7 @@ export function LlmRouterTab() {
           )}
           <button
             type="button"
-            onClick={openModal}
+            onClick={openCreateModal}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             <svg
@@ -489,7 +670,7 @@ export function LlmRouterTab() {
           </p>
           <button
             type="button"
-            onClick={openModal}
+            onClick={openCreateModal}
             className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             {t('admin.router.add')}
@@ -497,7 +678,7 @@ export function LlmRouterTab() {
         </div>
       ) : (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-outline-variant bg-surface-container">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="border-b border-outline-variant bg-surface-container-high text-[11px] uppercase tracking-wider text-on-surface-variant">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">
@@ -516,13 +697,29 @@ export function LlmRouterTab() {
                   scope="col"
                   className="px-4 py-3 text-right font-semibold"
                 >
+                  {t('admin.router.columns.dailyCostLimit')}
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-right font-semibold"
+                >
                   {t('admin.router.columns.priority')}
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-right font-semibold"
+                >
+                  {t('admin.router.columns.actions')}
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant">
               {routes.map((route) => (
-                <RouteRow key={route.id} route={route} />
+                <RouteRow
+                  key={route.id}
+                  route={route}
+                  onEdit={openEditModal}
+                />
               ))}
             </tbody>
           </table>
@@ -530,18 +727,33 @@ export function LlmRouterTab() {
       )}
 
       {isModalOpen && (
-        <AddRouteModal
-          isSaving={createRouteMutation.isPending}
+        <RouteFormModal
+          mode={formMode}
+          route={editingRoute}
+          isSaving={saveRouteMutation.isPending}
           error={
-            createRouteMutation.isError
+            saveRouteMutation.isError
               ? getAdminErrorMessage(
-                  createRouteMutation.error,
-                  'admin.errors.createRoute',
+                  saveRouteMutation.error,
+                  formMode === 'edit'
+                    ? 'admin.errors.updateRoute'
+                    : 'admin.errors.createRoute',
                 )
               : null
           }
-          onClose={() => setIsModalOpen(false)}
-          onSubmit={(input) => createRouteMutation.mutate(input)}
+          onClose={closeModal}
+          onSubmit={(input) => {
+            if (editingRoute === null) {
+              saveRouteMutation.mutate({ mode: 'create', input });
+              return;
+            }
+
+            saveRouteMutation.mutate({
+              mode: 'edit',
+              id: editingRoute.id,
+              input,
+            });
+          }}
         />
       )}
     </div>

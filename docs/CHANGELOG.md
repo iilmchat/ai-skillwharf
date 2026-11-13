@@ -4,29 +4,128 @@
 
 ## [Unreleased]
 
+### Sprint 17: LLM Worker, Redis & Control Plane UI
+
+**LLM Worker & Architecture**
+- Создан отдельный NestJS-микросервис `apps/llm-worker`. В него перенесены `@langchain/*`, LangGraph, адаптеры LLM и токен-эстиматор.
+- API полностью избавлен от `@langchain/*`. Размер образа API снижен до 380 МБ (цель ≤ 400 МБ). Закрывает KI-006.
+- Связь API ↔ worker реализована через внутренний HTTP/NDJSON (`/v1/graphs/run`, `/v1/graphs/resume`). 
+- Восстановлен RAG-контекст при вызове LLM (потерян при рефакторинге).
+
+**Фоновые задачи и Redis**
+- Добавлен Redis (`redis:7-alpine`) в `docker-compose.yml`.
+- Фоновые задачи (`expired-approvals`, `checkpoint-retention`) переведены на BullMQ (`upsertJobScheduler`). Исправлен баг с дублированием джобов и `jobId`.
+- Добавлены внутренние эндпоинты API (`/internal/agent/*`) с защитой по `INTERNAL_API_TOKEN`.
+
+**LLM Router & Control Plane**
+- Исправлен 502 `errors.llm_unavailable` для одиночных маршрутов и env-fallback. Закрывает KI-041, KI-044.
+- В Control Plane UI (вкладка «LLM Роутер») добавлены поля `taskType` и `dailyCostLimit`, добавлена валидация Zod и PATCH-эндпоинт.
+- Добавлен маппинг `errors.marketplace_unavailable` (бэкенд и UI). Завершает KI-025.
+
+**Новые известные проблемы:** KI-045–049 (mTLS, Zod-деградация, логирование уведомлений, синхронный worker→API, неполные E2E).
+
+### Sprint 17: Control Plane LLM Router UI & Error Mapping (KI-041)
+
+- Control Plane: в форме создания и редактирования LLM-маршрута появились
+  `taskType` (`chat`/`analysis`/`embeddings`) и `dailyCostLimit`
+  (₽/сутки, необязательно); таблица маршрутов показывает лимит и тип задачи,
+  у строки есть кнопка «Изменить» (`PATCH /admin/llm-routes/:id`).
+- `LlmRoute` описан Zod-схемой; ответы `GET`/`POST`/`PATCH /admin/llm-routes`
+  валидируются до попадания в UI. Новые поля опциональны — старый API без них
+  продолжает работать (`taskType` по умолчанию `chat`, лимит не задан).
+- Добавлен маппинг `errors.marketplace_unavailable` в `chat-errors.ts` и
+  i18n RU/EN; текстовые маркеры старого MCP/marketplace API сохранены как
+  fallback.
+- Сообщение для 502/503 `errors.llm_unavailable` уточнено: «Все
+  LLM-провайдеры недоступны или исчерпали дневной бюджет».
+- KI-041 закрыт для Control Plane UI. 502 для одиночного маршрута/env-fallback
+  закрыт в `llm-worker` вместе с KI-044 (см. раздел приёмки ниже).
+
+### Sprint 17: LLM Worker, Redis & BullMQ (KI-006)
+
+#### LLM Worker
+
+- Новый сервис `apps/llm-worker` (NestJS, порт 4100): LangGraph,
+  `@langchain/*`, адаптеры YandexGPT/GigaChat, токен-эстиматор и граф агента
+  перенесены из API. API больше не зависит от `@langchain/*`.
+- Транспорт API → worker: внутренний HTTP + NDJSON-стрим
+  (`POST /v1/graphs/run`, `POST /v1/graphs/resume`); события `delta`,
+  `office`, `approval`, `done`, `error` валидируются Zod с обеих сторон.
+- Worker → API: инструменты выполняются в Gateway через
+  `POST /api/v1/internal/agent/tools/execute` (policy engine, Pay-per-Outcome,
+  Ledger, песочница остаются в API); HITL-подготовка —
+  `POST /internal/agent/approvals/prepare|resolve`.
+- Checkpoint'ы LangGraph сериализуются в worker'е, API хранит непрозрачные
+  байты (`/internal/agent/checkpoints/*`), поэтому прежний
+  `PrismaCheckpointSaver` удалён без потери durability.
+- Дневной бюджет: worker резервирует/сверяет токены через
+  `/internal/agent/llm/budget/*`; списание в Ledger и OTel-метрики выполняет API.
+- Инструменты описаны JSON Schema (`z.toJSONSchema`) в API и конвертируются в
+  Zod в worker'е; схемы не дублируются вручную.
+
+#### Redis & BullMQ
+
+- `redis:7-alpine` в `docker-compose.yml` (AOF, healthcheck, без публикации
+  порта); `api`, `llm-worker` и `redis` стартуют по healthcheck'ам.
+- BullMQ в API: очередь `agent-maintenance` с повторяющимися job'ами
+  `hitl-expiry` и `checkpoint-retention`, очередь `agent-notifications` для
+  уведомлений об ожидающем подтверждении (канал — структурный лог, KI-047).
+- Без `REDIS_URL` API сохраняет прежние `setInterval`-таймеры (dev/тесты).
+
+#### Сборка и CI
+
+- `pnpm build:llm-worker`, сборка Docker-образа worker'а в CI, проверка
+  размера образа API (лимит 400 МБ).
+- `.env.example`: `LLM_WORKER_URL`, `INTERNAL_API_TOKEN`, `REDIS_URL`.
+
+#### Приёмка Sprint 17: KI-041/KI-044 и ошибки marketplace
+
+- 502 `errors.llm_unavailable` теперь отдаётся и для одиночного
+  маршрута/env-fallback: `LlmInferenceService` (worker) считает retriable
+  последнюю попытку любой длины цепочки, ошибки 400/401/403 не маскируются,
+  резерв бюджета возвращается ровно один раз (KI-044).
+- `errors.marketplace_unavailable` добавлен в `apps/api/src/i18n/error-keys.ts`
+  и `apps/api/src/common/api-error.ts`; marketplace-инструмент без ключей
+  провайдера отвечает 503 с этим кодом вместо текстовой строки (завершение
+  KI-025, UI-маппинг был добавлен ранее).
+- Долговременная память снова попадает в системный промпт: `ChatService`
+  подбирает `MemoryService.buildContext()` по тексту вопроса и передаёт блок в
+  worker (`memoryContext` + `systemPrompt`); resume использует контекст из
+  checkpoint'а.
+- Тесты нового контура: `apps/api/src/chat/chat.service.spec.ts`
+  (стриминг дельт, HITL-пауза, отмена устаревшего ожидания, память, paywall,
+  resume), `apps/llm-worker/src/llm/inference.service.spec.ts`
+  (одиночный маршрут, env-fallback, 400, fallback-цепочка, эхо-режим, settle),
+  проверка `marketplace_unavailable` в `agent-tools.service.spec.ts`.
+
 ### Sprint 16: Observability, LLM Router v2 & Reliability
 
-**Observability & Cost Attribution**
+#### Observability & Cost Attribution
+
 - OTel Collector добавлен в `docker-compose.yml` (профиль `monitoring`). API отправляет спаны по OTLP, коллектор пишет в stdout.
 - Sentry для NestJS: включён при наличии `SENTRY_DSN`, фильтрует PII (headers, bodies, токены).
 - Метрика `llm_cost_total` (рубли) с лейблами `tenant_id`, `model`, `agent_id`. В Grafana добавлены панели «Cost by Tenant» и «Tokens by Model».
 
-**LLM Router v2**
+#### LLM Router v2
+
 - В `LlmRoute` добавлены `taskType` и `dailyCostLimit` (дневной лимит в ₽). Расход считается по append-only Ledger.
 - Fallback-цепочки: при 429, 5xx или таймауте LLM Router переключается на следующий маршрут по `priority`. Для 400/401/403 fallback не применяется.
 - 502 `errors.llm_unavailable` при исчерпании цепочки маршрутов.
 - В Ledger добавлено поле `llmRouteName` для точного учёта расходов по маршрутам.
 
-**HITL TTL & Checkpoint Retention**
+#### HITL TTL & Checkpoint Retention
+
 - В `PendingApproval` добавлено `expiresAt` (`HITL_APPROVAL_TTL_HOURS`). Фоновый job отменяет escrow-hold, удаляет checkpoint и логирует `hitl.approval_expired`.
 - Фоновый job `checkpoint-retention` удаляет старые `GraphCheckpoint` (неактивные диалоги без ожиданий, `CHECKPOINT_RETENTION_DAYS`).
 - `GET /api/v1/chat/pending` отдаёт `expiresAt` для UI.
 
-**MCP & Egress Hardening**
+#### MCP & Egress Hardening
+
 - MCP Gateway: динамическое обнаружение действий через `tools/list` (с кешированием на сессию), валидация `action` до вызова.
 - Egress: DNS-запросы разрешены только от root (защита от tunneling через non-root код). Настроен `ip6tables` (строгий DROP по умолчанию). Исправлен баг с Docker DNAT и инжектом `/etc/hosts` при `read-only rootfs`.
 
-**Web UI**
+#### Web UI (Sprint 16)
+
 - Бесконечная пагинация истории Ledger (`useInfiniteQuery`, кнопка «Загрузить ещё»).
 - Маппинг кодов `errors.invalid_request` и `errors.policy_blocked` в i18n (RU/EN).
 - В AI-Офисе добавлен таймер TTL ожиданий (`expiresAt`), с обратной совместимостью для старых API.

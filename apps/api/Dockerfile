@@ -33,36 +33,29 @@ RUN pnpm --filter api deploy --prod /prod/api
 # генерируем Prisma Client ещё раз уже в изолированной папке.
 RUN cd /prod/api && /app/apps/api/node_modules/.bin/prisma generate --schema prisma/schema.prisma
 
-# --- Stage 2: Prisma CLI для миграций ---
-# В рантайм нужен только `prisma migrate deploy`; pnpm и npm туда не попадают.
-FROM node:24-alpine AS tools
+# Sentry CLI/bundler-plugins нужны только на этапе сборки source maps.
+# В рантайме @sentry/nestjs их не импортирует; удаление экономит ~24 МБ.
+RUN rm -rf /prod/api/node_modules/.pnpm/sentry@* \
+           /prod/api/node_modules/.pnpm/@sentry+bundler-plugins@*
 
-# openssl нужен и здесь: без него Prisma CLI скачает движок под libssl1.1
-# и в рантайме попытается перекачать его под openssl-3 (нужна запись в node_modules).
-RUN apk add --no-cache openssl \
-  && npm install --global --no-fund --no-audit prisma@5.22.0 \
-  && npm cache clean --force
-
-# --- Stage 3: рантайм ---
+# --- Stage 2: рантайм ---
 FROM alpine:3.24 AS runner
 
 ENV NODE_ENV=production
 
-# openssl нужен Prisma-движку, libstdc++/libgcc — самому бинарнику node.
-RUN apk add --no-cache openssl libstdc++ ca-certificates
-
-# Берём только node из официального образа: npm, yarn и corepack в рантайме не нужны.
-COPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/node
-COPY --from=tools /usr/local/lib/node_modules/prisma /usr/local/lib/node_modules/prisma
-RUN ln -s ../lib/node_modules/prisma/build/index.js /usr/local/bin/prisma
+# nodejs из Alpine весит ~50 МБ вместо ~133 МБ официального бинарника.
+# openssl/libstdc++ нужны Prisma-движку и node.
+RUN apk add --no-cache nodejs openssl libstdc++ ca-certificates
 
 WORKDIR /app
 
-# Только production-зависимости + собранное приложение + схема и миграции Prisma.
+# Только production-зависимости + собранное приложение + схема Prisma.
+# Prisma CLI в API не нужен: миграции выполняет one-shot db-migrate.
 COPY --from=builder /prod/api/package.json ./package.json
 COPY --from=builder /prod/api/node_modules ./node_modules
 COPY --from=builder /prod/api/dist ./dist
 COPY --from=builder /prod/api/prisma ./prisma
+
 # Стартовые навыки: SkillsService загружает их в БД на старте (onModuleInit).
 COPY starter-skills ./starter-skills
 COPY apps/api/entrypoint.sh ./entrypoint.sh

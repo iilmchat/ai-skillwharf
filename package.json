@@ -9,6 +9,7 @@
     "lint:docs": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\"",
     "format": "prettier --write .",
     "build:api": "pnpm --filter api build",
+    "build:llm-worker": "pnpm --filter llm-worker build",
     "db:seed:demo": "pnpm --filter api db:seed:demo",
     "test": "pnpm --filter @skillwharf/shared build && vitest run",
     "typecheck": "pnpm -r --if-present typecheck"

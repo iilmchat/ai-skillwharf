@@ -6,11 +6,8 @@ import { createFakeCheckpointPrisma } from '../../../test/checkpointer/fake-chec
 import { CheckpointRetentionService } from './checkpoint-retention.service.js';
 import { ExpiredApprovalsService } from './expired-approvals.service.js';
 import { PendingApprovalService } from './pending-approval.service.js';
-import {
-  ChatPersistenceModule,
-  GRAPH_CHECKPOINTER,
-} from './persistence.module.js';
-import { PrismaCheckpointSaver } from './prisma-checkpoint.saver.js';
+import { ChatPersistenceModule } from './persistence.module.js';
+import { CheckpointStoreService } from '../../agent/checkpoint-store.service.js';
 
 describe('ChatPersistenceModule', () => {
   // BillingModule (импортируется ради BillingService) тянет AuthModule,
@@ -39,8 +36,8 @@ describe('ChatPersistenceModule', () => {
       .useValue(store.prisma)
       .compile();
 
-    const saver = moduleRef.get<PrismaCheckpointSaver>(GRAPH_CHECKPOINTER);
-    expect(saver).toBeInstanceOf(PrismaCheckpointSaver);
+    const checkpointStore = moduleRef.get(CheckpointStoreService);
+    expect(checkpointStore).toBeInstanceOf(CheckpointStoreService);
 
     const pendingApprovals =
       moduleRef.get<PendingApprovalService>(PendingApprovalService);

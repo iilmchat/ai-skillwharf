@@ -232,6 +232,7 @@ const CHAT_ERROR_NOTICE_KEYS: Record<ChatErrorKind, string> = {
   mcpTimeout: 'chat.errors.mcpTimeout',
   mcpUnavailable: 'chat.errors.mcpUnavailable',
   llmUnavailable: 'chat.errors.llmUnavailable',
+  marketplaceUnavailable: 'chat.errors.marketplaceUnavailable',
 };
 
 function chatErrorNotice(kind: ChatErrorKind): string {

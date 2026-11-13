@@ -34,10 +34,64 @@ services:
       postgres:
         condition: service_healthy
 
+  # Redis для BullMQ: HITL TTL, retention checkpoint'ов и уведомления.
+  # AOF включён, чтобы повторяющиеся job'ы пережили рестарт контейнера.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Наружу не публикуется: доступ только из compose-сети.
+
+  # LangGraph/LangChain и адаптеры LLM. API общается с worker'ом по
+  # внутренней сети, а worker возвращает policy/billing-решения в API.
+  llm-worker:
+    build:
+      context: .
+      dockerfile: apps/llm-worker/Dockerfile
+    image: ai-skillwharf-llm-worker:latest
+    env_file:
+      - .env
+    environment:
+      LLM_WORKER_PORT: 4100
+      INTERNAL_API_URL: http://api:3000/api/v1
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-dev-internal-token}
+      # LLM_BASE_URL/LLM_MODEL/LLM_API_KEY приходят из .env.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      OZON_CLIENT_ID: ${OZON_CLIENT_ID:-}
+      OZON_API_KEY: ${OZON_API_KEY:-}
+      WB_API_TOKEN: ${WB_API_TOKEN:-}
+      OZON_MCP_URL: ${OZON_MCP_URL:-}
+      WB_MCP_URL: ${WB_MCP_URL:-}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      YANDEX_IAM_TOKEN: ${YANDEX_IAM_TOKEN:-}
+      YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
+    extra_hosts:
+      # LLM на хосте (LM Studio/Ollama) доступна так же, как из API.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:4100/v1/health/ready >/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    # Порт наружу не публикуется: доступ только из compose-сети.
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    image: ai-skillwharf-api:latest
     ports:
       # 3000 занят другим проектом на хосте, пробрасываем свободный 3001.
       - "3001:3000"
@@ -52,6 +106,12 @@ services:
       YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
       # API ходит к sandbox-worker по внутренней сети compose.
       SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
+      # LLM-инференс и LangGraph вынесены в отдельный сервис.
+      LLM_WORKER_URL: ${LLM_WORKER_URL:-http://llm-worker:4100}
+      # Общий токен внутренней сети API ↔ llm-worker (не публикуется наружу).
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-dev-internal-token}
+      # BullMQ: HITL TTL, retention и уведомления.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       # OTel включается только при заданном endpoint (см. Runbook).
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-skillwharf-api}
@@ -74,6 +134,10 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      llm-worker:
+        condition: service_healthy
     healthcheck:
       # Readiness: Terminus проверяет ping БД. Liveness — /api/v1/health/live.
       test:
@@ -281,6 +345,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   ollama_data:
   caddy_data:
   caddy_config:

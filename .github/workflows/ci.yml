@@ -45,6 +45,9 @@ jobs:
       - name: Build API
         run: pnpm build:api
 
+      - name: Build LLM Worker
+        run: pnpm build:llm-worker
+
       - name: Build Web UI
         run: pnpm --filter web build
 
@@ -53,6 +56,19 @@ jobs:
 
       - name: Test Docker Build
         run: docker compose build api
+
+      - name: Check API image size (<= 400 MB)
+        run: |
+          size=$(docker image inspect ai-skillwharf-api:latest --format '{{.Size}}')
+          limit=$((400 * 1024 * 1024))
+          echo "API image size: $((size / 1024 / 1024)) MB"
+          if [ "$size" -gt "$limit" ]; then
+            echo "API image is too large: $size bytes (limit $limit)" >&2
+            exit 1
+          fi
+
+      - name: Test LLM Worker Docker Build
+        run: docker compose build llm-worker
 
       - name: Test db-migrate Build
         run: docker compose build db-migrate

@@ -19,6 +19,12 @@ export const ERROR_KEYS = {
   /** MCP-сервер не сконфигурирован (нет `mcp_endpoint`). */
   mcpUnavailable: 'errors.mcp_unavailable',
   /**
+   * Marketplace-провайдер (Ozon/WB) недоступен: не заданы ключи, сервер не
+   * отвечает или вернул ошибку. Отдельный код нужен UI, чтобы показать
+   * локализованное сообщение вместо сырого текста MCP (KI-025).
+   */
+  marketplaceUnavailable: 'errors.marketplace_unavailable',
+  /**
    * LLM временно недоступен: все маршруты цепочки упали или исчерпали
    * дневной бюджет (LLM Router v2).
    */

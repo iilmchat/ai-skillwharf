@@ -74,6 +74,14 @@ flowchart LR
    * **Действия:** Ставит задачи автономным агентам, общается с ними через привычные интерфейсы.
    * **Взаимодействие:** Мессенджеры (Telegram, VK), Web-чат, CLI.
 
+### Внутренние сервисы (Sprint 17)
+
+Gateway остаётся лёгким: LangGraph/LangChain и адаптеры LLM вынесены в
+`llm-worker`. Внутренний HTTP/NDJSON связывает API с worker'ом; инструменты,
+policy engine, Ledger и песочница остаются в `api`/`sandbox-worker`. Redis
+используется только для BullMQ (HITL TTL, retention, уведомления). Детали —
+`docs/CHANGELOG.md` (Sprint 17) и KI-045/KI-048.
+
 ### Внешние системы
 
 1. **LLM Провайдеры:**

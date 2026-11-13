@@ -151,6 +151,24 @@ describe('classifyChatError', () => {
     ).toBe('mcpTimeout');
   });
 
+  it('распознаёт errors.marketplace_unavailable по `code`', () => {
+    expect(
+      classifyChatError('Сервис вернул 502', {
+        code: ERROR_CODES.marketplaceUnavailable,
+        status: 502,
+      }),
+    ).toBe('marketplaceUnavailable');
+  });
+
+  it('код marketplace_unavailable важнее текстовых маркеров', () => {
+    expect(
+      classifyChatError('MCP Error: transport failed', {
+        code: ERROR_CODES.marketplaceUnavailable,
+        status: 502,
+      }),
+    ).toBe('marketplaceUnavailable');
+  });
+
   it.each([
     { code: ERROR_CODES.invalidRequest, kind: 'invalidRequest', status: 400 },
     { code: ERROR_CODES.policyBlocked, kind: 'policyBlocked', status: 403 },

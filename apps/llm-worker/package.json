@@ -1,0 +1,35 @@
+{
+  "name": "llm-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Исполнитель LangGraph/LangChain: LLM-инференс, графы агента, стриминг",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.4.0",
+    "@langchain/langgraph": "^1.7.3",
+    "@langchain/langgraph-checkpoint": "^1.2.2",
+    "@langchain/openai": "^1.8.4",
+    "@nestjs/common": "^12.0.1",
+    "@nestjs/core": "^12.0.1",
+    "@nestjs/platform-express": "^12.0.1",
+    "axios": "^1.21.1",
+    "js-tiktoken": "^1.0.21",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.58.0",
+    "typescript": "^6.0.2",
+    "vitest": "^5.1.0"
+  }
+}

@@ -50,3 +50,18 @@ export function policyBlockedError(message: string): ApiException {
     message,
   });
 }
+
+/**
+ * Marketplace-провайдер недоступен (нет ключей, сервер не отвечает).
+ *
+ * Отдельный код от `errors.mcp_unavailable`: UI показывает для витрины
+ * маркетплейса своё сообщение, а не общий текст MCP (KI-025).
+ */
+export function marketplaceUnavailableError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 503,
+    error: 'Service Unavailable',
+    code: 'errors.marketplace_unavailable',
+    message,
+  });
+}

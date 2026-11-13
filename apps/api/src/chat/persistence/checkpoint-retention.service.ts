@@ -179,6 +179,14 @@ export class CheckpointRetentionService
   constructor(private readonly prisma: PrismaService) {}
 
   onModuleInit(): void {
+    if ((process.env.REDIS_URL?.trim() ?? '') !== '') {
+      this.logger.log(
+        'Retention: тик очистки выполняет BullMQ (REDIS_URL задан)',
+      );
+
+      return;
+    }
+
     const intervalMs = resolveRetentionCheckIntervalMs();
 
     void this.tick();

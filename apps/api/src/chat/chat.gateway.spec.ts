@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import type { Socket } from 'socket.io';
 import { ChatGateway } from './chat.gateway.js';
-import { DailyTokenLimitException } from '../llm/daily-token-limit.exception.js';
+import { DailyTokenLimitException } from '../agent/llm-budget.errors.js';
 import type { ChatService } from './chat.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;

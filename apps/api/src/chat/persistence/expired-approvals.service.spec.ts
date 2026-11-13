@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { CheckpointStoreService } from '../../agent/checkpoint-store.service.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BillingService } from '../../billing/billing.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
@@ -280,7 +280,7 @@ describe('ExpiredApprovalsService', () => {
       const { deps } = createSetup();
       const service = new ExpiredApprovalsService(
         deps.prisma as unknown as PrismaService,
-        deps.checkpointer as unknown as BaseCheckpointSaver,
+        deps.checkpointer as unknown as CheckpointStoreService,
         deps.billing as unknown as BillingService,
         deps.pendingApprovals as unknown as PendingApprovalService,
       );
@@ -322,7 +322,7 @@ describe('ExpiredApprovalsService', () => {
     } as unknown as ExpiredApprovalsDeps['prisma'];
     const service = new ExpiredApprovalsService(
       brokenPrisma as unknown as PrismaService,
-      deps.checkpointer as unknown as BaseCheckpointSaver,
+      deps.checkpointer as unknown as CheckpointStoreService,
       deps.billing as unknown as BillingService,
       deps.pendingApprovals as unknown as PendingApprovalService,
     );

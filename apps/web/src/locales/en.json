@@ -65,7 +65,8 @@
     "mcp_provider": "The MCP provider returned an error. Please try again later.",
     "mcp_timeout": "The MCP provider did not respond in time. Please try again later.",
     "mcp_unavailable": "The MCP provider is unavailable. Please try again later.",
-    "llm_unavailable": "The LLM is temporarily unavailable: all routes are busy or out of budget. Please try again later."
+    "llm_unavailable": "All LLM providers are unavailable or out of daily budget. Please try again later.",
+    "marketplace_unavailable": "The marketplace is temporarily unavailable. Please try again later."
   },
   "nav": {
     "primary": "Primary navigation",
@@ -463,14 +464,29 @@
         "provider": "Provider",
         "model": "Model",
         "baseUrl": "Base URL",
-        "priority": "Priority"
+        "dailyCostLimit": "Limit",
+        "priority": "Priority",
+        "actions": "Actions"
       },
+      "taskTypes": {
+        "chat": "Chat",
+        "analysis": "Analysis (reasoning)",
+        "embeddings": "Embeddings"
+      },
+      "dailyCostLimit": "Limit: {{limit}} ₽/day",
+      "noDailyCostLimit": "No limit",
+      "edit": "Edit",
+      "editLabel": "Edit route {{name}}",
       "modal": {
         "title": "New rule",
         "subtitle": "A rule defines which model serves requests.",
+        "editTitle": "Edit rule",
+        "editSubtitle": "Change the task type, model, Base URL, or daily limit.",
         "name": "Name",
         "namePlaceholder": "For example, classification",
         "provider": "Provider",
+        "taskType": "Task type",
+        "taskTypeHint": "The fallback chain is built only within a single task type.",
         "model": "Model",
         "modelPlaceholder": "deepseek-chat",
         "yandexHint": "YandexGPT models use a URI: gpt://<folder-id>/<model-name>.",
@@ -478,10 +494,18 @@
         "baseUrl": "Base URL",
         "baseUrlPlaceholder": "https://api.example.com/v1",
         "priority": "Priority",
-        "invalid": "Fill in the name, model, and Base URL.",
+        "dailyCostLimit": "Daily limit, ₽",
+        "dailyCostLimitPlaceholder": "For example, 500",
+        "dailyCostLimitHint": "Optional. Leave empty for a route without a daily limit.",
+        "dailyCostLimitEditHint": "Optional. Leave empty to keep the current limit.",
+        "invalid": "Fill in the name, model, and Base URL; priority must be a non-negative integer.",
+        "invalidDailyCostLimit": "The daily limit must be a non-negative number or empty.",
         "save": "Add rule",
+        "update": "Save changes",
         "saving": "Saving…",
-        "success": "The rule has been added."
+        "updating": "Saving…",
+        "success": "The rule has been added.",
+        "updated": "The rule has been updated."
       }
     },
     "skills": {
@@ -526,6 +550,7 @@
       "createVersion": "Could not create the version.",
       "router": "Could not load LLM rules.",
       "createRoute": "Could not add the rule.",
+      "updateRoute": "Could not save the rule changes.",
       "audit": "Could not load the audit log.",
       "forbiddenTitle": "Access denied",
       "forbiddenBody": "This section requires the administrator or owner role."
@@ -575,13 +600,13 @@
       "notReady": "The chat is not connected yet. Wait a moment and try again.",
       "timeout": "The server did not respond in time. Try again.",
       "invalidResponse": "The server returned an invalid response.",
-      "marketplaceUnavailable": "The marketplace service is temporarily unavailable",
+      "marketplaceUnavailable": "The marketplace service is temporarily unavailable. Please try again later.",
       "invalidRequest": "The request did not pass validation. Check the details and try again.",
       "policyBlocked": "The action was blocked by the security policy. Change the request and try again.",
       "mcpProvider": "The MCP provider returned an error. Please try again later.",
       "mcpTimeout": "The MCP provider did not respond in time. Please try again later.",
       "mcpUnavailable": "The MCP provider is unavailable. Please try again later.",
-      "llmUnavailable": "The LLM is temporarily unavailable: all routes are busy or out of budget. Please try again later.",
+      "llmUnavailable": "All LLM providers are unavailable or out of daily budget. Please try again later.",
       "dailyTokenLimit": "Daily token limit exhausted",
       "insufficientFunds": "Insufficient funds to run code. Top up your balance.",
       "sendFailed": "Could not send the message."

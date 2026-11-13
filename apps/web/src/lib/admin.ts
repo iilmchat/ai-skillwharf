@@ -1,4 +1,5 @@
 import { isAxiosError } from 'axios';
+import { z } from 'zod';
 import i18n from '../i18n';
 import { api } from './api';
 
@@ -25,20 +26,49 @@ export interface PromptVersion {
   createdAt?: string;
 }
 
-export type LlmProviderType = 'OpenAI' | 'YandexGPT' | 'GigaChat' | 'Ollama';
+export const LLM_PROVIDER_TYPES = [
+  'OpenAI',
+  'YandexGPT',
+  'GigaChat',
+  'Ollama',
+] as const;
 
-export interface LlmRoute {
-  id: string;
-  name: string;
-  modelName: string;
-  model?: string;
-  providerType?: LlmProviderType;
-  baseUrl?: string;
-  baseURL?: string;
-  apiKeyEnvVar?: string | null;
-  priority?: number;
-  isActive?: boolean;
-}
+export type LlmProviderType = (typeof LLM_PROVIDER_TYPES)[number];
+
+/**
+ * Типы задач LLM Router. Контракт совпадает с `LLM_TASK_TYPES` API:
+ * fallback-цепочка строится только внутри одного типа задачи. В API
+ * reasoning-задачи называются `analysis`, embedding-маршруты — `embeddings`;
+ * значения `reasoning`/`embedding` DTO отклоняет как 400.
+ */
+export const LLM_TASK_TYPES = ['chat', 'analysis', 'embeddings'] as const;
+
+export type LlmTaskType = (typeof LLM_TASK_TYPES)[number];
+
+/**
+ * Маршрут LLM Router (`GET /api/v1/admin/llm-routes`).
+ *
+ * Новые поля Sprint 16 (`taskType`, `dailyCostLimit`) опциональны для
+ * совместимости со старым API: если их нет, маршрут считается `chat`-маршрутом
+ * без дневного лимита. Ответ валидируется Zod, чтобы UI не показывал данные
+ * неверного типа.
+ */
+export const llmRouteSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  modelName: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
+  baseUrl: z.string().optional(),
+  baseURL: z.string().optional(),
+  apiKeyEnvVar: z.string().nullable().optional(),
+  priority: z.number().int().nonnegative().optional(),
+  isActive: z.boolean().optional(),
+  taskType: z.enum(LLM_TASK_TYPES).optional(),
+  dailyCostLimit: z.number().nonnegative().nullable().optional(),
+});
+
+export type LlmRoute = z.infer<typeof llmRouteSchema>;
 
 export interface CreateLlmRouteInput {
   name: string;
@@ -46,7 +76,16 @@ export interface CreateLlmRouteInput {
   providerType: LlmProviderType;
   baseUrl: string;
   priority: number;
+  taskType: LlmTaskType;
+  dailyCostLimit?: number;
 }
+
+/**
+ * PATCH-контракт: форма редактирования присылает полный набор полей.
+ * Пустой `dailyCostLimit` означает «не менять лимит»: контракт PATCH не
+ * описывает `null`, поэтому снять лимит через Control Plane пока нельзя.
+ */
+export type UpdateLlmRouteInput = CreateLlmRouteInput;
 
 export interface AuditEntry {
   id: string;
@@ -184,16 +223,34 @@ export async function createPromptVersion(
 
 export async function fetchLlmRoutes(): Promise<LlmRoute[]> {
   const { data } = await api.get<unknown>('/admin/llm-routes');
+  const items = unwrapList<unknown>(data, [
+    'routes',
+    'rules',
+    'items',
+    'data',
+  ]);
 
-  return unwrapList<LlmRoute>(data, ['routes', 'rules', 'items', 'data']);
+  return items.map((item) => llmRouteSchema.parse(item));
 }
 
 export async function createLlmRoute(
   input: CreateLlmRouteInput,
 ): Promise<LlmRoute> {
-  const { data } = await api.post<LlmRoute>('/admin/llm-routes', input);
+  const { data } = await api.post<unknown>('/admin/llm-routes', input);
 
-  return data;
+  return llmRouteSchema.parse(data);
+}
+
+export async function updateLlmRoute(
+  id: string,
+  input: UpdateLlmRouteInput,
+): Promise<LlmRoute> {
+  const { data } = await api.patch<unknown>(
+    `/admin/llm-routes/${encodeURIComponent(id)}`,
+    input,
+  );
+
+  return llmRouteSchema.parse(data);
 }
 
 export async function fetchAudit(): Promise<AuditEntry[]> {
@@ -290,6 +347,10 @@ export function getLlmRouteModel(route: LlmRoute): string {
 
 export function getLlmRouteProvider(route: LlmRoute): LlmProviderType {
   return route.providerType ?? 'OpenAI';
+}
+
+export function getLlmRouteTaskType(route: LlmRoute): LlmTaskType {
+  return route.taskType ?? 'chat';
 }
 
 export function getLlmRouteBaseUrl(route: LlmRoute): string {
