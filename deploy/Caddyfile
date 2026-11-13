@@ -3,6 +3,8 @@
 # домена по портам 80/443.
 {
 	email {$ACME_EMAIL}
+	# По умолчанию production-CA; staging-оверрайд подставляет staging-CA.
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
 }
 
 {$DOMAIN} {

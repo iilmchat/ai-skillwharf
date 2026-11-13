@@ -33,6 +33,7 @@ import { GigaChatAdapter } from './adapters/gigachat.adapter.js';
 import type { NativeProviderAdapter } from './adapters/types.js';
 import { YandexAdapter } from './adapters/yandex.adapter.js';
 import { McpClient } from './tools/mcp-client.js';
+import { MetricsService } from '../metrics/metrics.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
@@ -384,6 +385,7 @@ export class LlmService {
     @Optional() private readonly promptsService?: PromptsService,
     @Optional() private readonly billingService?: BillingService,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly metricsService?: MetricsService,
   ) {
     const baseURL = process.env.LLM_BASE_URL;
     const model = process.env.LLM_MODEL;
@@ -864,8 +866,8 @@ export class LlmService {
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    const response = await model.invoke(
-      withLanguageInstruction(messages, systemPrompt),
+    const response = await this.trackedLlmCall(route, () =>
+      model.invoke(withLanguageInstruction(messages, systemPrompt)),
     );
 
     this.logGenAiUsage(route, response.usage_metadata);
@@ -928,14 +930,19 @@ export class LlmService {
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
     let accumulated: AIMessageChunk | undefined;
 
-    for await (const chunk of await model.stream(
-      withLanguageInstruction(messages, systemPrompt),
-    )) {
-      accumulated = accumulated ? accumulated.concat(chunk) : chunk;
+    try {
+      for await (const chunk of await model.stream(
+        withLanguageInstruction(messages, systemPrompt),
+      )) {
+        accumulated = accumulated ? accumulated.concat(chunk) : chunk;
 
-      if (chunk.text) {
-        yield { type: 'delta', text: chunk.text };
+        if (chunk.text) {
+          yield { type: 'delta', text: chunk.text };
+        }
       }
+    } catch (error) {
+      this.recordLlmError(route, error);
+      throw error;
     }
 
     const message = accumulated
@@ -1086,6 +1093,40 @@ export class LlmService {
     }
   }
 
+  /**
+   * Вызов модели с учётом ошибок в `llm_errors_total`. Ошибку пробрасываем
+   * дальше: метрика не должна менять поведение обработки сбоев.
+   */
+  private async trackedLlmCall<T>(
+    route: LlmRouteSelection | undefined,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      this.recordLlmError(route, error);
+      throw error;
+    }
+  }
+
+  private recordLlmError(
+    route: LlmRouteSelection | undefined,
+    error: unknown,
+  ): void {
+    this.metricsService?.countLlmError(
+      this.metricsProvider(route),
+      this.metricsModel(route),
+      error instanceof Error ? error.name : 'UnknownError',
+    );
+  }
+
+  private metricsProvider(route?: LlmRouteSelection): string {
+    return route?.providerType || 'openai';
+  }
+
+  private metricsModel(route?: LlmRouteSelection): string {
+    return route?.modelName?.trim() || process.env.LLM_MODEL || 'unknown';
+  }
 
   /**
    * OTel-совместимый лог вызова LLM. Пока пишем JSON в лог приложения:
@@ -1096,13 +1137,23 @@ export class LlmService {
     route: LlmRouteSelection | undefined,
     usage: AIMessage['usage_metadata'],
   ): void {
+    const promptTokens = usage?.input_tokens ?? 0;
+    const completionTokens = usage?.output_tokens ?? 0;
+
+    this.metricsService?.countLlmTokens(
+      this.metricsProvider(route),
+      this.metricsModel(route),
+      promptTokens,
+      completionTokens,
+    );
+
     this.logger.log(
       JSON.stringify({
         event: 'gen_ai.usage',
-        'gen_ai.system': 'openai',
+        'gen_ai.system': this.metricsProvider(route),
         'gen_ai.model': route?.modelName.trim() || process.env.LLM_MODEL,
-        'gen_ai.prompt_tokens': usage?.input_tokens ?? 0,
-        'gen_ai.completion_tokens': usage?.output_tokens ?? 0,
+        'gen_ai.prompt_tokens': promptTokens,
+        'gen_ai.completion_tokens': completionTokens,
       }),
     );
   }
@@ -1121,7 +1172,9 @@ export class LlmService {
     await this.assertCanAffordLlm(options.userId);
 
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    const response = await adapter.chat({ messages, tools, systemPrompt });
+    const response = await this.trackedLlmCall(route, () =>
+      adapter.chat({ messages, tools, systemPrompt }),
+    );
 
     this.logGenAiUsage(route, response.usage_metadata);
     await this.chargeLlmUsage(options.userId, response.usage_metadata);

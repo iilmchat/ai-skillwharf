@@ -179,16 +179,40 @@ LLM_MODEL=<имя модели>
 
 Для предотвращения потери данных биллинга (Ledger) необходимо регулярно делать бэкап PostgreSQL.
 
-**Создание бэкапа:**
+### Бэкапы БД
+
+Скрипт `scripts/backup-db.sh` делает `pg_dump` в формате custom и кладёт
+дамп в `backups/` с датой и временем в имени:
 
 ```bash
-docker compose exec -T postgres pg_dump -U skillwharf_admin -d skillwharf_db -Fc > backup_$(date +%Y%m%d).dump
+bash scripts/backup-db.sh
+# backups/skillwharf_db-20261113-121500.dump
 ```
+
+Скрипт читает `POSTGRES_USER`/`POSTGRES_DB` из `.env` и требует запущенный
+контейнер `postgres`. Каталог можно переопределить переменной `BACKUP_DIR`:
+
+```bash
+BACKUP_DIR=/mnt/backups bash scripts/backup-db.sh
+```
+
+Рекомендуется добавить запуск в cron (например, ежедневно в 02:00):
+
+```cron
+0 2 * * * cd /opt/skillwharf && BACKUP_DIR=/mnt/backups bash scripts/backup-db.sh >> /var/log/skillwharf-backup.log 2>&1
+```
+
+Дампы в `backups/` не попадают в git. Каталог `backups/` стоит хранить на
+отдельном носителе и периодически проверять восстановление.
 
 **Восстановление:**
 
 ```bash
-docker compose exec -T postgres pg_restore -U skillwharf_admin -d skillwharf_db --clean < backup_20261112.dump
+docker compose exec -T postgres pg_restore \
+  --username "$POSTGRES_USER" \
+  --dbname "$POSTGRES_DB" \
+  --clean --if-exists \
+  < backups/skillwharf_db-20261113-121500.dump
 ```
 
 ## 6. Диагностика проблем
@@ -708,3 +732,42 @@ MCP-инструмента из `tools/list`:
   `.encryption_key`.
 * Фоновые проверки MCP-серверов отключены (`HEALTH_CHECK_INTERVAL_MIN=0`),
   чтобы не расходовать лимиты API; включайте их осознанно.
+
+## 16. Мониторинг и staging
+
+### Prometheus и Grafana
+
+API отдаёт метрики на `GET /metrics` (вне префикса `api/v1`). Prometheus
+скрейпит `api:3000/metrics`, Grafana при старте получает datasource и дашборд
+`SkillWharf Overview` из `infra/monitoring`.
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+* Prometheus: <http://localhost:9090>
+* Grafana: <http://localhost:3003> (логин/пароль — `GRAFANA_ADMIN_*` из `.env`)
+
+Дашборд показывает `http_requests_total`, `llm_tokens_total` и
+`llm_errors_total`. Оба порта опубликованы только на `127.0.0.1`; для
+удалённого доступа используйте SSH-туннель или reverse proxy с TLS.
+
+### Staging
+
+`docker-compose.staging.yml` — оверрайд поверх базового compose. Наружу
+открыты только `80`/`443` (Caddy), остальные порты слушают `127.0.0.1`.
+Критичные переменные объявлены через `${VAR:?}`: без реальных значений в
+`.env` запуск падает до старта контейнеров, mock-провайдеры не включаются.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --profile production up -d --build
+```
+
+Caddy выпускает сертификат Let's Encrypt. По умолчанию используется
+staging-CA (`ACME_CA`), поэтому браузер будет ругаться на недоверенный
+сертификат — это ожидаемо. Для боевого домена задайте:
+
+```text
+ACME_CA=https://acme-v02.api.letsencrypt.org/directory
+```

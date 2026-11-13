@@ -36,6 +36,7 @@
     "@nestjs/throttler": "^6.7.1",
     "@nestjs/websockets": "^12.4.2",
     "@prisma/client": "5.22.0",
+    "@prometheus-io/client": "^0.16.1",
     "@skillwharf/shared": "workspace:*",
     "adm-zip": "^0.6.1",
     "argon2": "^0.45.2",
