@@ -131,7 +131,7 @@ export function LedgerHistoryModal({ open, onClose }: LedgerHistoryModalProps) {
     return () => dialog.removeEventListener('close', handleClose);
   }, [onClose]);
 
-  const entries = ledgerQuery.data ?? [];
+  const entries = ledgerQuery.data?.items ?? [];
 
   return (
     <dialog

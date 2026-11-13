@@ -9,6 +9,7 @@ import { SkillsModule } from '../skills/skills.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatGateway } from './chat.gateway.js';
 import { ChatService } from './chat.service.js';
+import { ChatPersistenceModule } from './persistence/persistence.module.js';
 
 @Module({
   imports: [
@@ -19,6 +20,8 @@ import { ChatService } from './chat.service.js';
     BillingModule,
     SkillsModule,
     MemoryModule,
+    // Checkpointer графа и ожидающие одобрения (PostgreSQL).
+    ChatPersistenceModule,
   ],
   controllers: [ChatController],
   providers: [ChatGateway, ChatService],

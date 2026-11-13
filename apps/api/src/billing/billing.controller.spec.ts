@@ -1,25 +1,45 @@
 import {
   BadRequestException,
+  InternalServerErrorException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator.js';
+import { ApiException } from '../common/api-error.js';
 import { BillingController } from './billing.controller.js';
 import { BillingService } from './billing.service.js';
+import { encodeLedgerCursor } from './dto/ledger-query.dto.js';
+import { LedgerPageSchema } from './dto/ledger-response.dto.js';
 import { YooKassaProvider } from './providers/yookassa.provider.js';
 import type { TopUpDto } from './dto/topup.dto.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_USER_ID = '22222222-2222-2222-2222-222222222222';
 const ADMIN_ID = '33333333-3333-3333-3333-333333333333';
+const LEDGER_CREATED_AT = '2026-11-12T10:00:00.000Z';
+
+const LEDGER_PAGE = {
+  items: [
+    {
+      id: 'entry-1',
+      amount: '100.00',
+      balanceAfter: '150.00',
+      type: 'credit',
+      description: 'Пополнение баланса',
+      createdAt: LEDGER_CREATED_AT,
+    },
+  ],
+  total: 7,
+  nextCursor: null,
+};
 
 type MockFn = ReturnType<typeof vi.fn>;
 
 interface BillingMock {
   addFunds: MockFn;
   getBalance: MockFn;
-  getTransactionHistory: MockFn;
+  getTransactionPage: MockFn;
 }
 
 interface YooKassaMock {
@@ -57,7 +77,7 @@ describe('BillingController', () => {
     billing = {
       addFunds: vi.fn(),
       getBalance: vi.fn(),
-      getTransactionHistory: vi.fn(),
+      getTransactionPage: vi.fn(),
     };
     billing.addFunds.mockResolvedValue({
       balance: '500.00',
@@ -310,33 +330,162 @@ describe('BillingController', () => {
   });
 
   describe('getLedger', () => {
-    it('возвращает историю операций текущего пользователя', async () => {
-      const entries = [
-        {
-          id: 'entry-1',
-          amount: '100.00',
-          balanceAfter: '100.00',
-          type: 'credit',
-          description: 'Пополнение баланса',
-          createdAt: new Date('2026-11-12T10:00:00.000Z'),
-        },
-      ];
-      billing.getTransactionHistory.mockResolvedValue(entries);
-      const request = createRequest({
-        userId: USER_ID,
-        email: 'user@example.com',
-        role: 'user',
+    const request = createRequest({
+      userId: USER_ID,
+      email: 'user@example.com',
+      role: 'user',
+    });
+
+    /** Вызывает getLedger и возвращает Api-ошибку 400 (сервис не вызван). */
+    async function expectInvalidQuery(
+      query: Record<string, string>,
+    ): Promise<ApiException> {
+      let caught: unknown;
+
+      try {
+        await controller.getLedger(request, query);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(ApiException);
+      expect((caught as ApiException).getResponse()).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'errors.invalid_request',
+        message: expect.stringContaining('Некорректные параметры запроса'),
+      });
+      expect(billing.getTransactionPage).not.toHaveBeenCalled();
+
+      return caught as ApiException;
+    }
+
+    it('возвращает страницу операций текущего пользователя', async () => {
+      billing.getTransactionPage.mockResolvedValue(LEDGER_PAGE);
+
+      await expect(controller.getLedger(request, {})).resolves.toEqual(
+        LEDGER_PAGE,
+      );
+      // userId — только из JWT; по умолчанию limit=20, offset=0.
+      expect(billing.getTransactionPage).toHaveBeenCalledWith(USER_ID, {
+        limit: 20,
+        offset: 0,
+      });
+    });
+
+    it('передаёт limit и offset в сервис', async () => {
+      billing.getTransactionPage.mockResolvedValue(LEDGER_PAGE);
+
+      await controller.getLedger(request, { limit: '5', offset: '10' });
+
+      expect(billing.getTransactionPage).toHaveBeenCalledWith(USER_ID, {
+        limit: 5,
+        offset: 10,
+      });
+    });
+
+    it('декодирует opaque cursor из query', async () => {
+      billing.getTransactionPage.mockResolvedValue(LEDGER_PAGE);
+      const cursor = encodeLedgerCursor({
+        createdAt: LEDGER_CREATED_AT,
+        id: 'entry-1',
       });
 
-      await expect(controller.getLedger(request)).resolves.toEqual(entries);
-      expect(billing.getTransactionHistory).toHaveBeenCalledWith(USER_ID);
+      await controller.getLedger(request, { limit: '5', cursor });
+
+      expect(billing.getTransactionPage).toHaveBeenCalledWith(USER_ID, {
+        limit: 5,
+        offset: 0,
+        cursor: { createdAt: LEDGER_CREATED_AT, id: 'entry-1' },
+      });
     });
 
-    it('требует аутентификации', () => {
-      expect(() => controller.getLedger(createRequest())).toThrow(
-        UnauthorizedException,
-      );
-      expect(billing.getTransactionHistory).not.toHaveBeenCalled();
+    it.each<[string, Record<string, string>]>([
+      ['limit=0', { limit: '0' }],
+      ['limit=101', { limit: '101' }],
+      ['limit не число', { limit: 'abc' }],
+      ['offset=-1', { offset: '-1' }],
+      ['offset больше 10000', { offset: '10001' }],
+      ['битый cursor', { cursor: 'не-курсор' }],
+      [
+        'cursor и offset одновременно',
+        {
+          cursor: encodeLedgerCursor({
+            createdAt: LEDGER_CREATED_AT,
+            id: 'entry-1',
+          }),
+          offset: '5',
+        },
+      ],
+      ['лишний параметр', { limit: '10', userId: USER_ID }],
+    ])('отклоняет некорректный query: %s', async (_name, query) => {
+      await expectInvalidQuery(query);
     });
+
+    it('требует аутентификации', async () => {
+      await expect(
+        controller.getLedger(createRequest(), {}),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(billing.getTransactionPage).not.toHaveBeenCalled();
+    });
+
+    it('отдаёт 500, если ответ сервиса разошёлся с контрактом', async () => {
+      billing.getTransactionPage.mockResolvedValue({
+        items: [
+          {
+            id: 'entry-1',
+            amount: '100.00',
+            balanceAfter: '150.00',
+            type: 'credit',
+            description: 'Пополнение баланса',
+            createdAt: 'вчера',
+          },
+        ],
+        total: 1,
+        nextCursor: null,
+      });
+
+      await expect(controller.getLedger(request, {})).rejects.toBeInstanceOf(
+        InternalServerErrorException,
+      );
+    });
+  });
+});
+
+describe('LedgerPageSchema', () => {
+  const item = LEDGER_PAGE.items[0];
+
+  it('принимает контрактный ответ', () => {
+    expect(LedgerPageSchema.parse(LEDGER_PAGE)).toEqual(LEDGER_PAGE);
+  });
+
+  it.each<[string, unknown]>([
+    ['items не массив', { items: null, total: 0, nextCursor: null }],
+    [
+      'пустой id',
+      {
+        items: [{ ...item, id: '' }],
+        total: 1,
+        nextCursor: null,
+      },
+    ],
+    [
+      'не ISO дата',
+      {
+        items: [{ ...item, createdAt: 'вчера' }],
+        total: 1,
+        nextCursor: null,
+      },
+    ],
+    [
+      'пустой amount',
+      { items: [{ ...item, amount: '' }], total: 1, nextCursor: null },
+    ],
+    ['дробный total', { items: [], total: 1.5, nextCursor: null }],
+    ['отрицательный total', { items: [], total: -1, nextCursor: null }],
+    ['nextCursor отсутствует', { items: [], total: 0 }],
+    ['nextCursor не строка', { items: [], total: 0, nextCursor: 42 }],
+  ])('отклоняет ответ с расхождением контракта: %s', (_name, payload) => {
+    expect(LedgerPageSchema.safeParse(payload).success).toBe(false);
   });
 });

@@ -222,13 +222,20 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Ключи i18n для понятных пользователю сообщений по категории ошибки. */
+const CHAT_ERROR_NOTICE_KEYS: Record<ChatErrorKind, string> = {
+  marketplace: 'chat.errors.marketplaceUnavailable',
+  dailyTokenLimit: 'chat.errors.dailyTokenLimit',
+  mcpProvider: 'chat.errors.mcpProvider',
+  mcpTimeout: 'chat.errors.mcpTimeout',
+  mcpUnavailable: 'chat.errors.mcpUnavailable',
+};
+
 function chatErrorNotice(kind: ChatErrorKind): string {
-  return kind === 'marketplace'
-    ? i18n.t('chat.errors.marketplaceUnavailable')
-    : i18n.t('chat.errors.dailyTokenLimit');
+  return i18n.t(CHAT_ERROR_NOTICE_KEYS[kind]);
 }
 
-/** Приоритет: LLM auth, затем marketplace и дневной лимит токенов. */
+/** Приоритет: LLM auth, затем дневной лимит, MCP-коды и marketplace. */
 function resolveChatErrorMessage(message: string, meta: ApiErrorMeta): string {
   if (isLlmAuthError(message)) {
     return llmAuthErrorMessage();

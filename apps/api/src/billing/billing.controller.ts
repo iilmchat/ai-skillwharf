@@ -5,8 +5,10 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  InternalServerErrorException,
   Logger,
   Post,
+  Query,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -15,14 +17,19 @@ import type { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { invalidRequestError } from '../common/api-error.js';
 import {
   BillingService,
-  type LedgerHistoryEntry,
   type LedgerOperationResult,
   type WalletBalance,
 } from './billing.service.js';
 import { ChargeDto } from './dto/charge.dto.js';
 import { CreatePaymentDto } from './dto/create-payment.dto.js';
+import { LedgerQuerySchema } from './dto/ledger-query.dto.js';
+import {
+  LedgerPageSchema,
+  type LedgerPage,
+} from './dto/ledger-response.dto.js';
 import { TopUpDto } from './dto/topup.dto.js';
 import {
   isPaymentNotificationConfirmed,
@@ -63,18 +70,56 @@ export class BillingController {
     return this.billingService.getBalance(userId);
   }
 
+  /**
+   * Страница истории операций текущего пользователя.
+   * `GET /api/v1/billing/ledger?limit=20&offset=0` либо `?cursor=<opaque>`.
+   *
+   * `userId` берётся только из JWT. Query и ответ проходят Zod-валидацию,
+   * поэтому контракт эндпоинта не «плывёт», а расхождение ответа с ним — баг
+   * API (500), а не клиента.
+   */
   @Get('ledger')
   @UseGuards(JwtAuthGuard)
-  getLedger(
+  async getLedger(
     @Req() request: AuthenticatedRequest,
-  ): Promise<LedgerHistoryEntry[]> {
+    @Query() query: unknown,
+  ): Promise<LedgerPage> {
     const userId = request.user?.userId;
 
     if (!userId) {
       throw new UnauthorizedException('Пользователь не аутентифицирован');
     }
 
-    return this.billingService.getTransactionHistory(userId);
+    const parsedQuery = LedgerQuerySchema.safeParse(query);
+
+    if (!parsedQuery.success) {
+      throw invalidRequestError(
+        `Некорректные параметры запроса: ${parsedQuery.error.issues
+          .map(
+            (issue) => `${issue.path.join('.') || 'query'}: ${issue.message}`,
+          )
+          .join('; ')}`,
+      );
+    }
+
+    const page = await this.billingService.getTransactionPage(
+      userId,
+      parsedQuery.data,
+    );
+    const parsedResponse = LedgerPageSchema.safeParse(page);
+
+    if (!parsedResponse.success) {
+      // Ответ сервиса разошёлся с контрактом: это баг API, а не клиента.
+      // Клиенту отдаём 500 без вымышленных данных.
+      this.logger.error(
+        `Ответ истории операций не соответствует контракту: ${parsedResponse.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'Ответ истории операций не соответствует контракту',
+      );
+    }
+
+    return parsedResponse.data;
   }
 
   /** Создаёт платёж в ЮKassa и возвращает ссылку на оплату. */

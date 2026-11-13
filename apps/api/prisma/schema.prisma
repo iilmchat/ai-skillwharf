@@ -177,6 +177,61 @@ model LlmRoute {
   @@index([isActive, priority])
 }
 
+/// Сохранённое состояние LangGraph (checkpointer) после супершага.
+/// `payload` и `metadata` — сериализация JsonPlus (`serde.dumpsTyped`),
+/// поэтому хранятся как BYTEA, а не как JSONB: формат не обязан быть JSON.
+model GraphCheckpoint {
+  id                 String   @id @default(uuid())
+  threadId           String
+  checkpointNs       String   @default("")
+  checkpointId       String
+  parentCheckpointId String?
+  payload            Bytes    @db.ByteA
+  metadata           Bytes    @db.ByteA
+  createdAt          DateTime @default(now())
+
+  @@unique([threadId, checkpointNs, checkpointId])
+  @@index([threadId, checkpointId])
+}
+
+/// Отложенные записи каналов (pending writes) для конкретной точки графа.
+/// `idx` отрицательный для служебных каналов (`WRITES_IDX_MAP`).
+model GraphCheckpointWrite {
+  id           String   @id @default(uuid())
+  threadId     String
+  checkpointNs String   @default("")
+  checkpointId String
+  taskId       String
+  idx          Int
+  taskPath     String   @default("")
+  channel      String
+  value        Bytes    @db.ByteA
+  createdAt    DateTime @default(now())
+
+  @@unique([threadId, checkpointNs, checkpointId, taskId, idx])
+  @@index([threadId, checkpointNs, checkpointId])
+}
+
+/// Действие агента, ожидающее решения пользователя (approval или оплата).
+/// Пишется до `interrupt()`, чтобы после рестарта API был известен контекст.
+model PendingApproval {
+  id             String    @id @default(uuid())
+  conversationId String    @unique
+  userId         String
+  /// approval | payment
+  reason         String
+  /// string[] — инструменты, ожидающие подтверждения.
+  tools          Json
+  /// {callId,toolName,entryId}[] — зарезервированные escrow-holds.
+  holds          Json
+  /// pending | approved | rejected
+  status         String    @default("pending")
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  @@index([userId, status, createdAt])
+}
+
 /// Аудит изменений Control Plane: кто, что и когда изменил.
 model AuditLog {
   id         String   @id @default(uuid())

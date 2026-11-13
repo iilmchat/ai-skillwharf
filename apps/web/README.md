@@ -85,10 +85,10 @@ Inter/Manrope заданы в `src/index.css`. Светлая и тёмная т
 - «Долговременная память» — кнопка «Забыть меня» вызывает
   `DELETE /api/v1/chat/memory` и показывает тост об успехе или ошибке.
 - «Память» — список записей RAG-памяти. Раздел управляется feature-флагом
-  `VITE_RAG_MEMORY_ENABLED`: по умолчанию выключен, потому что read-эндпоинт
-  `GET /api/v1/chat/memory` ещё не выкачен в текущей ветке API (KI-023).
-  Пока флаг выключен, панель не рендерится и не делает запросов; моки вместо
-  данных не используются.
+  `VITE_RAG_MEMORY_ENABLED`: по умолчанию выключен, хотя read-эндпоинт
+  `GET /api/v1/chat/memory` уже реализован (KI-023) — включать его нужно после
+  проверки на реальных данных. Пока флаг выключен, панель не рендерится и не
+  делает запросов; моки вместо данных не используются.
 
 Когда флаг включён, панель запрашивает `GET /api/v1/chat/memory`, валидирует
 ответ Zod по контракту Sprint 14 `{ items: [{ id, content, createdAt }],
@@ -106,8 +106,10 @@ docker build -f apps/web/Dockerfile \
   --build-arg VITE_RAG_MEMORY_ENABLED=true -t skillwharf-web .
 ```
 
-В `docker-compose.yml` аргумент пока не проброшен (там передаётся только
-`VITE_API_URL`), поэтому при сборке через Compose раздел остаётся выключенным.
+Через Compose переменная пробрасывается в build-args сервиса `web`
+(`docker-compose.yml` и `docker-compose.staging.yml`), поэтому включение —
+`VITE_RAG_MEMORY_ENABLED=true docker compose build web` (или строка в `.env`);
+значение по умолчанию — `false`, после изменения нужна пересборка web.
 
 ## Навыки
 

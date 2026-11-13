@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -14,14 +15,20 @@ import {
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import {
   Annotation,
+  Command,
   END,
   getWriter,
+  interrupt,
+  isInterrupted,
+  Overwrite,
   START,
   StateGraph,
 } from '@langchain/langgraph';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { InstalledSkill } from '@prisma/client';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
@@ -67,6 +74,14 @@ import {
   type LlmRouteSelection,
 } from '../llm-router/llm-router.service.js';
 import {
+  GRAPH_CHECKPOINTER,
+} from './persistence/persistence.module.js';
+import {
+  PendingApprovalService,
+  type PendingApprovalHold,
+  type PendingApprovalReason,
+} from './persistence/pending-approval.service.js';
+import {
   DEFAULT_OFFICE_AGENT_ID,
   OFFICE_TASKS,
   officeTaskForTool,
@@ -88,6 +103,50 @@ const TOOL_LIMIT_REPLY =
 
 const DEFAULT_CONVERSATION_TITLE = 'Новый диалог';
 
+/**
+ * Сериализуемый снимок навыка, который хранится в checkpoint'е: после
+ * рестарта API инструменты пересобираются из него, а не из памяти процесса.
+ */
+export type SkillSnapshot = Pick<
+  InstalledSkill,
+  'id' | 'name' | 'manifest' | 'isEnabled'
+>;
+
+/** Причина паузы графа: обычное подтверждение или Pay-per-Outcome. */
+export type ChatApprovalReason = PendingApprovalReason;
+
+/** Payload, который граф кладёт в interrupt() и отдаёт клиенту. */
+export interface ChatApprovalInterrupt {
+  type: 'approval';
+  conversationId: string;
+  userId: string;
+  reason: ChatApprovalReason;
+  tools: string[];
+  task: string;
+}
+
+/** Ответ пользователя, которым возобновляется граф после interrupt. */
+export interface ChatApprovalResume {
+  approved: boolean;
+}
+
+/** Zod-схема resume-значения: внешний ввод от клиента. */
+export const chatApprovalResumeSchema = z
+  .object({ approved: z.boolean() })
+  .strict();
+
+/** Zod-схема payload'а interrupt: читаем из checkpoint после рестарта. */
+export const chatApprovalInterruptSchema = z
+  .object({
+    type: z.literal('approval'),
+    conversationId: z.string().min(1),
+    userId: z.string().min(1),
+    reason: z.enum(['approval', 'payment']),
+    tools: z.array(z.string()),
+    task: z.string(),
+  })
+  .strict();
+
 const ChatStateAnnotation = Annotation.Root({
   conversationId: Annotation<string>({
     reducer: (_previous, next) => next,
@@ -105,7 +164,12 @@ const ChatStateAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => '',
   }),
-  availableTools: Annotation<StructuredToolInterface[]>({
+  /**
+   * Сериализуемый снимок навыков. Сами инструменты (StructuredToolInterface
+   * с функциями) в состояние не кладём: они не сериализуются в PostgreSQL и
+   * пересобираются из снимка при каждом запуске/возобновлении графа.
+   */
+  skills: Annotation<SkillSnapshot[]>({
     reducer: (_previous, next) => next,
     default: () => [],
   }),
@@ -153,9 +217,23 @@ const ChatStateAnnotation = Annotation.Root({
 
 type ChatState = typeof ChatStateAnnotation.State;
 
+/**
+ * Сбрасывает taint-канал перед новым сообщением пользователя: reducer
+ * канала объединяет значения внутри одного прогона графа, а между
+ * сообщениями старые секреты не должны блокировать новые вызовы.
+ */
+function overwriteEmptySecrets(): string[] {
+  return new Overwrite([]) as unknown as string[];
+}
+
 export interface ChatReply {
   conversationId: string;
   reply: string;
+  /**
+   * `true`, если граф поставлен на паузу и ждёт `approve_action`.
+   * Повторная отправка сообщения в такой диалог сначала завершает ожидание.
+   */
+  pendingApproval?: boolean;
 }
 
 /** Событие чанка текста, которое граф отдаёт в custom-стрим. */
@@ -185,7 +263,7 @@ export interface OutcomePrice {
  * Freemium (с бесплатными вызовами); Free и отсутствие цены — бесплатно.
  */
 function resolveToolPrice(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
   toolName: string,
 ): ToolPrice | null {
   for (const skill of skills) {
@@ -227,7 +305,7 @@ function resolveToolPrice(
  * `requiresApproval` живёт в манифесте навыка и распространяется на все
  * инструменты из его `dependencies.tools`.
  */
-function resolveApprovalTools(skills: InstalledSkill[]): string[] {
+function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[] {
   const tools = new Set<string>();
 
   for (const skill of skills) {
@@ -247,7 +325,7 @@ function resolveApprovalTools(skills: InstalledSkill[]): string[] {
 
 /** Объявлен ли инструмент хотя бы одним включённым навыком. */
 function skillDeclaresTool(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
   toolName: string,
 ): boolean {
   return skills.some((skill) => {
@@ -285,7 +363,7 @@ export function normalizeUserRole(role: string | undefined): UserRole {
  * для проверки роли, сетевого доступа и taint-политик.
  */
 export function buildToolSkillContexts(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
 ): Record<string, ToolSkillContext[]> {
   const contexts: Record<string, ToolSkillContext[]> = {};
 
@@ -317,7 +395,7 @@ export function buildToolSkillContexts(
  * означает запрет сети (deny by default, ADR 0004 п.3).
  */
 export function resolveToolEgress(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
   toolName: string,
 ): EgressPolicy | undefined {
   const allowlist = new Set<string>();
@@ -351,7 +429,7 @@ export function resolveToolEgress(
  * хардкодится в коде: источник истины — манифест включённого навыка.
  */
 export function resolveToolMcpEndpoint(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
   toolName: string,
 ): string | undefined {
   for (const skill of skills) {
@@ -377,7 +455,7 @@ export function resolveToolMcpEndpoint(
 
 /** Цены Pay-per-Outcome по инструментам из манифестов навыков. */
 function resolveOutcomePrices(
-  skills: InstalledSkill[],
+  skills: readonly SkillSnapshot[],
 ): Record<string, OutcomePrice> {
   const prices: Record<string, OutcomePrice> = {};
 
@@ -544,24 +622,22 @@ async function executeToolCalls(
 }
 
 /**
- * Колбэк ожидания подтверждения. Возвращает промис, который резолвится,
- * когда пользователь пришлёт `approve_action` для этого диалога.
- */
-type ApprovalGate = (conversationId: string, userId: string) => Promise<void>;
-
-/**
  * Граф состояний LangGraph в стиле AgentExecutor:
  *
  * `llm` → (есть tool_calls?) → `tools` → `llm` → … → END.
  *
- * Инструменты приходят в состоянии, потому что содержат привязанный к
- * пользователю paywall-хук.
+ * Инструменты не хранятся в состоянии (они не сериализуются): вместо них в
+ * checkpoint пишется снимок навыков, а `resolveTools` пересобирает инструменты
+ * с привязанным к пользователю paywall-хуком при каждом запуске, в том числе
+ * после рестарта API.
  */
 function buildChatGraph(
   llmService: LlmService,
-  waitForApproval: ApprovalGate,
   billingService: BillingService,
   agentGateway: AgentGatewayService,
+  pendingApprovals: PendingApprovalService,
+  checkpointer: BaseCheckpointSaver,
+  resolveTools: (state: ChatState) => StructuredToolInterface[],
 ) {
   return new StateGraph(ChatStateAnnotation)
     .addNode('llm', async (state: ChatState, config) => {
@@ -571,7 +647,7 @@ function buildChatGraph(
 
       for await (const chunk of llmService.chatWithToolsStream(
         state.messages,
-        state.availableTools,
+        resolveTools(state),
         state.llmRoute ?? undefined,
         { userId: state.userId, memoryContext: state.memoryContext },
       )) {
@@ -608,6 +684,7 @@ function buildChatGraph(
     })
     .addNode('tools', async (state: ChatState, config) => {
       const emit = getWriter(config);
+      const tools = resolveTools(state);
       const calls = toolCallsOf(lastMessage(state.messages));
       const approvalRequired = new Set(state.approvalRequiredTools);
       const approvalCalls = calls.filter((call) =>
@@ -622,11 +699,13 @@ function buildChatGraph(
           evaluateToolCall(call, state, agentGateway);
         }
 
-        const createdHolds: EscrowHold[] = [];
+        // Holds создаются ДО interrupt() и с детерминированным idempotencyKey:
+        // узел повторно выполняется при возобновлении (в том числе после
+        // рестарта API), и authorizeHold должен вернуть существующий
+        // PENDING-entry, а не создать второй.
+        const holds: PendingApprovalHold[] = [];
 
         try {
-          // Pay-per-Outcome резервируется до ожидания одобрения и остаётся
-          // PENDING, пока пользователь не подтвердит действие.
           for (const [index, call] of calls.entries()) {
             if (!approvalRequired.has(call.name)) {
               continue;
@@ -641,39 +720,85 @@ function buildChatGraph(
             const authorized = await billingService.authorizeHold(
               state.userId,
               outcome.price,
-              randomUUID(),
+              `approval:${state.conversationId}:${call.id ?? String(index)}`,
             );
-            const hold = { entryId: authorized.entryId };
 
-            preAuthorizedHolds.set(index, hold);
-            createdHolds.push(hold);
+            preAuthorizedHolds.set(index, { entryId: authorized.entryId });
+            holds.push({
+              callId: call.id ?? String(index),
+              toolName: call.name,
+              entryId: authorized.entryId,
+            });
           }
         } catch (error) {
           await Promise.all(
-            createdHolds.map((hold) => billingService.cancelHold(hold.entryId)),
+            [...preAuthorizedHolds.values()].map((hold) =>
+              billingService.cancelHold(hold.entryId),
+            ),
           );
           throw error;
         }
 
-        // Ставим промис в Map до отправки события, чтобы approve_action
-        // не мог прийти раньше, чем сохранено состояние ожидания.
-        const approved = waitForApproval(state.conversationId, state.userId);
-        const reason = approvalCalls.some((call) =>
+        const reason: ChatApprovalReason = approvalCalls.some((call) =>
           Boolean(state.outcomePrices[call.name]),
         )
-          ? ('payment' as const)
-          : ('approval' as const);
+          ? 'payment'
+          : 'approval';
+        const approvalTools = approvalCalls.map((call) => call.name);
 
-        emit?.({
-          type: 'office',
+        // Запись в БД переживает рестарт API и используется эндпоинтом
+        // списка ожидающих; сама пауза графа хранится в checkpoint'е.
+        await pendingApprovals.upsertPending({
           conversationId: state.conversationId,
-          agentId: DEFAULT_OFFICE_AGENT_ID,
-          status: 'waiting_approval',
-          task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(approvalCalls[0]?.name ?? '')}`,
+          userId: state.userId,
           reason,
-        } satisfies ChatOfficeEvent);
+          tools: approvalTools,
+          holds,
+        });
 
-        await approved;
+        const interruptPayload: ChatApprovalInterrupt = {
+          type: 'approval',
+          conversationId: state.conversationId,
+          userId: state.userId,
+          reason,
+          tools: approvalTools,
+          task: `${OFFICE_TASKS.waitingApproval}: ${officeTaskForTool(
+            approvalTools[0] ?? '',
+          )}`,
+        };
+
+        // Останавливает граф; resume-значение проверяется Zod-схемой.
+        const resume = interrupt<ChatApprovalInterrupt, ChatApprovalResume>(
+          interruptPayload,
+          { responseSchema: chatApprovalResumeSchema },
+        );
+
+        if (!resume.approved) {
+          await pendingApprovals.resolvePending(
+            state.conversationId,
+            'rejected',
+          );
+          await Promise.all(
+            holds.map((hold) => billingService.cancelHold(hold.entryId)),
+          );
+
+          return {
+            messages: [
+              ...state.messages,
+              ...calls.map(
+                (call) =>
+                  new ToolMessage({
+                    tool_call_id: call.id ?? '',
+                    name: call.name,
+                    content: 'Действие отклонено пользователем',
+                    status: 'error',
+                  }),
+              ),
+            ],
+          };
+        }
+
+        await pendingApprovals.resolvePending(state.conversationId, 'approved');
       } else {
         // AI-Офис получает задачу по имени каждого инструмента, который
         // запросила модель. События уходят до фактического запуска.
@@ -688,20 +813,16 @@ function buildChatGraph(
         }
       }
 
-      const execution = await executeToolCalls(
-        state.availableTools,
-        calls,
-        {
-          userId: state.userId,
-          userRole: state.userRole,
-          toolSkills: state.toolSkills,
-          taintedSecrets: state.taintedSecrets,
-          outcomePrices: state.outcomePrices,
-          preAuthorizedHolds,
-          billingService,
-          agentGateway,
-        },
-      );
+      const execution = await executeToolCalls(tools, calls, {
+        userId: state.userId,
+        userRole: state.userRole,
+        toolSkills: state.toolSkills,
+        taintedSecrets: state.taintedSecrets,
+        outcomePrices: state.outcomePrices,
+        preAuthorizedHolds,
+        billingService,
+        agentGateway,
+      });
 
       return {
         messages: [...state.messages, ...execution.messages],
@@ -718,21 +839,13 @@ function buildChatGraph(
       return toolRounds(state.messages) > MAX_TOOL_ROUNDS ? END : 'tools';
     })
     .addEdge('tools', 'llm')
-    .compile();
+    .compile({ checkpointer });
 }
 
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
   private readonly graph: ReturnType<typeof buildChatGraph>;
-  /**
-   * Ожидающие одобрения диалоги: ключ — `conversationId`, значение —
-   * владелец диалога и функция, которая будит граф.
-   */
-  private readonly pendingApprovals = new Map<
-    string,
-    { userId: string; resume: () => void }
-  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -742,31 +855,114 @@ export class ChatService {
     private readonly llmRouterService: LlmRouterService,
     private readonly agentGateway: AgentGatewayService,
     private readonly memoryService: MemoryService,
+    @Inject(GRAPH_CHECKPOINTER)
+    private readonly checkpointer: BaseCheckpointSaver,
+    private readonly pendingApprovalService: PendingApprovalService,
   ) {
     this.graph = buildChatGraph(
       this.llmService,
-      (conversationId, userId) => this.waitForApproval(conversationId, userId),
       this.billingService,
       this.agentGateway,
+      this.pendingApprovalService,
+      this.checkpointer,
+      (state) => this.buildTools(state.userId, state.skills),
     );
+  }
+
+  /** Конфигурация checkpoint-треда: один диалог — один thread. */
+  private graphConfig(conversationId: string): {
+    configurable: { thread_id: string };
+  } {
+    return { configurable: { thread_id: conversationId } };
   }
 
   /**
    * Возобновляет граф, приостановленный перед инструментом, которому нужно
-   * одобрение. Возвращает `false`, если ожидания для диалога нет или оно
-   * принадлежит другому пользователю.
+   * одобрение. Работает после рестарта API: состояние графа читается из
+   * PostgreSQL-checkpoint'а, holds — из append-only Ledger.
+   *
+   * Возвращает `null`, если ожидания нет или оно принадлежит другому
+   * пользователю (проверка прав — до возобновления).
    */
-  approveAction(conversationId: string, userId: string): boolean {
-    const pending = this.pendingApprovals.get(conversationId);
+  async approveAction(
+    userId: string,
+    conversationId: string,
+    approved: boolean,
+    onDelta?: (text: string) => void,
+    onOfficeEvent?: (event: OfficeEvent) => void,
+  ): Promise<ChatReply | null> {
+    await this.assertConversationOwner(userId, conversationId);
 
-    if (!pending || pending.userId !== userId) {
-      return false;
+    const pending =
+      await this.pendingApprovalService.findPending(conversationId);
+
+    if (pending === null || pending.userId !== userId) {
+      return null;
     }
 
-    this.pendingApprovals.delete(conversationId);
-    pending.resume();
+    const config = this.graphConfig(conversationId);
+    const snapshot = await this.graph.getState(config);
 
-    return true;
+    if (snapshot.next.length === 0) {
+      // Граф уже завершён, а запись осталась pending (например, гонка двух
+      // approve_action): закрываем её без возобновления.
+      await this.pendingApprovalService.resolvePending(
+        conversationId,
+        approved ? 'approved' : 'rejected',
+      );
+
+      return null;
+    }
+
+    onOfficeEvent?.({
+      conversationId,
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      status: 'working',
+      task: OFFICE_TASKS.resumingAfterApproval,
+    });
+
+    const stream = await this.graph.stream(
+      new Command({ resume: { approved } satisfies ChatApprovalResume }),
+      { ...config, streamMode: ['custom', 'values'] },
+    );
+    const reply = await this.consumeGraphStream(
+      stream,
+      conversationId,
+      onDelta,
+      onOfficeEvent,
+    );
+
+    const interrupt = await this.findPendingInterrupt(conversationId);
+
+    if (interrupt !== null) {
+      this.emitWaitingApproval(interrupt, onOfficeEvent);
+
+      return { conversationId, reply, pendingApproval: true };
+    }
+
+    await this.persistReply(conversationId, reply);
+    await this.rememberReply(userId, reply);
+
+    return { conversationId, reply };
+  }
+
+  /** Список диалогов пользователя, ожидающих `approve_action`. */
+  async listPendingApprovals(userId: string): Promise<
+    Array<{
+      conversationId: string;
+      reason: ChatApprovalReason;
+      tools: string[];
+      createdAt: string;
+    }>
+  > {
+    const pending = await this.pendingApprovalService.listPending(userId);
+
+    return pending.map((item) => ({
+      conversationId: item.conversationId,
+      reason: item.reason,
+      tools: item.tools,
+      createdAt: item.createdAt.toISOString(),
+    }));
   }
 
   async createConversation(
@@ -796,34 +992,38 @@ export class ChatService {
   ): Promise<ChatReply> {
     this.logAgentContext(userId, conversationId);
 
-    const {
-      messages,
-      tools,
-      approvalRequiredTools,
-      outcomePrices,
-      memoryContext,
-      userRole,
-      toolSkills,
-    } = await this.prepareMessage(userId, conversationId, content);
+    const prepared = await this.prepareMessage(
+      userId,
+      conversationId,
+      content,
+    );
     const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply: string;
 
     try {
-      const state = await this.graph.invoke({
-        conversationId,
-        userId,
-        messages,
-        availableTools: tools,
-        approvalRequiredTools,
-        outcomePrices,
-        llmRoute,
-        memoryContext,
-        userRole,
-        toolSkills,
-        taintedSecrets: [],
-      });
-      reply = state.reply;
+      const state = await this.graph.invoke(
+        {
+          conversationId,
+          userId,
+          messages: prepared.messages,
+          skills: prepared.skills,
+          approvalRequiredTools: prepared.approvalRequiredTools,
+          outcomePrices: prepared.outcomePrices,
+          llmRoute,
+          memoryContext: prepared.memoryContext,
+          userRole: prepared.userRole,
+          toolSkills: prepared.toolSkills,
+          taintedSecrets: overwriteEmptySecrets(),
+        },
+        this.graphConfig(conversationId),
+      );
+
+      if (isInterrupted(state)) {
+        return { conversationId, reply: '', pendingApproval: true };
+      }
+
+      reply = (state as ChatState).reply;
     } catch (error) {
       // Paywall: списание не удалось — песочница не запускалась,
       // прерываем граф и отдаём клиенту ключ ошибки для перевода.
@@ -832,8 +1032,6 @@ export class ChatService {
       }
 
       reply = ERROR_KEYS.insufficientFunds;
-    } finally {
-      this.pendingApprovals.delete(conversationId);
     }
 
     await this.persistReply(conversationId, reply);
@@ -844,8 +1042,9 @@ export class ChatService {
 
   /**
    * Стриминговый ответ: граф запускается в режиме `custom`, а каждый
-   * сгенерированный фрагмент текста уходит в `onDelta`. Полный ответ
-   * сохраняется в БД после завершения стрима.
+   * сгенерированный фрагмент текста уходит в `onDelta`. Если граф встал на
+   * паузу (`interrupt`), клиент получает `waiting_approval`, а ответ будет
+   * сгенерирован после `approve_action` — в том числе после рестарта API.
    */
   async streamMessage(
     userId: string,
@@ -856,15 +1055,11 @@ export class ChatService {
   ): Promise<ChatReply> {
     this.logAgentContext(userId, conversationId);
 
-    const {
-      messages,
-      tools,
-      approvalRequiredTools,
-      outcomePrices,
-      memoryContext,
-      userRole,
-      toolSkills,
-    } = await this.prepareMessage(userId, conversationId, content);
+    const prepared = await this.prepareMessage(
+      userId,
+      conversationId,
+      content,
+    );
     const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply = '';
@@ -874,54 +1069,25 @@ export class ChatService {
         {
           conversationId,
           userId,
-          messages,
-          availableTools: tools,
-          approvalRequiredTools,
-          outcomePrices,
+          messages: prepared.messages,
+          skills: prepared.skills,
+          approvalRequiredTools: prepared.approvalRequiredTools,
+          outcomePrices: prepared.outcomePrices,
           llmRoute,
-          memoryContext,
-          userRole,
-          toolSkills,
-          taintedSecrets: [],
+          memoryContext: prepared.memoryContext,
+          userRole: prepared.userRole,
+          toolSkills: prepared.toolSkills,
+          taintedSecrets: overwriteEmptySecrets(),
         },
-        { streamMode: ['custom', 'values'] },
+        { ...this.graphConfig(conversationId), streamMode: ['custom', 'values'] },
       );
 
-      for await (const event of stream) {
-        const [mode, chunk] = event as [string, unknown];
-
-        if (mode === 'custom') {
-          const event = chunk as Partial<ChatStreamEvent>;
-
-          if (event.type === 'delta' && typeof event.text === 'string') {
-            onDelta(event.text);
-          } else if (event.type === 'office') {
-            const officeEvent = event as ChatOfficeEvent;
-
-            if (
-              typeof officeEvent.agentId === 'string' &&
-              (officeEvent.status === 'working' ||
-                officeEvent.status === 'waiting_approval') &&
-              typeof officeEvent.task === 'string'
-            ) {
-              onOfficeEvent?.({
-                // Контекст диалога берём из аргумента метода: событие
-                // инструмента не должно потерять привязку к чату.
-                conversationId,
-                agentId: officeEvent.agentId,
-                status: officeEvent.status,
-                task: officeEvent.task,
-                ...(officeEvent.reason === 'approval' ||
-                officeEvent.reason === 'payment'
-                  ? { reason: officeEvent.reason }
-                  : {}),
-              });
-            }
-          }
-        } else if (mode === 'values') {
-          reply = (chunk as ChatState).reply;
-        }
-      }
+      reply = await this.consumeGraphStream(
+        stream,
+        conversationId,
+        onDelta,
+        onOfficeEvent,
+      );
     } catch (error) {
       if (!(error instanceof BadRequestException)) {
         throw error;
@@ -929,15 +1095,167 @@ export class ChatService {
 
       reply = ERROR_KEYS.insufficientFunds;
       onDelta(reply);
-    } finally {
-      // Диалог завершился (в том числе с ошибкой) — ожидание больше не нужно.
-      this.pendingApprovals.delete(conversationId);
+    }
+
+    const interrupt = await this.findPendingInterrupt(conversationId);
+
+    if (interrupt !== null) {
+      this.emitWaitingApproval(interrupt, onOfficeEvent);
+
+      return { conversationId, reply, pendingApproval: true };
     }
 
     await this.persistReply(conversationId, reply);
     await this.rememberExchange(userId, content, reply);
 
     return { conversationId, reply };
+  }
+
+  /**
+   * Читает custom/values-стрим графа. Возвращает накопленный reply из
+   * values-чанков и прокидывает дельты/office-события наружу.
+   */
+  private async consumeGraphStream(
+    stream: AsyncIterable<unknown>,
+    conversationId: string,
+    onDelta?: (text: string) => void,
+    onOfficeEvent?: (event: OfficeEvent) => void,
+  ): Promise<string> {
+    let reply = '';
+
+    for await (const event of stream) {
+      const [mode, chunk] = event as [string, unknown];
+
+      if (mode === 'custom') {
+        const custom = chunk as Partial<ChatStreamEvent>;
+
+        if (custom.type === 'delta' && typeof custom.text === 'string') {
+          onDelta?.(custom.text);
+        } else if (custom.type === 'office') {
+          const officeEvent = custom as ChatOfficeEvent;
+
+          if (
+            typeof officeEvent.agentId === 'string' &&
+            (officeEvent.status === 'working' ||
+              officeEvent.status === 'waiting_approval') &&
+            typeof officeEvent.task === 'string'
+          ) {
+            onOfficeEvent?.({
+              // Контекст диалога берём из аргумента метода: событие
+              // инструмента не должно потерять привязку к чату.
+              conversationId,
+              agentId: officeEvent.agentId,
+              status: officeEvent.status,
+              task: officeEvent.task,
+              ...(officeEvent.reason === 'approval' ||
+              officeEvent.reason === 'payment'
+                ? { reason: officeEvent.reason }
+                : {}),
+            });
+          }
+        }
+      } else if (mode === 'values') {
+        // На чанке с `__interrupt__` поля reply может не быть — не затираем
+        // уже накопленное значение.
+        const values = chunk as Partial<ChatState>;
+
+        if (typeof values.reply === 'string') {
+          reply = values.reply;
+        }
+      }
+    }
+
+    return reply;
+  }
+
+  /**
+   * Возвращает payload ожидающего `interrupt` из checkpoint'а. Именно этот
+   * запрос переживает рестарт API — оперативной карты ожиданий больше нет.
+   */
+  private async findPendingInterrupt(
+    conversationId: string,
+  ): Promise<ChatApprovalInterrupt | null> {
+    const snapshot = await this.graph.getState(
+      this.graphConfig(conversationId),
+    );
+
+    if (snapshot.next.length === 0) {
+      return null;
+    }
+
+    for (const task of snapshot.tasks) {
+      for (const interrupt of task.interrupts ?? []) {
+        const parsed = chatApprovalInterruptSchema.safeParse(interrupt.value);
+
+        if (parsed.success) {
+          return parsed.data;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /** Отправляет клиенту событие ожидания подтверждения. */
+  private emitWaitingApproval(
+    interrupt: ChatApprovalInterrupt,
+    onOfficeEvent?: (event: OfficeEvent) => void,
+  ): void {
+    onOfficeEvent?.({
+      conversationId: interrupt.conversationId,
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      status: 'waiting_approval',
+      task: interrupt.task,
+      reason: interrupt.reason,
+    });
+  }
+
+  /** Проверяет существование диалога и его принадлежность пользователю. */
+  private async assertConversationOwner(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, userId: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Диалог ${conversationId} не найден`);
+    }
+
+    if (conversation.userId !== userId) {
+      throw new ForbiddenException('Диалог принадлежит другому пользователю');
+    }
+  }
+
+  /**
+   * Отменяет «зависшее» одобрение при новом сообщении в том же диалоге:
+   * escrow-holds возвращаются пользователю, запись ожидания закрывается,
+   * checkpoint треда удаляется (следующий запуск графа стартует с начала).
+   */
+  private async discardStaleApproval(conversationId: string): Promise<void> {
+    const pending =
+      await this.pendingApprovalService.findPending(conversationId);
+
+    if (pending === null) {
+      return;
+    }
+
+    await this.pendingApprovalService.resolvePending(
+      conversationId,
+      'rejected',
+    );
+    await Promise.all(
+      pending.holds.map((hold) =>
+        this.billingService.cancelHold(hold.entryId),
+      ),
+    );
+    await this.checkpointer.deleteThread(conversationId);
+
+    this.logger.log(
+      `Отменено устаревшее ожидание одобрения: conversationId=${conversationId}`,
+    );
   }
 
   /** Проверяет диалог, баланс, сохраняет вопрос и собирает контекст. */
@@ -947,7 +1265,7 @@ export class ChatService {
     content: string,
   ): Promise<{
     messages: BaseMessage[];
-    tools: StructuredToolInterface[];
+    skills: SkillSnapshot[];
     approvalRequiredTools: string[];
     outcomePrices: Record<string, OutcomePrice>;
     memoryContext: string;
@@ -967,6 +1285,11 @@ export class ChatService {
       throw new ForbiddenException('Диалог принадлежит другому пользователю');
     }
 
+    // Новое сообщение в диалоге, где висит старое неподтверждённое действие,
+    // означает отказ от него: отменяем escrow-holds и чистим checkpoint,
+    // чтобы граф стартовал с чистого состояния.
+    await this.discardStaleApproval(conversationId);
+
     // Cost control: не запускаем даже LLM, если на счету меньше порога.
     await this.assertSufficientBalance(userId);
 
@@ -985,8 +1308,15 @@ export class ChatService {
       .reverse()
       .map((message) => toLangChainMessage(message));
 
-    const skills = await this.skillsService.getEnabledSkills();
-    const tools = this.buildTools(userId, skills);
+    const skills = (await this.skillsService.getEnabledSkills()).map(
+      (skill): SkillSnapshot => ({
+        id: skill.id,
+        name: skill.name,
+        manifest: skill.manifest,
+        isEnabled: skill.isEnabled,
+      }),
+    );
+
     const approvalRequiredTools = resolveApprovalTools(skills);
     const outcomePrices = resolveOutcomePrices(skills);
     const toolSkills = buildToolSkillContexts(skills);
@@ -1005,7 +1335,7 @@ export class ChatService {
 
     return {
       messages,
-      tools,
+      skills,
       approvalRequiredTools,
       outcomePrices,
       memoryContext,
@@ -1026,6 +1356,26 @@ export class ChatService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
+  }
+
+  /**
+   * Дополняет память ответом, сгенерированным после `approve_action`.
+   * Пользовательское сообщение уже было записано при постановке на паузу.
+   */
+  private async rememberReply(userId: string, reply: string): Promise<void> {
+    if (reply.trim() === '') {
+      return;
+    }
+
+    try {
+      await this.memoryService.remember(userId, reply);
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось обновить долговременную память: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
@@ -1061,16 +1411,6 @@ export class ChatService {
     }
   }
 
-  /** Сохраняет резолвер в Map и возвращает промис ожидания одобрения. */
-  private waitForApproval(
-    conversationId: string,
-    userId: string,
-  ): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.pendingApprovals.set(conversationId, { userId, resume: resolve });
-    });
-  }
-
   /**
    * OTel-атрибуты запуска агента: агент и tenant (владелец диалога).
    * Пишем JSON в лог приложения, чтобы позже подключить OTLP-экспорт.
@@ -1092,7 +1432,7 @@ export class ChatService {
    */
   private buildTools(
     userId: string,
-    skills: InstalledSkill[],
+    skills: readonly SkillSnapshot[],
   ): StructuredToolInterface[] {
     const beforeExecuteFor = (
       toolName: string,

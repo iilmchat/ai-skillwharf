@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+
+# Минимальный образ для one-shot миграций (KI-007). Полный образ API здесь
+# не нужен: только Prisma CLI, схема и migrations. Это ускоряет `db-migrate`
+# и не тянет LangChain/Nest в init-контейнер.
+FROM node:24-alpine
+
+# openssl нужен Prisma-движку для определения версии OpenSSL.
+# Версия Prisma должна совпадать с apps/api/package.json (5.22.0).
+RUN apk add --no-cache openssl \
+  && npm install --global --no-fund --no-audit prisma@5.22.0 \
+  && npm cache clean --force
+
+WORKDIR /app
+
+# Схема и каталог migrations; DATABASE_URL передаётся через environment.
+COPY apps/api/prisma ./prisma
+
+# node (UID 1000) уже есть в официальном образе; root для миграций не нужен.
+USER node
+
+ENTRYPOINT ["prisma", "migrate", "deploy"]

@@ -54,6 +54,9 @@ jobs:
       - name: Test Docker Build
         run: docker compose build api
 
+      - name: Test db-migrate Build
+        run: docker compose build db-migrate
+
       - name: Test Sandbox Worker Build
         run: docker compose build sandbox-worker
 

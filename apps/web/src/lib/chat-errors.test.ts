@@ -69,6 +69,22 @@ describe('getErrorMeta', () => {
       ),
     ).toEqual({ code: ERROR_CODES.dailyTokenLimit, status: 429 });
   });
+
+  it('достаёт MCP-код и статус из тела ошибки Axios', () => {
+    expect(
+      getErrorMetaFromError(
+        axiosErrorWith(
+          {
+            statusCode: 504,
+            error: 'Gateway Timeout',
+            code: ERROR_CODES.mcpTimeout,
+            message: 'MCP-провайдер не ответил за 15000 мс',
+          },
+          504,
+        ),
+      ),
+    ).toEqual({ code: ERROR_CODES.mcpTimeout, status: 504 });
+  });
 });
 
 describe('classifyChatError', () => {
@@ -104,6 +120,56 @@ describe('classifyChatError', () => {
         status: undefined,
       }),
     ).toBe('dailyTokenLimit');
+  });
+
+  it.each([
+    { code: ERROR_CODES.mcpProvider, kind: 'mcpProvider' },
+    { code: ERROR_CODES.mcpTimeout, kind: 'mcpTimeout' },
+    { code: ERROR_CODES.mcpUnavailable, kind: 'mcpUnavailable' },
+  ] as const)(
+    'распознаёт MCP-код $code как отдельную категорию',
+    ({ code, kind }) => {
+      expect(
+        classifyChatError(
+          'MCP-провайдер вернул ошибку при вызове ozon_orders',
+          {
+            code,
+            status: 502,
+          },
+        ),
+      ).toBe(kind);
+    },
+  );
+
+  it('код важнее текстовых маркеров: MCP-ошибка не становится дневным лимитом', () => {
+    expect(
+      classifyChatError('Too Many Requests', {
+        code: ERROR_CODES.mcpTimeout,
+        status: 504,
+      }),
+    ).toBe('mcpTimeout');
+  });
+
+  it('без `code` старый MCP-текст остаётся marketplace-fallback', () => {
+    expect(classifyChatError('MCP Error: transport failed')).toBe(
+      'marketplace',
+    );
+    expect(classifyChatError('fetch failed')).toBe('marketplace');
+  });
+
+  it('неизвестный `code` не превращает MCP-текст в лишнюю категорию', () => {
+    expect(
+      classifyChatError('MCP Error: connection refused', {
+        code: 'errors.unknown',
+        status: undefined,
+      }),
+    ).toBe('marketplace');
+    expect(
+      classifyChatError('Что-то пошло не так', {
+        code: 'errors.unknown',
+        status: undefined,
+      }),
+    ).toBeNull();
   });
 
   it('по-прежнему распознаёт ошибку marketplace по тексту', () => {

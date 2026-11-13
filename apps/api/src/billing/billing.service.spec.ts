@@ -4,6 +4,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { BillingService } from './billing.service.js';
+import {
+  decodeLedgerCursor,
+  encodeLedgerCursor,
+} from './dto/ledger-query.dto.js';
+import { LedgerPageSchema } from './dto/ledger-response.dto.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -27,6 +32,7 @@ interface PrismaMock {
     findUnique: MockFn;
     findMany: MockFn;
     aggregate: MockFn;
+    count: MockFn;
   };
   skillUsage: { updateMany: MockFn; findUnique: MockFn; create: MockFn };
   $transaction: MockFn;
@@ -68,6 +74,7 @@ describe('BillingService', () => {
         findUnique: vi.fn(),
         findMany: vi.fn(),
         aggregate: vi.fn(),
+        count: vi.fn(),
       },
       skillUsage: {
         updateMany: vi.fn(),
@@ -176,6 +183,240 @@ describe('BillingService', () => {
       prisma.ledgerEntry.findMany.mockResolvedValue([]);
 
       await expect(service.getTransactionHistory(USER_ID)).resolves.toEqual([]);
+    });
+  });
+
+  describe('getTransactionPage', () => {
+    interface FakeLedgerRow {
+      id: string;
+      amount: Prisma.Decimal;
+      balanceAfter: Prisma.Decimal;
+      type: string;
+      description: string;
+      createdAt: Date;
+    }
+
+    interface CursorCondition {
+      createdAt: Date | { lt: Date };
+      id?: { lt: string };
+    }
+
+    function ledgerRow(id: string, createdAt: string): FakeLedgerRow {
+      return {
+        id,
+        amount: new Prisma.Decimal('10.00'),
+        balanceAfter: new Prisma.Decimal('90.00'),
+        type: 'credit',
+        description: `Операция ${id}`,
+        createdAt: new Date(createdAt),
+      };
+    }
+
+    /**
+     * Имитация Postgres для keyset-пагинации: сортировка createdAt desc,
+     * id desc и фильтр по OR-условиям курсора.
+     */
+    function useFakeLedgerTable(rows: FakeLedgerRow[]): void {
+      prisma.ledgerEntry.findMany.mockImplementation(
+        async (args: {
+          where: { OR?: CursorCondition[] };
+          skip?: number;
+          take: number;
+        }) => {
+          let result = [...rows].sort((left, right) => {
+            const byDate = right.createdAt.getTime() - left.createdAt.getTime();
+
+            if (byDate !== 0) {
+              return byDate;
+            }
+
+            return left.id < right.id ? 1 : left.id > right.id ? -1 : 0;
+          });
+
+          const conditions = args.where.OR;
+
+          if (conditions !== undefined) {
+            result = result.filter((row) =>
+              conditions.some((condition) => {
+                const cursorDate =
+                  condition.createdAt instanceof Date
+                    ? condition.createdAt
+                    : condition.createdAt.lt;
+
+                if (row.createdAt.getTime() < cursorDate.getTime()) {
+                  return true;
+                }
+
+                if (row.createdAt.getTime() !== cursorDate.getTime()) {
+                  return false;
+                }
+
+                return condition.id !== undefined && row.id < condition.id.lt;
+              }),
+            );
+          }
+
+          const offset = args.skip ?? 0;
+
+          return result.slice(offset, offset + args.take);
+        },
+      );
+      prisma.ledgerEntry.count.mockResolvedValue(rows.length);
+    }
+
+    it('отдаёт offset-страницу с total и без курсора на последней странице', async () => {
+      prisma.ledgerEntry.findMany.mockResolvedValue([
+        ledgerRow('entry-2', '2026-11-13T10:00:00.000Z'),
+        ledgerRow('entry-1', '2026-11-12T10:00:00.000Z'),
+      ]);
+      prisma.ledgerEntry.count.mockResolvedValue(42);
+
+      const page = await service.getTransactionPage(USER_ID, {
+        limit: 2,
+        offset: 10,
+      });
+
+      expect(LedgerPageSchema.safeParse(page).success).toBe(true);
+      expect(page).toEqual({
+        items: [
+          {
+            id: 'entry-2',
+            amount: '10.00',
+            balanceAfter: '90.00',
+            type: 'credit',
+            description: 'Операция entry-2',
+            createdAt: '2026-11-13T10:00:00.000Z',
+          },
+          {
+            id: 'entry-1',
+            amount: '10.00',
+            balanceAfter: '90.00',
+            type: 'credit',
+            description: 'Операция entry-1',
+            createdAt: '2026-11-12T10:00:00.000Z',
+          },
+        ],
+        total: 42,
+        nextCursor: null,
+      });
+      expect(prisma.ledgerEntry.findMany).toHaveBeenCalledWith({
+        where: { wallet: { userId: USER_ID } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: 10,
+        take: 3,
+        select: {
+          id: true,
+          amount: true,
+          balanceAfter: true,
+          type: true,
+          description: true,
+          createdAt: true,
+        },
+      });
+      // total — общее количество операций, а не длина страницы.
+      expect(prisma.ledgerEntry.count).toHaveBeenCalledWith({
+        where: { wallet: { userId: USER_ID } },
+      });
+    });
+
+    it('возвращает nextCursor последнего элемента, если есть ещё записи', async () => {
+      prisma.ledgerEntry.findMany.mockResolvedValue([
+        ledgerRow('entry-3', '2026-11-13T10:00:00.000Z'),
+        ledgerRow('entry-2', '2026-11-12T10:00:00.000Z'),
+        ledgerRow('entry-1', '2026-11-11T10:00:00.000Z'),
+      ]);
+      prisma.ledgerEntry.count.mockResolvedValue(3);
+
+      const page = await service.getTransactionPage(USER_ID, {
+        limit: 2,
+        offset: 0,
+      });
+
+      expect(page.items.map((item) => item.id)).toEqual(['entry-3', 'entry-2']);
+      expect(page.nextCursor).toBe(
+        encodeLedgerCursor({
+          createdAt: '2026-11-12T10:00:00.000Z',
+          id: 'entry-2',
+        }),
+      );
+      expect(decodeLedgerCursor(page.nextCursor ?? '')).toEqual({
+        createdAt: '2026-11-12T10:00:00.000Z',
+        id: 'entry-2',
+      });
+    });
+
+    it('отдаёт cursor-страницу без дублей и не использует skip', async () => {
+      useFakeLedgerTable([
+        ledgerRow('entry-1', '2026-11-12T09:00:00.000Z'),
+        ledgerRow('entry-2', '2026-11-13T11:00:00.000Z'),
+        ledgerRow('entry-3', '2026-11-13T10:00:00.000Z'),
+        ledgerRow('entry-4', '2026-11-13T10:00:00.000Z'),
+      ]);
+
+      const firstPage = await service.getTransactionPage(USER_ID, {
+        limit: 2,
+        offset: 0,
+      });
+
+      expect(firstPage.items.map((item) => item.id)).toEqual([
+        'entry-2',
+        'entry-4',
+      ]);
+
+      const cursor = decodeLedgerCursor(firstPage.nextCursor ?? '');
+
+      if (cursor === null) {
+        throw new Error('nextCursor первой страницы не декодируется');
+      }
+
+      expect(cursor).toEqual({
+        createdAt: '2026-11-13T10:00:00.000Z',
+        id: 'entry-4',
+      });
+
+      const secondPage = await service.getTransactionPage(USER_ID, {
+        limit: 2,
+        offset: 0,
+        cursor,
+      });
+
+      expect(secondPage.items.map((item) => item.id)).toEqual([
+        'entry-3',
+        'entry-1',
+      ]);
+      expect(secondPage.nextCursor).toBeNull();
+      expect(secondPage.total).toBe(4);
+      expect(LedgerPageSchema.safeParse(secondPage).success).toBe(true);
+
+      const allIds = [...firstPage.items, ...secondPage.items].map(
+        (item) => item.id,
+      );
+      expect(new Set(allIds).size).toBe(4);
+
+      const [cursorArgs] = prisma.ledgerEntry.findMany.mock.calls.at(-1) as [
+        Record<string, unknown>,
+      ];
+      expect(cursorArgs.where).toEqual({
+        wallet: { userId: USER_ID },
+        OR: [
+          { createdAt: { lt: new Date('2026-11-13T10:00:00.000Z') } },
+          {
+            createdAt: new Date('2026-11-13T10:00:00.000Z'),
+            id: { lt: 'entry-4' },
+          },
+        ],
+      });
+      expect(cursorArgs).not.toHaveProperty('skip');
+      expect(cursorArgs.take).toBe(3);
+    });
+
+    it('возвращает пустую страницу, если операций нет', async () => {
+      prisma.ledgerEntry.findMany.mockResolvedValue([]);
+      prisma.ledgerEntry.count.mockResolvedValue(0);
+
+      await expect(
+        service.getTransactionPage(USER_ID, { limit: 20, offset: 0 }),
+      ).resolves.toEqual({ items: [], total: 0, nextCursor: null });
     });
   });
 

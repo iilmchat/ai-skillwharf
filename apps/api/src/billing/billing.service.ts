@@ -8,6 +8,11 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  encodeLedgerCursor,
+  type LedgerQuery,
+} from './dto/ledger-query.dto.js';
+import type { LedgerItem, LedgerPage } from './dto/ledger-response.dto.js';
 
 export interface WalletBalance {
   balance: string;
@@ -100,6 +105,77 @@ export class BillingService {
       description: entry.description,
       createdAt: entry.createdAt,
     }));
+  }
+
+  /**
+   * Страница истории операций (read-API Ledger).
+   *
+   * Две стратегии: `offset` — простые страницы, `cursor` — keyset-пагинация
+   * по `(createdAt, id)`, при которой новые записи не сдвигают уже выданные
+   * страницы. Порядок — от новых к старым, `total` — общее число операций
+   * пользователя (не длина страницы). `createdAt` отдаётся строкой ISO 8601.
+   */
+  async getTransactionPage(
+    userId: string,
+    query: LedgerQuery,
+  ): Promise<LedgerPage> {
+    const where =
+      query.cursor === undefined
+        ? { wallet: { userId } }
+        : {
+            wallet: { userId },
+            OR: [
+              { createdAt: { lt: new Date(query.cursor.createdAt) } },
+              {
+                createdAt: new Date(query.cursor.createdAt),
+                id: { lt: query.cursor.id },
+              },
+            ],
+          };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(query.cursor === undefined ? { skip: query.offset } : {}),
+        // Одна запись сверху нужна только чтобы понять, есть ли следующая страница.
+        take: query.limit + 1,
+        select: {
+          id: true,
+          amount: true,
+          balanceAfter: true,
+          type: true,
+          description: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.ledgerEntry.count({ where: { wallet: { userId } } }),
+    ]);
+
+    const hasMore = rows.length > query.limit;
+    const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
+    const lastRow = pageRows.at(-1);
+
+    const items: LedgerItem[] = pageRows.map((entry) => ({
+      id: entry.id,
+      amount: formatBalance(entry.amount),
+      balanceAfter: formatBalance(entry.balanceAfter),
+      type: entry.type,
+      description: entry.description,
+      createdAt: entry.createdAt.toISOString(),
+    }));
+
+    return {
+      items,
+      total,
+      nextCursor:
+        hasMore && lastRow !== undefined
+          ? encodeLedgerCursor({
+              createdAt: lastRow.createdAt.toISOString(),
+              id: lastRow.id,
+            })
+          : null,
+    };
   }
 
   /**

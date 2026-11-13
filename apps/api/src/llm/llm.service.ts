@@ -34,6 +34,10 @@ import type {
 } from './adapters/types.js';
 import { YandexAdapter } from './adapters/yandex.adapter.js';
 import { DailyTokenLimitException } from './daily-token-limit.exception.js';
+import {
+  estimateMessagesTokens,
+  estimateUsageFromMessages,
+} from './token-estimator.js';
 import { McpClient } from './tools/mcp-client.js';
 import {
   McpGateway,
@@ -89,6 +93,36 @@ export interface LlmCallOptions {
 
 /** Доля жёсткого лимита, после которой Budget Guard пишет предупреждение. */
 export const DAILY_TOKEN_SOFT_LIMIT_RATIO = 0.8;
+
+/**
+ * Резерв токенов на ответ модели, который списывается с дневного бюджета
+ * ДО вызова провайдера (KI-021). После ответа резерв сверяется с фактическим
+ * `usage`: излишек возвращается, недостача дописывается.
+ */
+export const DEFAULT_RESERVED_OUTPUT_TOKENS = 4096;
+
+/**
+ * Размер резерва вывода: `LLM_RESERVE_OUTPUT_TOKENS` из окружения или
+ * `DEFAULT_RESERVED_OUTPUT_TOKENS`. Некорректное значение игнорируется,
+ * чтобы конфигурация не ломала бюджет.
+ */
+export function resolveReservedOutputTokens(
+  value: string | undefined = process.env.LLM_RESERVE_OUTPUT_TOKENS,
+): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_RESERVED_OUTPUT_TOKENS;
+}
+
+/**
+ * Резерв дневного бюджета одного вызова LLM: сколько токенов зарезервировано
+ * до обращения к провайдеру.
+ */
+interface TokenReservation {
+  readonly reserved: number;
+}
 
 /**
  * Начало текущих суток в UTC. Счётчик токенов сбрасывается при первом
@@ -887,6 +921,10 @@ export class LlmService {
   /**
    * Вызов LLM с набором инструментов. Возвращает ответ модели как есть:
    * если в нём есть `tool_calls`, их должен выполнить вызывающий граф.
+   *
+   * Дневной бюджет резервируется ДО обращения к провайдеру (KI-021): если
+   * резерв не помещается в лимит, клиент получает 429, а токены провайдера
+   * не тратятся. После ответа резерв сверяется с фактическим `usage`.
    */
   async chatWithTools(
     messages: BaseMessage[],
@@ -894,8 +932,6 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): Promise<AIMessage> {
-    await this.assertDailyTokenLimit(options.userId);
-
     const adapter = this.resolveAdapter(route);
 
     if (adapter) {
@@ -918,15 +954,30 @@ export class LlmService {
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    const response = await this.trackedLlmCall(route, () =>
-      model.invoke(withLanguageInstruction(messages, systemPrompt)),
+    const reservation = await this.reserveDailyTokens(
+      options.userId,
+      estimateMessagesTokens(messages, systemPrompt),
     );
 
-    this.logGenAiUsage(route, response.usage_metadata);
-    await this.chargeLlmUsage(options.userId, response.usage_metadata);
-    await this.chargeDailyTokensAtomically(
+    let response: AIMessage;
+
+    try {
+      response = await this.trackedLlmCall(route, () =>
+        model.invoke(withLanguageInstruction(messages, systemPrompt)),
+      );
+    } catch (error) {
+      // Провайдер не вернул ответ и usage: возвращаем резерв в бюджет.
+      await this.refundDailyTokens(options.userId, reservation);
+      throw error;
+    }
+
+    await this.recordLlmResponse(
+      route,
       options.userId,
-      response.usage_metadata,
+      messages,
+      systemPrompt,
+      reservation,
+      response,
     );
 
     return response;
@@ -943,15 +994,18 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
-    await this.assertDailyTokenLimit(options.userId);
-
     const adapter = this.resolveAdapter(route);
 
     if (adapter) {
+      await this.assertCanAffordLlm(options.userId);
+
       const systemPrompt = await this.getSystemPrompt(options.memoryContext);
       const request: NativeChatRequest = { messages, tools, systemPrompt };
-
-      await this.assertCanAffordLlm(options.userId);
+      // Резерв до первой дельты: даже если стрим прервётся, бюджет уже занят.
+      const reservation = await this.reserveDailyTokens(
+        options.userId,
+        estimateMessagesTokens(messages, systemPrompt),
+      );
 
       let message: AIMessage;
       let emittedDelta = false;
@@ -976,27 +1030,44 @@ export class LlmService {
 
           if (emittedDelta) {
             // Часть ответа уже ушла клиенту: повторять запрос нельзя,
-            // иначе пользователь увидит текст дважды.
+            // иначе пользователь увидит текст дважды. Usage не получен —
+            // возвращаем неиспользованный резерв.
+            await this.refundDailyTokens(options.userId, reservation);
             throw error;
           }
 
           this.logger.warn(
             `LLM-адаптер ${adapter.provider}: стриминг недоступен (${describeError(error)}), fallback на обычный режим`,
           );
-          message = await this.trackedLlmCall(route, () =>
-            adapter.chat(request),
-          );
+
+          try {
+            message = await this.trackedLlmCall(route, () =>
+              adapter.chat(request),
+            );
+          } catch (fallbackError) {
+            await this.refundDailyTokens(options.userId, reservation);
+            throw fallbackError;
+          }
         }
       } else {
         // Адаптеры без стриминга (например, YandexGPT) отвечают целиком.
-        message = await this.trackedLlmCall(route, () => adapter.chat(request));
+        try {
+          message = await this.trackedLlmCall(route, () =>
+            adapter.chat(request),
+          );
+        } catch (error) {
+          await this.refundDailyTokens(options.userId, reservation);
+          throw error;
+        }
       }
 
-      this.logGenAiUsage(route, message.usage_metadata);
-      await this.chargeLlmUsage(options.userId, message.usage_metadata);
-      await this.chargeDailyTokensAtomically(
+      await this.recordLlmResponse(
+        route,
         options.userId,
-        message.usage_metadata,
+        messages,
+        systemPrompt,
+        reservation,
+        message,
       );
 
       if (
@@ -1028,6 +1099,11 @@ export class LlmService {
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
+    // Резерв до вызова провайдера и, значит, до первой `delta`.
+    const reservation = await this.reserveDailyTokens(
+      options.userId,
+      estimateMessagesTokens(messages, systemPrompt),
+    );
     let accumulated: AIMessageChunk | undefined;
 
     try {
@@ -1042,6 +1118,20 @@ export class LlmService {
       }
     } catch (error) {
       this.recordLlmError(route, error);
+      const partialUsage = accumulated?.usage_metadata;
+
+      if (totalTokens(partialUsage) > 0) {
+        // Usage успел прийти до сбоя: сверяем резерв с фактическим расходом,
+        // возвращать его целиком нельзя.
+        await this.reconcileDailyTokens(
+          options.userId,
+          reservation,
+          partialUsage,
+        );
+      } else {
+        await this.refundDailyTokens(options.userId, reservation);
+      }
+
       throw error;
     }
 
@@ -1054,11 +1144,13 @@ export class LlmService {
         })
       : new AIMessage('');
 
-    this.logGenAiUsage(route, message.usage_metadata);
-    await this.chargeLlmUsage(options.userId, message.usage_metadata);
-    await this.chargeDailyTokensAtomically(
+    await this.recordLlmResponse(
+      route,
       options.userId,
-      message.usage_metadata,
+      messages,
+      systemPrompt,
+      reservation,
+      message,
     );
 
     yield { type: 'message', message };
@@ -1082,19 +1174,33 @@ export class LlmService {
   }
 
   /**
-   * Budget Guard, мягкая проверка перед вызовом LLM.
+   * Budget Guard: атомарный резерв дневного бюджета ДО вызова провайдера.
    *
-   * Счётчик сбрасывается лениво при первом запросе нового дня. Проверка
-   * read-only: при конкурентных запросах несколько вызовов могут пройти её
-   * одновременно, поэтому жёсткую гарантию даёт атомарное списание после
-   * ответа. Мягкий порог (80% лимита) только логируется; уже исчерпанный
-   * лимит даёт ранний отказ, чтобы не тратить токены впустую.
+   * Порядок (KI-021):
+   * 1. ленивый сброс суток условным `updateMany` — как раньше, чтобы не
+   *    сбрасывать счётчик дважды при параллельных запросах;
+   * 2. атомарный резерв `prompt estimate + reserved output` тем же приёмом:
+   *    `where dailyTokensUsed <= dailyTokenLimit - reserved` и `increment`.
+   *    Postgres блокирует строку, поэтому конкурентные запросы делят лимит
+   *    без гонок;
+   * 3. `count === 0` — резерв не помещается: пишем `gen_ai.budget.hard_limit`
+   *    и отдаём 429 до обращения к провайдеру (токены не тратятся);
+   * 4. после успешного резерва, если счётчик достиг 80% лимита, пишем
+   *    `gen_ai.budget.soft_limit` (предупреждение, не отказ).
+   *
+   * Возвращает `null`, если учёт не ведётся (нет пользователя или Prisma).
    */
-  private async assertDailyTokenLimit(userId?: string): Promise<void> {
+  private async reserveDailyTokens(
+    userId: string | undefined,
+    estimatedPromptTokens: number,
+  ): Promise<TokenReservation | null> {
     if (!userId || !this.prisma) {
-      return;
+      return null;
     }
 
+    const reserved = estimatedPromptTokens + resolveReservedOutputTokens();
+
+    const now = new Date();
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -1105,11 +1211,8 @@ export class LlmService {
     });
 
     if (!user) {
-      return;
+      return null;
     }
-
-    const now = new Date();
-    let used = user.dailyTokensUsed;
 
     if (needsDailyTokenReset(user.lastTokenReset, now)) {
       // Условный updateMany исключает двойной сброс при параллельных запросах.
@@ -1117,9 +1220,36 @@ export class LlmService {
         where: { id: userId, lastTokenReset: { lt: startOfUtcDay(now) } },
         data: { dailyTokensUsed: 0, lastTokenReset: now },
       });
-      used = 0;
     }
 
+    const reservation = await this.prisma.user.updateMany({
+      where: {
+        id: userId,
+        dailyTokensUsed: { lte: user.dailyTokenLimit - reserved },
+      },
+      data: { dailyTokensUsed: { increment: reserved } },
+    });
+
+    if (reservation.count === 0) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'gen_ai.budget.hard_limit',
+          userId,
+          'gen_ai.tokens': reserved,
+          'gen_ai.daily_token_limit': user.dailyTokenLimit,
+        }),
+      );
+
+      throw new DailyTokenLimitException();
+    }
+
+    // Читаем счётчик после резерва: параллельные вызовы могли увеличить его
+    // сильнее, чем видно в снапшоте `user`.
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { dailyTokensUsed: true },
+    });
+    const used = current?.dailyTokensUsed ?? user.dailyTokensUsed + reserved;
     const softLimit = Math.floor(
       user.dailyTokenLimit * DAILY_TOKEN_SOFT_LIMIT_RATIO,
     );
@@ -1136,30 +1266,43 @@ export class LlmService {
       );
     }
 
-    if (used >= user.dailyTokenLimit) {
-      throw new DailyTokenLimitException();
-    }
+    return { reserved };
   }
 
   /**
-   * Атомарно списывает токены с дневного счётчика (жёсткий лимит).
+   * Сверяет резерв с фактическим расходом после ответа провайдера.
    *
-   * `updateMany` с условием `dailyTokensUsed + tokens <= dailyTokenLimit`
-   * выполняется одной SQL-операцией: Postgres блокирует строку, поэтому при
-   * конкурентных запросах счётчик не может превысить жёсткий лимит.
-   * `count === 0` означает превышение — клиент получает 429 в едином формате.
+   * `delta = actual - reserved`: излишек возвращается в бюджет атомарным
+   * `decrement` с защитой от отрицательного счётчика, недостача дописывается
+   * атомарным `increment` с условием жёсткого лимита. Если дописать некуда,
+   * пишем `gen_ai.budget.reconcile_overflow` и прижимаем счётчик к лимиту:
+   * жёсткий лимит не превышается, но фактический расход по этой операции
+   * может быть больше учтённого (осознанный drift, KI-021).
    */
-  private async chargeDailyTokensAtomically(
+  private async reconcileDailyTokens(
     userId: string | undefined,
+    reservation: TokenReservation | null,
     usage: AIMessage['usage_metadata'],
   ): Promise<void> {
-    if (!userId || !this.prisma) {
+    if (!userId || !this.prisma || reservation === null) {
       return;
     }
 
-    const tokens = totalTokens(usage);
+    const actual = totalTokens(usage);
+    const delta = actual - reservation.reserved;
 
-    if (tokens <= 0) {
+    if (delta === 0) {
+      return;
+    }
+
+    if (delta < 0) {
+      const refund = -delta;
+
+      await this.prisma.user.updateMany({
+        where: { id: userId, dailyTokensUsed: { gte: refund } },
+        data: { dailyTokensUsed: { decrement: refund } },
+      });
+
       return;
     }
 
@@ -1172,26 +1315,99 @@ export class LlmService {
       return;
     }
 
-    const charged = await this.prisma.user.updateMany({
+    const added = await this.prisma.user.updateMany({
       where: {
         id: userId,
-        dailyTokensUsed: { lte: user.dailyTokenLimit - tokens },
+        dailyTokensUsed: { lte: user.dailyTokenLimit - delta },
       },
-      data: { dailyTokensUsed: { increment: tokens } },
+      data: { dailyTokensUsed: { increment: delta } },
     });
 
-    if (charged.count === 0) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'gen_ai.budget.hard_limit',
-          userId,
-          'gen_ai.tokens': tokens,
-          'gen_ai.daily_token_limit': user.dailyTokenLimit,
-        }),
-      );
-
-      throw new DailyTokenLimitException();
+    if (added.count !== 0) {
+      return;
     }
+
+    this.logger.warn(
+      JSON.stringify({
+        event: 'gen_ai.budget.reconcile_overflow',
+        userId,
+        'gen_ai.tokens': delta,
+        'gen_ai.daily_token_limit': user.dailyTokenLimit,
+      }),
+    );
+
+    await this.prisma.user.updateMany({
+      where: { id: userId },
+      data: { dailyTokensUsed: user.dailyTokenLimit },
+    });
+  }
+
+  /**
+   * Возвращает резерв в бюджет, если провайдер не вернул ответ (ошибка до
+   * получения `usage`). Условие `dailyTokensUsed >= refund` защищает счётчик
+   * от отрицательного значения, если сутки уже сбросились.
+   */
+  private async refundDailyTokens(
+    userId: string | undefined,
+    reservation: TokenReservation | null,
+  ): Promise<void> {
+    if (!userId || !this.prisma || reservation === null) {
+      return;
+    }
+
+    await this.prisma.user.updateMany({
+      where: { id: userId, dailyTokensUsed: { gte: reservation.reserved } },
+      data: { dailyTokensUsed: { decrement: reservation.reserved } },
+    });
+  }
+
+  /**
+   * Учёт полученного ответа: `usage` с fallback-оценкой (KI-022), лог
+   * `gen_ai.usage`, списание денег и сверка дневного резерва. Общий
+   * хвост всех четырёх путей вызова LLM.
+   */
+  private async recordLlmResponse(
+    route: LlmRouteSelection | undefined,
+    userId: string | undefined,
+    messages: BaseMessage[],
+    systemPrompt: string,
+    reservation: TokenReservation | null,
+    message: AIMessage,
+  ): Promise<void> {
+    const { usage, estimated } = this.resolveUsage(
+      route,
+      messages,
+      systemPrompt,
+      messageContentToText(message.content),
+      message.usage_metadata,
+    );
+
+    this.logGenAiUsage(route, usage, estimated);
+    await this.chargeLlmUsage(userId, usage);
+    await this.reconcileDailyTokens(userId, reservation, usage);
+  }
+
+  /**
+   * `usage` ответа или fallback-оценка, если провайдер не прислал usage
+   * (KI-022: GigaChat может опустить его в стрим-чанке). Оценка считается
+   * локальным токенизатором по отправленному prompt и тексту ответа; при
+   * наличии `usage` поведение не меняется.
+   */
+  private resolveUsage(
+    route: LlmRouteSelection | undefined,
+    messages: BaseMessage[],
+    systemPrompt: string,
+    completionText: string,
+    usage: AIMessage['usage_metadata'],
+  ): { usage: AIMessage['usage_metadata']; estimated: boolean } {
+    if (totalTokens(usage) > 0) {
+      return { usage, estimated: false };
+    }
+
+    return {
+      usage: estimateUsageFromMessages(messages, completionText, systemPrompt),
+      estimated: true,
+    };
   }
 
   /**
@@ -1270,11 +1486,14 @@ export class LlmService {
   /**
    * OTel-совместимый лог вызова LLM. Пока пишем JSON в лог приложения:
    * позже эти атрибуты можно отправить в OTLP-коллектор без изменения
-   * вызывающего кода.
+   * вызывающего кода. Для fallback-оценки (провайдер не прислал usage)
+   * добавляется флаг `gen_ai.usage_estimated` и отдельное событие
+   * `gen_ai.usage.fallback`, чтобы такие вызовы было видно в метриках.
    */
   private logGenAiUsage(
     route: LlmRouteSelection | undefined,
     usage: AIMessage['usage_metadata'],
+    estimated = false,
   ): void {
     const promptTokens = usage?.input_tokens ?? 0;
     const completionTokens = usage?.output_tokens ?? 0;
@@ -1293,13 +1512,25 @@ export class LlmService {
         'gen_ai.model': route?.modelName.trim() || process.env.LLM_MODEL,
         'gen_ai.prompt_tokens': promptTokens,
         'gen_ai.completion_tokens': completionTokens,
+        ...(estimated ? { 'gen_ai.usage_estimated': true } : {}),
       }),
     );
+
+    if (estimated) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'gen_ai.usage.fallback',
+          'gen_ai.system': this.metricsProvider(route),
+          'gen_ai.model': this.metricsModel(route),
+        }),
+      );
+    }
   }
 
   /**
    * Вызов нативного провайдера (YandexGPT/GigaChat): адаптер сам ходит в
-   * свой API, а мы приводим ответ к `AIMessage` и списываем токены.
+   * свой API, а мы приводим ответ к `AIMessage` и списываем токены. Резерв
+   * дневного бюджета берётся до вызова адаптера, сверка — после ответа.
    */
   private async chatWithAdapter(
     adapter: NativeProviderAdapter,
@@ -1311,15 +1542,30 @@ export class LlmService {
     await this.assertCanAffordLlm(options.userId);
 
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    const response = await this.trackedLlmCall(route, () =>
-      adapter.chat({ messages, tools, systemPrompt }),
+    const reservation = await this.reserveDailyTokens(
+      options.userId,
+      estimateMessagesTokens(messages, systemPrompt),
     );
 
-    this.logGenAiUsage(route, response.usage_metadata);
-    await this.chargeLlmUsage(options.userId, response.usage_metadata);
-    await this.chargeDailyTokensAtomically(
+    let response: AIMessage;
+
+    try {
+      response = await this.trackedLlmCall(route, () =>
+        adapter.chat({ messages, tools, systemPrompt }),
+      );
+    } catch (error) {
+      // Адаптер упал до получения usage: возвращаем резерв и пробрасываем.
+      await this.refundDailyTokens(options.userId, reservation);
+      throw error;
+    }
+
+    await this.recordLlmResponse(
+      route,
       options.userId,
-      response.usage_metadata,
+      messages,
+      systemPrompt,
+      reservation,
+      response,
     );
 
     return response;

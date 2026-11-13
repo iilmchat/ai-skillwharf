@@ -10,8 +10,11 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { Test, TestingModule } from '@nestjs/testing';
+import { MemorySaver } from '@langchain/langgraph';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { InstalledSkill } from '@prisma/client';
 import type { SkillPermission } from '@skillwharf/shared';
+import { createFakeCheckpointPrisma } from '../../test/checkpointer/fake-checkpoint-store.js';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import {
@@ -45,6 +48,78 @@ import type { SandboxService } from '../sandbox/sandbox.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import { ChatService } from './chat.service.js';
 import type { OfficeEvent } from './office-events.js';
+import {
+  PendingApprovalService,
+  type PendingApprovalHold,
+  type PendingApprovalRecord,
+  type PendingApprovalReason,
+} from './persistence/pending-approval.service.js';
+import { GRAPH_CHECKPOINTER } from './persistence/persistence.module.js';
+import { PrismaCheckpointSaver } from './persistence/prisma-checkpoint.saver.js';
+
+/**
+ * In-memory замена PendingApprovalService для unit/интеграционных тестов.
+ * Хранилище можно передать двум ChatService — это эмулирует durable-таблицу
+ * между «рестартами» API.
+ */
+class FakePendingApprovals {
+  private readonly rows = new Map<string, PendingApprovalRecord>();
+
+  async upsertPending(input: {
+    conversationId: string;
+    userId: string;
+    reason: PendingApprovalReason;
+    tools: readonly string[];
+    holds: readonly PendingApprovalHold[];
+  }): Promise<PendingApprovalRecord> {
+    const existing = this.rows.get(input.conversationId);
+    const record: PendingApprovalRecord = {
+      id: existing?.id ?? `pending-${this.rows.size + 1}`,
+      conversationId: input.conversationId,
+      userId: input.userId,
+      reason: input.reason,
+      tools: [...input.tools],
+      holds: [...input.holds],
+      status: 'pending',
+      createdAt: existing?.createdAt ?? new Date(),
+      resolvedAt: null,
+    };
+
+    this.rows.set(input.conversationId, record);
+
+    return record;
+  }
+
+  async findPending(
+    conversationId: string,
+  ): Promise<PendingApprovalRecord | null> {
+    const record = this.rows.get(conversationId);
+
+    return record?.status === 'pending' ? record : null;
+  }
+
+  async listPending(userId: string): Promise<PendingApprovalRecord[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.userId === userId && row.status === 'pending')
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async resolvePending(
+    conversationId: string,
+    status: 'approved' | 'rejected',
+  ): Promise<number> {
+    const record = this.rows.get(conversationId);
+
+    if (!record || record.status !== 'pending') {
+      return 0;
+    }
+
+    record.status = status;
+    record.resolvedAt = new Date();
+
+    return 1;
+  }
+}
 
 const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
@@ -184,6 +259,41 @@ describe('ChatService', () => {
   let memory: MemoryMock;
   let llm: LlmService;
   let chatWithToolsStream: ReturnType<typeof vi.spyOn>;
+  let checkpointer: MemorySaver;
+  let pendingApprovals: FakePendingApprovals;
+
+  /** Минимальный контракт хранилища ожиданий для ChatService. */
+  type PendingApprovalStore = Pick<
+    FakePendingApprovals,
+    'upsertPending' | 'findPending' | 'listPending' | 'resolvePending'
+  >;
+
+  /**
+   * Собирает ChatService на текущих моках. Переданные saver/pending-store
+   * позволяют создать второй экземпляр поверх того же состояния — эмуляция
+   * рестарта API (граф и кэши процесса теряются, PostgreSQL остаётся).
+   */
+  async function createServiceInstance(
+    saver: BaseCheckpointSaver,
+    pendingStore: PendingApprovalStore,
+  ): Promise<ChatService> {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: LlmService, useValue: llm },
+        { provide: BillingService, useValue: billing },
+        { provide: SkillsService, useValue: skills },
+        { provide: LlmRouterService, useValue: router },
+        AgentGatewayService,
+        { provide: MemoryService, useValue: memory },
+        { provide: GRAPH_CHECKPOINTER, useValue: saver },
+        { provide: PendingApprovalService, useValue: pendingStore },
+      ],
+    }).compile();
+
+    return moduleRef.get(ChatService);
+  }
 
   beforeEach(async () => {
     prisma = {
@@ -216,20 +326,9 @@ describe('ChatService', () => {
     llm = new LlmService(sandbox as unknown as SandboxService);
     chatWithToolsStream = vi.spyOn(llm, 'chatWithToolsStream');
 
-    const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        { provide: PrismaService, useValue: prisma },
-        { provide: LlmService, useValue: llm },
-        { provide: BillingService, useValue: billing },
-        { provide: SkillsService, useValue: skills },
-        { provide: LlmRouterService, useValue: router },
-        AgentGatewayService,
-        { provide: MemoryService, useValue: memory },
-      ],
-    }).compile();
-
-    service = moduleRef.get(ChatService);
+    checkpointer = new MemorySaver();
+    pendingApprovals = new FakePendingApprovals();
+    service = await createServiceInstance(checkpointer, pendingApprovals);
   });
 
   afterEach(() => {
@@ -1128,7 +1227,7 @@ describe('ChatService', () => {
       expect(result.reply).toBe('Готово: hi');
     });
 
-    it('приостанавливает выполнение до approve_action', async () => {
+    it('приостанавливает выполнение до approve_action и возобновляется', async () => {
       skills.getEnabledSkills.mockResolvedValue([
         createSkill('code-runner', SANDBOX_TOOL_NAME, { model: 'Free' }, true),
       ]);
@@ -1142,26 +1241,21 @@ describe('ChatService', () => {
         .mockReturnValueOnce(streamOf(new AIMessage('Готово: hi')));
       sandbox.runCommand.mockResolvedValue('hi\n');
 
-      let notifyWaiting: ((event: OfficeEvent) => void) | undefined;
-      const waiting = new Promise<OfficeEvent>((resolve) => {
-        notifyWaiting = resolve;
-      });
-
-      const streamPromise = service.streamMessage(
+      const officeEvents: OfficeEvent[] = [];
+      const result = await service.streamMessage(
         USER_ID,
         CONVERSATION_ID,
         'запусти echo hi',
         () => {},
-        (event) => {
-          if (event.status === 'waiting_approval') {
-            notifyWaiting?.(event);
-          }
-        },
+        (event) => officeEvents.push(event),
       );
 
-      const waitingEvent = await waiting;
-
-      expect(waitingEvent).toEqual({
+      expect(result).toMatchObject({
+        conversationId: CONVERSATION_ID,
+        reply: '',
+        pendingApproval: true,
+      });
+      expect(officeEvents).toContainEqual({
         conversationId: CONVERSATION_ID,
         agentId: 'default',
         status: 'waiting_approval',
@@ -1171,16 +1265,27 @@ describe('ChatService', () => {
       // До одобрения песочница не запускается.
       expect(sandbox.runCommand).not.toHaveBeenCalled();
 
-      expect(service.approveAction(CONVERSATION_ID, OTHER_USER_ID)).toBe(false);
-      expect(service.approveAction(CONVERSATION_ID, USER_ID)).toBe(true);
-      expect(service.approveAction(CONVERSATION_ID, USER_ID)).toBe(false);
+      // Чужой пользователь не может одобрить чужой диалог.
+      await expect(
+        service.approveAction(OTHER_USER_ID, CONVERSATION_ID, true),
+      ).rejects.toBeInstanceOf(ForbiddenException);
 
-      const result = await streamPromise;
+      const approved = await service.approveAction(
+        USER_ID,
+        CONVERSATION_ID,
+        true,
+        () => {},
+      );
 
-      expect(result.reply).toBe('Готово: hi');
+      expect(approved).toMatchObject({ reply: 'Готово: hi' });
       expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {}, {
         egress: undefined,
       });
+
+      // Повторное одобрение уже завершённого ожидания — null.
+      await expect(
+        service.approveAction(USER_ID, CONVERSATION_ID, true),
+      ).resolves.toBeNull();
     });
 
     it('помечает waiting_approval для Pay-per-Outcome как payment', async () => {
@@ -1203,40 +1308,261 @@ describe('ChatService', () => {
       sandbox.runCommand.mockResolvedValue('hi\n');
       billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
 
-      let notifyWaiting: ((event: OfficeEvent) => void) | undefined;
-      const waiting = new Promise<OfficeEvent>((resolve) => {
-        notifyWaiting = resolve;
-      });
-
-      const streamPromise = service.streamMessage(
+      const officeEvents: OfficeEvent[] = [];
+      const result = await service.streamMessage(
         USER_ID,
         CONVERSATION_ID,
         'сгенерируй результат',
         () => {},
-        (event) => {
-          if (event.status === 'waiting_approval') {
-            notifyWaiting?.(event);
-          }
-        },
+        (event) => officeEvents.push(event),
       );
 
-      const waitingEvent = await waiting;
-
-      expect(waitingEvent).toMatchObject({
-        conversationId: CONVERSATION_ID,
-        status: 'waiting_approval',
-        reason: 'payment',
-      });
+      expect(result.pendingApproval).toBe(true);
+      expect(officeEvents).toContainEqual(
+        expect.objectContaining({
+          conversationId: CONVERSATION_ID,
+          status: 'waiting_approval',
+          reason: 'payment',
+        }),
+      );
+      // Hold создан ДО паузы и с детерминированным идемпотентным ключом.
       expect(billing.authorizeHold).toHaveBeenCalledWith(
         USER_ID,
         100,
-        expect.any(String),
+        `approval:${CONVERSATION_ID}:call-1`,
       );
       expect(sandbox.runCommand).not.toHaveBeenCalled();
 
-      expect(service.approveAction(CONVERSATION_ID, USER_ID)).toBe(true);
-      await expect(streamPromise).resolves.toMatchObject({ reply: 'Готово' });
+      const approved = await service.approveAction(
+        USER_ID,
+        CONVERSATION_ID,
+        true,
+      );
+
+      expect(approved?.reply).toBe('Готово');
       expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
+      // Hold переиспользован (replay), а не создан второй.
+      expect(
+        billing.authorizeHold.mock.calls.filter(
+          (call) => call[2] === `approval:${CONVERSATION_ID}:call-1`,
+        ),
+      ).toHaveLength(2);
+    });
+
+    it('отклонение одобрения отменяет escrow-hold', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill(
+          'outcome-approval',
+          SANDBOX_TOOL_NAME,
+          { model: 'Pay-per-Outcome', price: 100 },
+          true,
+        ),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сгенерируй результат' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(
+          streamOf(new AIMessage('Пользователь отклонил действие')),
+        );
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'сгенерируй результат',
+        () => {},
+      );
+
+      const result = await service.approveAction(
+        USER_ID,
+        CONVERSATION_ID,
+        false,
+      );
+
+      expect(result?.reply).toBe('Пользователь отклонил действие');
+      expect(billing.cancelHold).toHaveBeenCalledWith('hold-1');
+      expect(billing.captureHold).not.toHaveBeenCalled();
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+    });
+
+    it('переживает рестарт API: pending approval и escrow восстанавливаются', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill(
+          'outcome-approval',
+          SANDBOX_TOOL_NAME,
+          { model: 'Pay-per-Outcome', price: 100 },
+          true,
+        ),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сгенерируй результат' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово после рестарта')));
+      sandbox.runCommand.mockResolvedValue('hi\n');
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      const first = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'сгенерируй результат',
+        () => {},
+      );
+
+      expect(first.pendingApproval).toBe(true);
+
+      const pendingBefore =
+        await service.listPendingApprovals(USER_ID);
+      expect(pendingBefore).toHaveLength(1);
+      expect(pendingBefore[0]).toMatchObject({
+        conversationId: CONVERSATION_ID,
+        reason: 'payment',
+      });
+
+      // Эмуляция рестарта: новый ChatService и новый скомпилированный граф,
+      // но тот же checkpointer и та же таблица ожиданий.
+      const restarted = await createServiceInstance(
+        checkpointer,
+        pendingApprovals,
+      );
+
+      const deltas: string[] = [];
+      const resumed = await restarted.approveAction(
+        USER_ID,
+        CONVERSATION_ID,
+        true,
+        (text) => deltas.push(text),
+      );
+
+      expect(resumed).toMatchObject({ reply: 'Готово после рестарта' });
+      expect(deltas).toEqual(['Готово после рестарта']);
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {}, {
+        egress: undefined,
+      });
+      expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
+      expect(await restarted.listPendingApprovals(USER_ID)).toEqual([]);
+    });
+
+    it('переживает рестарт API с PostgreSQL-checkpointer (fake-БД)', async () => {
+      const database = createFakeCheckpointPrisma();
+      const prismaWithPersistence = prisma as unknown as Record<string, unknown>;
+
+      prismaWithPersistence.graphCheckpoint =
+        database.prisma.graphCheckpoint;
+      prismaWithPersistence.graphCheckpointWrite =
+        database.prisma.graphCheckpointWrite;
+      prismaWithPersistence.pendingApproval =
+        database.prisma.pendingApproval;
+
+      const prismaService = prismaWithPersistence as unknown as PrismaService;
+      const dbCheckpointer = new PrismaCheckpointSaver(prismaService);
+      const dbPendingApprovals = new PendingApprovalService(prismaService);
+
+      const firstService = await createServiceInstance(
+        dbCheckpointer,
+        dbPendingApprovals,
+      );
+
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill(
+          'outcome-approval',
+          SANDBOX_TOOL_NAME,
+          { model: 'Pay-per-Outcome', price: 100 },
+          true,
+        ),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сгенерируй результат' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Готово из PostgreSQL')));
+      sandbox.runCommand.mockResolvedValue('hi\n');
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      const first = await firstService.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'сгенерируй результат',
+        () => {},
+      );
+      expect(first.pendingApproval).toBe(true);
+      expect(database.state.graphCheckpoints.length).toBeGreaterThan(0);
+      expect(database.state.pendingApprovals).toHaveLength(1);
+
+      // «Рестарт»: новые saver/service поверх той же fake-БД.
+      const restartedService = await createServiceInstance(
+        new PrismaCheckpointSaver(prismaService),
+        new PendingApprovalService(prismaService),
+      );
+
+      const deltas: string[] = [];
+      const resumed = await restartedService.approveAction(
+        USER_ID,
+        CONVERSATION_ID,
+        true,
+        (text) => deltas.push(text),
+      );
+
+      expect(resumed).toMatchObject({ reply: 'Готово из PostgreSQL' });
+      expect(deltas).toEqual(['Готово из PostgreSQL']);
+      expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
+      expect(sandbox.runCommand).toHaveBeenCalledWith('echo hi', {}, {
+        egress: undefined,
+      });
+      expect(
+        await restartedService.listPendingApprovals(USER_ID),
+      ).toEqual([]);
+    });
+
+    it('новое сообщение отменяет устаревшее ожидание и чистит checkpoint', async () => {
+      skills.getEnabledSkills.mockResolvedValue([
+        createSkill(
+          'outcome-approval',
+          SANDBOX_TOOL_NAME,
+          { model: 'Pay-per-Outcome', price: 100 },
+          true,
+        ),
+      ]);
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'сгенерируй результат' },
+      ]);
+      chatWithToolsStream
+        .mockReturnValueOnce(
+          streamOf(toolCallMessage(SANDBOX_TOOL_NAME, { code: 'echo hi' })),
+        )
+        .mockReturnValueOnce(streamOf(new AIMessage('Новый ответ')));
+      billing.authorizeHold.mockResolvedValue({ entryId: 'hold-1' });
+
+      const first = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'сгенерируй результат',
+        () => {},
+      );
+      expect(first.pendingApproval).toBe(true);
+
+      // Пользователь не подтвердил действие, а написал новое сообщение:
+      // старое ожидание отменяется, hold возвращается, граф стартует заново.
+      const second = await service.streamMessage(
+        USER_ID,
+        CONVERSATION_ID,
+        'другое сообщение',
+        () => {},
+      );
+
+      expect(second.reply).toBe('Новый ответ');
+      expect(billing.cancelHold).toHaveBeenCalledWith('hold-1');
+      expect(await service.listPendingApprovals(USER_ID)).toEqual([]);
     });
 
     it('отправляет ошибку paywall в стрим и сохраняет её', async () => {

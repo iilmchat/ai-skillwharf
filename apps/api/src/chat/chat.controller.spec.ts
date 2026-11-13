@@ -10,6 +10,7 @@ type MockFn = ReturnType<typeof vi.fn>;
 interface ChatServiceMock {
   createConversation: MockFn;
   clearMemory: MockFn;
+  listPendingApprovals: MockFn;
 }
 
 type ControllerRequest = Parameters<ChatController['clearMemory']>[0];
@@ -32,6 +33,7 @@ describe('ChatController', () => {
     chat = {
       createConversation: vi.fn(),
       clearMemory: vi.fn(),
+      listPendingApprovals: vi.fn(),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -64,6 +66,69 @@ describe('ChatController', () => {
         controller.clearMemory(createRequest()),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(chat.clearMemory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listPendingApprovals', () => {
+    it('возвращает ожидающие подтверждения текущего пользователя', async () => {
+      chat.listPendingApprovals.mockResolvedValue([
+        {
+          conversationId: '11111111-1111-1111-1111-111111111111',
+          reason: 'payment',
+          tools: ['publish_to_dzen'],
+          createdAt: '2026-11-13T12:00:00.000Z',
+        },
+      ]);
+
+      await expect(
+        controller.listPendingApprovals(
+          createRequest({
+            userId: USER_ID,
+            email: 'user@example.com',
+            role: 'user',
+          }),
+        ),
+      ).resolves.toEqual({
+        items: [
+          {
+            conversationId: '11111111-1111-1111-1111-111111111111',
+            reason: 'payment',
+            tools: ['publish_to_dzen'],
+            createdAt: '2026-11-13T12:00:00.000Z',
+          },
+        ],
+      });
+
+      expect(chat.listPendingApprovals).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('валидирует контракт ответа Zod-схемой', async () => {
+      chat.listPendingApprovals.mockResolvedValue([
+        {
+          // Нарушение контракта: reason вне enum.
+          conversationId: '11111111-1111-1111-1111-111111111111',
+          reason: 'unknown',
+          tools: [],
+          createdAt: 'not-a-date',
+        },
+      ]);
+
+      await expect(
+        controller.listPendingApprovals(
+          createRequest({
+            userId: USER_ID,
+            email: 'user@example.com',
+            role: 'user',
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('требует аутентификации', async () => {
+      await expect(
+        controller.listPendingApprovals(createRequest()),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(chat.listPendingApprovals).not.toHaveBeenCalled();
     });
   });
 });

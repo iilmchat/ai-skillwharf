@@ -1,10 +1,8 @@
 #!/bin/sh
 set -e
 
-# В runtime-образе нет npm/npx (см. KI-001), поэтому используем Prisma CLI,
-# установленный в /usr/local/bin/prisma на стадии tools.
-echo "Running database migrations..."
-prisma migrate deploy
-
+# Миграции выполняет one-shot сервис db-migrate (KI-007): API-реплики не
+# должны запускать prisma migrate deploy параллельно. Compose стартует API
+# только после service_completed_successfully для db-migrate.
 echo "Starting the application..."
 exec node dist/main

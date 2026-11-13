@@ -45,20 +45,40 @@
    docker compose up -d --build
    ```
 
-   Миграции применяются автоматически при старте контейнера через `entrypoint.sh`.
+   Миграции выполняет отдельный one-shot сервис `db-migrate` (Prisma
+   `migrate deploy`), а API-реплики стартуют только после его успешного
+   завершения (`service_completed_successfully`). `entrypoint.sh` API больше
+   не запускает миграции, поэтому `--scale api=2` безопасен.
 
-   > **Внимание (масштабирование):** при запуске API в нескольких репликах не
-   > полагайтесь на `entrypoint.sh` — каждая реплика выполнит
-   > `prisma migrate deploy` параллельно. Используйте отдельный Init-Container
-   > (или Kubernetes Job), который применяет миграции и завершается до старта
-   > реплик API. Подробнее — KI-007 в `docs/KNOWN_ISSUES.md`.
+   Проверить миграции можно отдельно:
+
+   ```bash
+   docker compose up -d db-migrate
+   docker compose logs db-migrate
+   docker compose ps -a db-migrate
+   ```
+
+   Ожидаемо: `All migrations have been successfully applied` и
+   `STATUS Exited (0)`. Если `db-migrate` упал, API не запустится; см.
+   раздел 6 «Диагностика проблем».
 
 4. **Проверка статуса:**
 
    ```bash
    curl http://localhost:3001/api/v1/health
    # Ожидаемый ответ: {"status":"ok","database":true}
+
+   curl http://localhost:3001/api/v1/health/ready
+   curl http://localhost:3001/api/v1/health/live
+   docker compose ps api
    ```
+
+   `health/ready` проверяет БД (readiness), `health/live` — только процесс
+   (liveness). Compose healthcheck использует `/health/ready`, поэтому
+   `docker compose ps` показывает `healthy` только после готовности API.
+   Для Kubernetes: `readinessProbe` → `/api/v1/health/ready`,
+   `livenessProbe` → `/api/v1/health/live`; старт API дополнительно
+   контролируется Job'ом с `prisma migrate deploy`.
 
    > Порты `3000` и `5432` на хосте заняты другими проектами, поэтому API
    > проброшен на `3001`, а PostgreSQL — на `5435` (см. `docker-compose.yml`).
@@ -237,16 +257,111 @@ bash scripts/rotate-backups.sh --dry-run
 bash scripts/rotate-backups.sh --keep-days 30 --keep-min 10
 ```
 
+### Offsite-копии в S3
+
+Offsite включается, когда задан `BACKUP_S3_BUCKET`. После успешного
+локального `pg_dump` и локальной ротации `backup-db.sh` вызывает
+`scripts/upload-backup.sh`, который выгружает дамп через `rclone` в
+S3-совместимое хранилище (MinIO, AWS S3 и т. п.). Если offsite не настроен,
+локальные бэкапы работают как раньше.
+
+Требуется `rclone` в `PATH` на хосте, где выполняется cron:
+<https://rclone.org/install/>. Секреты передаются rclone через переменные
+окружения и не попадают в аргументы командной строки.
+
+| Переменная | Обязательна | Назначение |
+| --- | --- | --- |
+| `BACKUP_S3_BUCKET` | да, для offsite | Bucket; пусто — offsite выключен |
+| `BACKUP_S3_ENDPOINT` | нет | Endpoint MinIO/S3; пусто — AWS S3 |
+| `BACKUP_S3_REGION` | нет | Регион, по умолчанию `us-east-1` |
+| `BACKUP_S3_ACCESS_KEY` | нет | Access key; можно не задавать при IAM-роли |
+| `BACKUP_S3_SECRET_KEY` | нет | Secret key |
+| `BACKUP_S3_PREFIX` | нет | Префикс ключей, например `skillwharf/db/` |
+| `BACKUP_S3_KEEP_DAYS` | нет | Retention offsite, по умолчанию `BACKUP_KEEP_DAYS` |
+
+Пример `.env` (значения — заглушки, реальные секреты не коммитьте):
+
+```text
+BACKUP_S3_ENDPOINT=https://s3.example.com
+BACKUP_S3_BUCKET=skillwharf-backups
+BACKUP_S3_REGION=us-east-1
+BACKUP_S3_ACCESS_KEY=<access-key>
+BACKUP_S3_SECRET_KEY=<secret-key>
+BACKUP_S3_PREFIX=skillwharf/db/
+BACKUP_S3_KEEP_DAYS=30
+```
+
+Проверка после запуска:
+
+```bash
+bash scripts/backup-db.sh
+# В логе: "Offsite-копия готова: s3://..."
+```
+
+`BACKUP_S3_KEEP_DAYS=0` отключает удаление старых объектов, но не саму
+выгрузку. Свежий дамп под retention не попадает. Если S3/rclone недоступны,
+локальный дамп и результат локальной ротации сохраняются, скрипт печатает
+причину и завершается с кодом `1` — это сигнал для мониторинга, а не повод
+удалять локальную копию. Повторная выгрузка вручную:
+
+```bash
+bash scripts/upload-backup.sh --file backups/skillwharf_db-20261113-020000.dump
+```
+
+**Откат offsite:** очистите `BACKUP_S3_BUCKET` в `.env` (или удалите
+`BACKUP_S3_*`). Следующий запуск `backup-db.sh` снова будет только локальным;
+уже загруженные объекты останутся в хранилище. Если нужно прекратить и
+удалить их, настройте lifecycle-политику bucket отдельно.
+
+### Restore-drill
+
+`scripts/restore-drill.sh` проверяет не только наличие файла, но и
+восстановимость: скачивает последний offsite-дамп `${POSTGRES_DB}-*.dump`,
+создаёт временную БД `drill_*`, выполняет `pg_restore`, проверяет таблицы
+`User` и `LedgerEntry` и удаляет временную БД (в том числе при ошибке).
+
+```bash
+bash scripts/restore-drill.sh
+```
+
+Ожидаемый результат: `OK: User=<n>, LedgerEntry=<n>` и
+`Restore-drill успешно завершён`. Скрипт возвращает `0` только при успехе;
+при недоступном S3, ошибке `pg_restore` или отсутствии таблиц — `1`.
+Локальные дампы не используются: проверяется именно offsite-копия.
+
+Проверить, что временные БД не остались:
+
+```bash
+docker compose exec -T postgres psql --username "$POSTGRES_USER" \
+  --dbname postgres -At \
+  -c "SELECT datname FROM pg_database WHERE datname LIKE 'drill_%';"
+```
+
+Если drill падает, смотрите `docker compose logs postgres`, права
+`POSTGRES_USER` (нужны `CREATEDB` и чтение схемы), свободное место и
+доступность bucket. Drill не изменяет рабочую БД: восстановление идёт в
+отдельную временную базу, а при сбое она удаляется.
+
 ### Включение по расписанию
 
 Рекомендуется добавить запуск в cron (например, ежедневно в 02:00). Ротация
-запускается автоматически после успешного бэкапа:
+и offsite-выгрузка запускаются автоматически после успешного бэкапа:
 
 ```cron
 0 2 * * * cd /opt/skillwharf && \
+  PATH=/usr/local/bin:/usr/bin:/bin \
   BACKUP_DIR=/mnt/backups BACKUP_KEEP_DAYS=14 BACKUP_KEEP_MIN=7 \
   bash scripts/backup-db.sh >> /var/log/skillwharf-backup.log 2>&1
+
+# 03:00 — проверка восстановления последнего offsite-дампа.
+0 3 * * * cd /opt/skillwharf && \
+  PATH=/usr/local/bin:/usr/bin:/bin \
+  bash scripts/restore-drill.sh >> /var/log/skillwharf-restore-drill.log 2>&1
 ```
+
+`PATH` в cron должен содержать `docker` и `rclone`: cron не наследует PATH
+интерактивной оболочки. Если offsite не настроен, `restore-drill.sh` вернёт
+`1` с понятной ошибкой — это ожидаемо только до включения S3.
 
 Если ротация должна выполняться отдельным заданием, добавьте
 `--skip-prune` к бэкапу и второй cron-вызов:
@@ -268,6 +383,10 @@ du -sh /mnt/backups
 
 # Что будет удалено при текущей политике?
 BACKUP_DIR=/mnt/backups bash scripts/rotate-backups.sh --dry-run
+
+# Offsite: последняя выгрузка и restore-drill.
+tail -n 30 /var/log/skillwharf-backup.log
+tail -n 30 /var/log/skillwharf-restore-drill.log
 ```
 
 Дампы в `backups/` не попадают в git. Каталог `backups/` стоит хранить на
@@ -302,6 +421,20 @@ curl -fsS http://localhost:3001/metrics | head
   * *Решение:* Убедитесь, что хост-система поддерживает виртуализацию (`egrep -c '(vmx|svm)' /proc/cpuinfo` > 0) и модуль KVM загружен (`lsmod | grep kvm`). Если развертывание в облаке, используйте инстансы с поддержкой вложенной виртуализации.
 * **Ошибка: `Connection refused` при вызове LLM.**
   * *Решение:* Проверьте доступность API LLM-провайдера из контейнера (`docker compose exec api curl ...`).
+* **`db-migrate` завершился с ошибкой, API не стартует.**
+  * *Решение:* API ждёт `service_completed_successfully`, поэтому его контейнер
+    не запустится. Посмотрите `docker compose logs db-migrate` и
+    `docker compose ps -a db-migrate`. Частые причины: неверный
+    `DATABASE_URL`, нет прав на схему, конфликтующая/частично применённая
+    миграция. Исправьте причину и повторите миграции:
+    `docker compose up -d --force-recreate db-migrate`, затем
+    `docker compose up -d api`. В production не делайте `migrate reset` —
+    исправляйте миграцию вперёд и проверяйте бэкап.
+* **API в статусе `unhealthy`.**
+  * *Решение:* Проверьте `curl http://localhost:3001/api/v1/health/ready`
+    (readiness, проверяет БД) и `curl .../health/live` (процесс).
+    `unhealthy` при живом процессе обычно означает проблему с БД или
+    `db-migrate`; смотрите `docker compose logs api`.
 
 ## 7. Безопасность Sandbox
 
@@ -1018,3 +1151,48 @@ staging-CA (`ACME_CA`), поэтому браузер будет ругатьс�
 ```text
 ACME_CA=https://acme-v02.api.letsencrypt.org/directory
 ```
+
+## 17. HITL, ожидающие одобрения и checkpoint'ы
+
+Состояние графа агента (LangGraph) и ожидающие подтверждения хранятся в
+PostgreSQL, поэтому пауза `waiting_approval` и escrow-hold переживают
+`docker compose restart api`:
+
+* `GraphCheckpoint` / `GraphCheckpointWrite` — сериализованное состояние
+  графа по треду `thread_id = conversationId`;
+* `PendingApproval` — ожидающие решения действия (`reason`: `approval` или
+  `payment`), инструменты и зарезервированные escrow-holds.
+
+Таблицы создаются миграцией `20261113150000_add_graph_checkpointer_and_pending_approval`.
+В Compose миграции применяет one-shot сервис `db-migrate`; API стартует
+только после его успешного завершения. В Kubernetes нужен такой же Job
+(см. KI-037).
+
+**Диагностика ожиданий:**
+
+```bash
+# Ожидающие одобрения пользователя (JWT): conversationId, reason, tools
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/v1/chat/pending
+
+# Сколько hold'ов заморожено в Ledger (PENDING)
+docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT count(*), sum(amount) FROM \"LedgerEntry\" WHERE type = 'PENDING';"
+```
+
+**Поведение:**
+
+* подтверждение/отклонение — `approve_action` по WebSocket; граф
+  возобновляется из checkpoint'а и стримит ответ;
+* отклонение отменяет hold (`PENDING` → `credit`), баланс возвращается;
+* новое сообщение в диалоге со старым ожиданием автоматически закрывает его
+  как `rejected`, отменяет hold'ы и удаляет checkpoint треда;
+* TTL для ожиданий пока нет (KI-033): зависшие записи закрывайте вручную
+  через `approve_action` с `approved: false`;
+* ретенции checkpoint'ов нет (KI-034): в пилоте объём мал, долгосрочно нужен
+  retention-job.
+
+**Восстановление из бэкапа:** таблицы checkpoint'ов входят в общий дамп БД,
+поэтому после восстановления ожидания и позиция графа сохраняются вместе с
+Ledger. После восстановления проверьте отсутствие «осиротевших» `PENDING`
+без активных `PendingApproval`.

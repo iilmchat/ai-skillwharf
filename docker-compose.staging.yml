@@ -56,7 +56,17 @@ services:
       # closed), а файл смонтирован в базовом docker-compose.yml.
       SANDBOX_SECCOMP_PROFILE: /etc/sandbox/seccomp-profile.json
 
+  db-migrate:
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required in .env}?schema=public
+
   web:
+    build:
+      args:
+        # Staging собирает статику с тем же дефолтом, что и базовый compose;
+        # флаг можно включить в .env без правки compose-файлов.
+        VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
     ports:
       # Web доступен только через Caddy и с localhost для диагностики.
       - "127.0.0.1:8080:80"

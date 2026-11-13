@@ -12,6 +12,12 @@ import { z } from 'zod';
 export const ERROR_CODES = {
   insufficientFunds: 'errors.insufficient_funds',
   dailyTokenLimit: 'errors.daily_token_limit',
+  /** MCP-провайдер вернул ошибку (502). */
+  mcpProvider: 'errors.mcp_provider',
+  /** MCP-провайдер не ответил за отведённое время (504). */
+  mcpTimeout: 'errors.mcp_timeout',
+  /** MCP-сервер не сконфигурирован (503). */
+  mcpUnavailable: 'errors.mcp_unavailable',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -101,11 +107,41 @@ export function getErrorMetaFromError(error: unknown): ApiErrorMeta {
     : getErrorMeta(error);
 }
 
-export type ChatErrorKind = 'marketplace' | 'dailyTokenLimit';
+export type ChatErrorKind =
+  | 'marketplace'
+  | 'dailyTokenLimit'
+  | 'mcpProvider'
+  | 'mcpTimeout'
+  | 'mcpUnavailable';
 
 /** Ошибка внешнего marketplace/MCP-сервиса (например, Ozon). */
 export function isMarketplaceError(message: string): boolean {
   return MARKETPLACE_ERROR_MARKERS.some((marker) => message.includes(marker));
+}
+
+/** MCP-коды из единого JSON API (`errors.mcp_*`) → категория для i18n. */
+function mcpErrorKind(code: string | undefined): ChatErrorKind | null {
+  switch (code) {
+    case ERROR_CODES.mcpProvider:
+      return 'mcpProvider';
+    case ERROR_CODES.mcpTimeout:
+      return 'mcpTimeout';
+    case ERROR_CODES.mcpUnavailable:
+      return 'mcpUnavailable';
+    default:
+      return null;
+  }
+}
+
+/** Fallback старого API: HTTP 429 или текстовые маркеры дневного лимита. */
+function hasDailyTokenLimitFallback(
+  message: string,
+  meta: ApiErrorMeta,
+): boolean {
+  return (
+    meta.status === 429 ||
+    DAILY_TOKEN_LIMIT_MARKERS.some((marker) => message.includes(marker))
+  );
 }
 
 /** Дневной лимит токенов: `code`, HTTP 429 или текст ошибки старого API. */
@@ -115,8 +151,7 @@ export function isDailyTokenLimitError(
 ): boolean {
   return (
     meta.code === ERROR_CODES.dailyTokenLimit ||
-    meta.status === 429 ||
-    DAILY_TOKEN_LIMIT_MARKERS.some((marker) => message.includes(marker))
+    hasDailyTokenLimitFallback(message, meta)
   );
 }
 
@@ -124,7 +159,19 @@ export function classifyChatError(
   message: string,
   meta: ApiErrorMeta = EMPTY_META,
 ): ChatErrorKind | null {
-  if (isDailyTokenLimitError(message, meta)) {
+  // Код важнее текста: сообщения бэкенда — не контракт (KI-025).
+  if (meta.code === ERROR_CODES.dailyTokenLimit) {
+    return 'dailyTokenLimit';
+  }
+
+  const mcpKind = mcpErrorKind(meta.code);
+
+  if (mcpKind !== null) {
+    return mcpKind;
+  }
+
+  // Fallback для старого API без `code`.
+  if (hasDailyTokenLimitFallback(message, meta)) {
     return 'dailyTokenLimit';
   }
 

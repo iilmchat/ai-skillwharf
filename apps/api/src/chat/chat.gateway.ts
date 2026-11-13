@@ -209,14 +209,15 @@ export class ChatGateway implements OnGatewayConnection {
   }
 
   /**
-   * Подтверждение действия, которое агент пометил как `waiting_approval`.
-   * Пока это имитация: логируем решение и возвращаем агента в `working`.
+   * Подтверждение или отклонение действия, на котором граф остановился
+   * (`waiting_approval`). Состояние и escrow-hold хранятся в PostgreSQL, поэтому
+   * возобновление работает и после рестарта API.
    */
   @SubscribeMessage('approve_action')
-  handleApproveAction(
+  async handleApproveAction(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: ApproveActionPayload,
-  ): void {
+  ): Promise<ChatReply> {
     const userId = (client.data as { userId?: string }).userId;
 
     if (!userId) {
@@ -231,20 +232,33 @@ export class ChatGateway implements OnGatewayConnection {
       throw new WsException('Ожидается { conversationId }');
     }
 
-    const resumed = this.chatService.approveAction(
-      payload.conversationId,
+    const approved = payload.approved !== false;
+
+    const reply = await this.chatService.approveAction(
       userId,
+      payload.conversationId,
+      approved,
+      (text) => {
+        client.emit('stream_delta', {
+          conversationId: payload.conversationId,
+          text,
+        });
+      },
+      (event) => this.sendOfficeEvent(client, event),
     );
+
+    if (reply === null) {
+      throw new WsException(
+        'Нет действия, ожидающего подтверждения в этом диалоге',
+      );
+    }
 
     this.logger.log(
-      `Действие одобрено: conversationId=${payload.conversationId}, userId=${userId}, approved=${payload.approved !== false}, resumed=${resumed}`,
+      `Действие ${approved ? 'одобрено' : 'отклонено'}: conversationId=${payload.conversationId}, userId=${userId}`,
     );
 
-    this.sendOfficeEvent(client, {
-      conversationId: payload.conversationId,
-      agentId: DEFAULT_OFFICE_AGENT_ID,
-      status: 'working',
-      task: OFFICE_TASKS.resumingAfterApproval,
-    });
+    client.emit('stream_end', { conversationId: payload.conversationId });
+
+    return reply;
   }
 }

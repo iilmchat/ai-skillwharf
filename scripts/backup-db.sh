@@ -12,7 +12,9 @@
 # Проверка места: перед дампом скрипт требует BACKUP_MIN_FREE_MB (по умолчанию
 # 512) свободных мегабайт в BACKUP_DIR. Дамп пишется во временный .partial,
 # проверяется на непустоту и только затем переименовывается. После успешного
-# бэкапа запускается ротация (scripts/rotate-backups.sh).
+# бэкапа запускается ротация (scripts/rotate-backups.sh), затем offsite-копия
+# в S3 (BACKUP_S3_BUCKET, scripts/upload-backup.sh). Если S3 недоступен,
+# локальный дамп сохраняется, скрипт возвращает код 1.
 #
 # Формат custom (-Fc) восстанавливается через pg_restore, см.
 # docs/operations/Deployment-Runbook.md.
@@ -47,6 +49,9 @@ usage() {
   -h, --help      показать эту справку
 
 Переменные: POSTGRES_USER, POSTGRES_DB, BACKUP_DIR, BACKUP_MIN_FREE_MB.
+Offsite: BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_REGION,
+BACKUP_S3_ACCESS_KEY, BACKUP_S3_SECRET_KEY, BACKUP_S3_PREFIX,
+BACKUP_S3_KEEP_DAYS. Без BACKUP_S3_BUCKET выгрузка пропускается.
 Dry-run ротации: bash scripts/rotate-backups.sh --dry-run
 EOF
 }
@@ -149,4 +154,12 @@ if ((SKIP_PRUNE == 0)); then
     --backup-dir "$BACKUP_DIR" \
     --keep-days "$KEEP_DAYS" \
     --keep-min "$KEEP_MIN"
+fi
+
+if ! bash "${script_dir}/upload-backup.sh" \
+  --file "$target" \
+  --keep-days "$KEEP_DAYS"; then
+  echo "ОШИБКА: локальный бэкап ${target} сохранён, но offsite-выгрузка не удалась." >&2
+  echo "Проверьте BACKUP_S3_* и доступность хранилища; дамп не удалён." >&2
+  exit 1
 fi

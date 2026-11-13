@@ -18,6 +18,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot миграции (KI-007). API-реплики не запускают prisma migrate deploy;
+  # они ждут успешного завершения этого сервиса. Отдельный минимальный образ
+  # содержит только Prisma CLI и схему, без приложения.
+  db-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.migrate
+    image: ai-skillwharf-db-migrate:latest
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -49,6 +65,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Readiness: Terminus проверяет ping БД. Liveness — /api/v1/health/live.
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3000/api/v1/health/ready >/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # Единственный сервис с доступом к Docker-сокету. API общается с ним по
   # HTTP, поэтому компрометация API не даёт управления хостом.
@@ -79,6 +108,9 @@ services:
       args:
         # Vite вшивает базовый URL API на этапе сборки.
         VITE_API_URL: /api/v1
+        # Раздел «Память» (RAG): Vite вшивает флаг на этапе сборки, поэтому
+        # изменение значения требует пересборки web. По умолчанию выключен.
+        VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
     ports:
       # Caddy слушает 80 внутри контейнера; на хосте оставляем 8080.
       - "8080:80"

@@ -269,44 +269,111 @@ describe('ChatGateway', () => {
   });
 
   describe('handleApproveAction', () => {
-    it('логирует одобрение и отправляет office_event', () => {
+    it('возобновляет граф, стримит ответ и завершает поток', async () => {
       const socket = createSocket();
       socket.data.userId = USER_ID;
       const log = vi
         .spyOn(Logger.prototype, 'log')
         .mockImplementation(() => {});
-      chatService.approveAction.mockReturnValue(true);
+      chatService.approveAction.mockImplementation(
+        async (
+          _userId: string,
+          _conversationId: string,
+          _approved: boolean,
+          onDelta?: (text: string) => void,
+          onOfficeEvent?: (event: unknown) => void,
+        ) => {
+          onOfficeEvent?.({
+            conversationId: CONVERSATION_ID,
+            agentId: 'default',
+            status: 'working',
+            task: 'Продолжение после одобрения',
+          });
+          onDelta?.('готово');
 
-      gateway.handleApproveAction(socket as unknown as Socket, {
-        conversationId: CONVERSATION_ID,
-        approved: true,
-      });
+          return { conversationId: CONVERSATION_ID, reply: 'готово' };
+        },
+      );
+
+      const result = await gateway.handleApproveAction(
+        socket as unknown as Socket,
+        {
+          conversationId: CONVERSATION_ID,
+          approved: true,
+        },
+      );
 
       expect(chatService.approveAction).toHaveBeenCalledWith(
-        CONVERSATION_ID,
         USER_ID,
+        CONVERSATION_ID,
+        true,
+        expect.any(Function),
+        expect.any(Function),
       );
       expect(log).toHaveBeenCalledWith(
         expect.stringContaining(CONVERSATION_ID),
       );
+      expect(socket.emit).toHaveBeenCalledWith('stream_delta', {
+        conversationId: CONVERSATION_ID,
+        text: 'готово',
+      });
+      expect(socket.emit).toHaveBeenCalledWith('stream_end', {
+        conversationId: CONVERSATION_ID,
+      });
       expect(socket.emit).toHaveBeenCalledWith('office_event', {
         conversationId: CONVERSATION_ID,
         agentId: 'default',
         status: 'working',
         task: 'Продолжение после одобрения',
       });
+      expect(result).toEqual({ conversationId: CONVERSATION_ID, reply: 'готово' });
 
       log.mockRestore();
     });
 
-    it('запрещает одобрение без аутентификации', () => {
+    it('передаёт отказ в approveAction', async () => {
       const socket = createSocket();
+      socket.data.userId = USER_ID;
+      chatService.approveAction.mockResolvedValue({
+        conversationId: CONVERSATION_ID,
+        reply: 'Действие отклонено',
+      });
 
-      expect(() =>
+      await gateway.handleApproveAction(socket as unknown as Socket, {
+        conversationId: CONVERSATION_ID,
+        approved: false,
+      });
+
+      expect(chatService.approveAction).toHaveBeenCalledWith(
+        USER_ID,
+        CONVERSATION_ID,
+        false,
+        expect.any(Function),
+        expect.any(Function),
+      );
+    });
+
+    it('отдаёт ошибку, если ожидания нет', async () => {
+      const socket = createSocket();
+      socket.data.userId = USER_ID;
+      chatService.approveAction.mockResolvedValue(null);
+
+      await expect(
         gateway.handleApproveAction(socket as unknown as Socket, {
           conversationId: CONVERSATION_ID,
         }),
-      ).toThrow(WsException);
+      ).rejects.toBeInstanceOf(WsException);
+      expect(socket.emit).not.toHaveBeenCalled();
+    });
+
+    it('запрещает одобрение без аутентификации', async () => {
+      const socket = createSocket();
+
+      await expect(
+        gateway.handleApproveAction(socket as unknown as Socket, {
+          conversationId: CONVERSATION_ID,
+        }),
+      ).rejects.toBeInstanceOf(WsException);
       expect(chatService.approveAction).not.toHaveBeenCalled();
       expect(socket.emit).not.toHaveBeenCalled();
     });

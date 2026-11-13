@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
@@ -33,6 +33,7 @@ import {
   calculateLlmCost,
   needsDailyTokenReset,
   resolveMcpEndpoint,
+  resolveReservedOutputTokens,
   startOfUtcDay,
   withLanguageInstruction,
   withMemoryContext,
@@ -46,12 +47,17 @@ import {
   DAILY_TOKEN_LIMIT_MESSAGE,
   DailyTokenLimitException,
 } from './daily-token-limit.exception.js';
+import {
+  estimateMessagesTokens,
+  estimateUsageFromMessages,
+} from './token-estimator.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 
 const ENV_KEYS = [
   'LLM_BASE_URL',
   'LLM_API_KEY',
   'LLM_MODEL',
+  'LLM_RESERVE_OUTPUT_TOKENS',
   'TAVILY_API_KEY',
   'GITHUB_TOKEN',
 ] as const;
@@ -85,11 +91,11 @@ interface DailyTokenUser {
 interface UpdateManyWhere {
   id?: string;
   lastTokenReset?: { lt?: Date };
-  dailyTokensUsed?: { lte?: number };
+  dailyTokensUsed?: { lte?: number; gte?: number };
 }
 
 interface UpdateManyData {
-  dailyTokensUsed?: { increment?: number } | number;
+  dailyTokensUsed?: { increment?: number; decrement?: number } | number;
   lastTokenReset?: Date;
 }
 
@@ -155,14 +161,16 @@ function createPrismaUser(user: DailyTokenUser | null = null): PrismaUserMock {
       return { count: 0 };
     }
 
+    const minUsed = args.where.dailyTokensUsed?.gte;
+
+    if (minUsed !== undefined && state.dailyTokensUsed < minUsed) {
+      return { count: 0 };
+    }
+
     const update = args.data.dailyTokensUsed;
 
-    if (
-      typeof update === 'object' &&
-      update !== undefined &&
-      update.increment !== undefined
-    ) {
-      state.dailyTokensUsed += update.increment;
+    if (typeof update === 'object' && update !== undefined) {
+      state.dailyTokensUsed += update.increment ?? -(update.decrement ?? 0);
     } else if (typeof update === 'number') {
       state.dailyTokensUsed = update;
     }
@@ -209,6 +217,42 @@ function clientWithUsage(inputTokens: number, outputTokens: number) {
   };
 }
 
+/**
+ * Ожидаемый резерв для сообщений: prompt-оценка с системным промптом
+ * по умолчанию плюс резерв вывода из окружения.
+ */
+function reservedFor(messages: BaseMessage[]): number {
+  return (
+    estimateMessagesTokens(messages, DEFAULT_SYSTEM_PROMPT) +
+    resolveReservedOutputTokens()
+  );
+}
+
+/** Достаёт JSON-события из вызовов Nest-логгера (остальные строки пропускает). */
+function parseEvents(calls: readonly unknown[][]): Record<string, unknown>[] {
+  const events: Record<string, unknown>[] = [];
+
+  for (const call of calls) {
+    const message = call[0];
+
+    if (typeof message !== 'string') {
+      continue;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(message);
+
+      if (parsed !== null && typeof parsed === 'object' && 'event' in parsed) {
+        events.push(parsed as Record<string, unknown>);
+      }
+    } catch {
+      // Неструктурированный текст лога — не событие.
+    }
+  }
+
+  return events;
+}
+
 describe('LlmService', () => {
   const originalEnv = new Map<string, string | undefined>();
 
@@ -229,6 +273,8 @@ describe('LlmService', () => {
         process.env[key] = value;
       }
     }
+
+    vi.restoreAllMocks();
   });
 
   it('возвращает эхо-заглушку, если LLM не настроен', async () => {
@@ -544,6 +590,12 @@ describe('LlmService', () => {
   describe('дневной лимит токенов (Budget Guard)', () => {
     const userId = '11111111-1111-1111-1111-111111111111';
 
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(Logger.prototype, 'warn');
+    });
+
     function enableLlm(): void {
       process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
       process.env.LLM_MODEL = 'llama3';
@@ -564,7 +616,11 @@ describe('LlmService', () => {
       return { service, prisma };
     }
 
-    it('бросает 429 в едином JSON-формате и не вызывает модель, если лимит исчерпан', async () => {
+    function warnEvents(): Record<string, unknown>[] {
+      return parseEvents(warnSpy.mock.calls);
+    }
+
+    it('бросает 429 в едином JSON-формате и не вызывает модель, если резерв не помещается в лимит', async () => {
       enableLlm();
       const { service } = createLimitedService({
         dailyTokenLimit: 100,
@@ -588,31 +644,71 @@ describe('LlmService', () => {
         message: DAILY_TOKEN_LIMIT_MESSAGE,
       });
       expect(client.invoke).not.toHaveBeenCalled();
+      expect(
+        warnEvents().some(
+          (event) => event.event === 'gen_ai.budget.hard_limit',
+        ),
+      ).toBe(true);
     });
 
-    it('атомарно инкрементирует счётчик с условием жёсткого лимита', async () => {
+    it('резервирует бюджет до вызова модели и сверяет с фактическим usage', async () => {
       enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '500';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
       const { service, prisma } = createLimitedService({
         dailyTokenLimit: 1000,
         dailyTokensUsed: 10,
         lastTokenReset: new Date(),
       });
+      const client = clientWithUsage(100, 50);
+      let usedAtInvoke = -1;
 
-      Object.assign(service, { client: clientWithUsage(100, 50) });
+      client.invoke.mockImplementation(async () => {
+        usedAtInvoke = prisma.state?.dailyTokensUsed ?? -1;
 
-      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
-        userId,
+        return new AIMessage({
+          content: 'готово',
+          usage_metadata: {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+          },
+        });
       });
 
+      Object.assign(service, { client });
+
+      await service.chatWithTools(messages, [], undefined, { userId });
+
+      // На момент вызова провайдера резерв уже списан.
+      expect(usedAtInvoke).toBe(10 + reserved);
+      // После сверки в счётчике фактический расход, а не резерв.
       expect(prisma.state?.dailyTokensUsed).toBe(160);
       expect(prisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: userId, dailyTokensUsed: { lte: 850 } },
-        data: { dailyTokensUsed: { increment: 150 } },
+        where: {
+          id: userId,
+          dailyTokensUsed: { lte: 1000 - reserved },
+        },
+        data: { dailyTokensUsed: { increment: reserved } },
       });
+      // Возврат излишка резерва: 150 фактических вместо reserved.
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: userId, dailyTokensUsed: { gte: reserved - 150 } },
+        data: { dailyTokensUsed: { decrement: reserved - 150 } },
+      });
+      expect(client.invoke.mock.invocationCallOrder[0] ?? 0).toBeGreaterThan(
+        prisma.user.updateMany.mock.invocationCallOrder[0] ?? 0,
+      );
     });
 
     it('сбрасывает счётчик при первом запросе нового дня', async () => {
       enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
       const { service, prisma } = createLimitedService({
         dailyTokenLimit: 1000,
         dailyTokensUsed: 900,
@@ -622,9 +718,7 @@ describe('LlmService', () => {
 
       Object.assign(service, { client });
 
-      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
-        userId,
-      });
+      await service.chatWithTools(messages, [], undefined, { userId });
 
       const calls = prisma.user.updateMany.mock.calls as [UpdateManyArgs][];
 
@@ -633,69 +727,333 @@ describe('LlmService', () => {
         data: { dailyTokensUsed: 0, lastTokenReset: expect.any(Date) },
       });
       expect(calls[1]?.[0]).toEqual({
-        where: { id: userId, dailyTokensUsed: { lte: 880 } },
-        data: { dailyTokensUsed: { increment: 120 } },
+        where: { id: userId, dailyTokensUsed: { lte: 1000 - reserved } },
+        data: { dailyTokensUsed: { increment: reserved } },
       });
+      // 900 сброшены, фактический расход 120, резерв сверен.
       expect(prisma.state?.dailyTokensUsed).toBe(120);
       expect(client.invoke).toHaveBeenCalledTimes(1);
     });
 
-    it('не превышает жёсткий лимит при конкурентных запросах', async () => {
+    it('дописывает фактический расход, если он больше резерва', async () => {
       enableLlm();
-      // 10 вызовов по 300 токенов при лимите 1000: успешны ровно 3.
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '10';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 10_000,
+        dailyTokensUsed: 100,
+        lastTokenReset: new Date(),
+      });
+      const usage = {
+        input_tokens: 900,
+        output_tokens: 600,
+        total_tokens: 1500,
+      };
+
+      Object.assign(service, {
+        client: {
+          invoke: vi
+            .fn()
+            .mockResolvedValue(
+              new AIMessage({ content: 'ок', usage_metadata: usage }),
+            ),
+        },
+      });
+
+      await service.chatWithTools(messages, [], undefined, { userId });
+
+      expect(prisma.state?.dailyTokensUsed).toBe(1600);
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: userId,
+          dailyTokensUsed: { lte: 10_000 - (1500 - reserved) },
+        },
+        data: { dailyTokensUsed: { increment: 1500 - reserved } },
+      });
+    });
+
+    it('прижимает счётчик к лимиту, если фактический расход не помещается', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '10';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
+      const dailyTokenLimit = 1000;
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit,
+        dailyTokensUsed: dailyTokenLimit - reserved,
+        lastTokenReset: new Date(),
+      });
+
+      Object.assign(service, {
+        client: {
+          invoke: vi.fn().mockResolvedValue(
+            new AIMessage({
+              content: 'ок',
+              usage_metadata: {
+                input_tokens: 900,
+                output_tokens: 900,
+                total_tokens: 1800,
+              },
+            }),
+          ),
+        },
+      });
+
+      await service.chatWithTools(messages, [], undefined, { userId });
+
+      // Жёсткий лимит не превышен, событие переполнения сверки записано.
+      expect(prisma.state?.dailyTokensUsed).toBe(dailyTokenLimit);
+      expect(
+        warnEvents().some(
+          (event) => event.event === 'gen_ai.budget.reconcile_overflow',
+        ),
+      ).toBe(true);
+    });
+
+    it('возвращает резерв, если провайдер ответил ошибкой', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 50,
+        lastTokenReset: new Date(),
+      });
+      const invoke = vi
+        .fn()
+        .mockRejectedValue(new Error('429 Too Many Requests'));
+
+      Object.assign(service, {
+        client: { invoke, stream: async function* () {} },
+      });
+
+      await expect(
+        service.chatWithTools(messages, [], undefined, { userId }),
+      ).rejects.toThrow('429 Too Many Requests');
+      expect(prisma.state?.dailyTokensUsed).toBe(50);
+    });
+
+    it('конкурентные вызовы делят лимит без гонок: успешны ровно те, кому хватает резерва', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '500';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
+      // Помещается ровно два резерва из десяти попыток.
+      const dailyTokenLimit = reserved * 3 - 1;
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+      const pending: ((message: AIMessage) => void)[] = [];
+      const invoke = vi.fn(
+        () =>
+          new Promise<AIMessage>((resolve) => {
+            pending.push(resolve);
+          }),
+      );
+
+      Object.assign(service, {
+        client: { invoke, stream: async function* () {} },
+      });
+
+      const attempts = Array.from({ length: 10 }, () =>
+        service.chatWithTools(messages, [], undefined, { userId }).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ),
+      );
+
+      // Ждём, пока все попытки сделают резерв: успешные дойдут до провайдера.
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledTimes(2);
+      });
+
+      for (const resolve of pending) {
+        resolve(
+          new AIMessage({
+            content: 'ок',
+            usage_metadata: {
+              input_tokens: 100,
+              output_tokens: 100,
+              total_tokens: 200,
+            },
+          }),
+        );
+      }
+
+      const results = await Promise.all(attempts);
+      const succeeded = results.filter((result) => result.ok);
+      const failed = results.filter((result) => !result.ok);
+
+      expect(succeeded).toHaveLength(2);
+      expect(failed).toHaveLength(8);
+
+      for (const result of failed) {
+        expect(result.ok).toBe(false);
+        expect(result.error).toBeInstanceOf(DailyTokenLimitException);
+        expect((result.error as DailyTokenLimitException).getStatus()).toBe(
+          429,
+        );
+      }
+
+      // Неуспешные не дошли до провайдера: вызовов ровно по числу резервов.
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThanOrEqual(
+        dailyTokenLimit,
+      );
+      expect(prisma.state?.dailyTokensUsed).toBe(400);
+    });
+
+    it('резервирует бюджет до первой дельты стрима', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
       const { service, prisma } = createLimitedService({
         dailyTokenLimit: 1000,
         dailyTokensUsed: 0,
         lastTokenReset: new Date(),
       });
+      const stream = async function* () {
+        yield new AIMessageChunk({ content: 'При' });
+        yield new AIMessageChunk({ content: 'вет' });
+        yield new AIMessageChunk({
+          content: '',
+          usage_metadata: {
+            input_tokens: 30,
+            output_tokens: 2,
+            total_tokens: 32,
+          },
+        });
+      };
+      let usedAtFirstDelta = -1;
 
-      Object.assign(service, { client: clientWithUsage(200, 100) });
+      Object.assign(service, {
+        client: { invoke: vi.fn(), stream },
+      });
 
-      const attempts = Array.from({ length: 10 }, () =>
-        service.chatWithTools([new HumanMessage('привет')], [], undefined, {
-          userId,
-        }),
-      );
-      const results = await Promise.allSettled(attempts);
-      const fulfilled = results.filter(
-        (result) => result.status === 'fulfilled',
-      );
-      const rejected = results.filter((result) => result.status === 'rejected');
-
-      expect(fulfilled).toHaveLength(3);
-      expect(rejected).toHaveLength(7);
-
-      for (const result of rejected) {
-        const error = (result as PromiseRejectedResult).reason as unknown;
-
-        expect(error).toBeInstanceOf(DailyTokenLimitException);
-        expect((error as DailyTokenLimitException).getStatus()).toBe(429);
+      for await (const chunk of service.chatWithToolsStream(
+        messages,
+        [],
+        undefined,
+        { userId },
+      )) {
+        if (chunk.type === 'delta' && usedAtFirstDelta < 0) {
+          usedAtFirstDelta = prisma.state?.dailyTokensUsed ?? -1;
+        }
       }
 
-      expect(prisma.state?.dailyTokensUsed).toBe(900);
-      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThanOrEqual(
-        prisma.state?.dailyTokenLimit ?? 0,
-      );
+      expect(usedAtFirstDelta).toBe(reserved);
+    });
+
+    it('возвращает резерв, если стрим упал до получения usage', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 50,
+        lastTokenReset: new Date(),
+      });
+      const stream = async function* () {
+        yield* [] as AIMessageChunk[];
+        throw new Error('connection reset');
+      };
+
+      Object.assign(service, { client: { invoke: vi.fn(), stream } });
+
+      const consume = async (): Promise<void> => {
+        for await (const _chunk of service.chatWithToolsStream(
+          messages,
+          [],
+          undefined,
+          { userId },
+        )) {
+          // Итератор нужен только ради учёта расхода.
+        }
+      };
+
+      await expect(consume()).rejects.toThrow('connection reset');
+      expect(prisma.state?.dailyTokensUsed).toBe(50);
+    });
+
+    it('сверяет usage, если стрим упал после получения usage', async () => {
+      enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+      const stream = async function* () {
+        yield new AIMessageChunk({ content: 'Начало' });
+        yield new AIMessageChunk({
+          content: '',
+          usage_metadata: {
+            input_tokens: 40,
+            output_tokens: 10,
+            total_tokens: 50,
+          },
+        });
+        throw new Error('connection reset');
+      };
+
+      Object.assign(service, { client: { invoke: vi.fn(), stream } });
+
+      const consume = async (): Promise<void> => {
+        for await (const _chunk of service.chatWithToolsStream(
+          messages,
+          [],
+          undefined,
+          { userId },
+        )) {
+          // Итератор нужен только ради учёта расхода.
+        }
+      };
+
+      await expect(consume()).rejects.toThrow('connection reset');
+      // Резерв сверен с usage (50), а не возвращён целиком (0).
+      expect(prisma.state?.dailyTokensUsed).toBe(50);
     });
 
     it('мягкий порог (80%) — предупреждение, а не отказ', async () => {
       enableLlm();
+      process.env.LLM_RESERVE_OUTPUT_TOKENS = '100';
+
+      const messages = [new HumanMessage('привет')];
+      const reserved = reservedFor(messages);
+      const dailyTokenLimit = 1000;
       const { service, prisma } = createLimitedService({
-        dailyTokenLimit: 1000,
-        dailyTokensUsed: 850,
+        dailyTokenLimit,
+        // Ровно столько, чтобы после резерва счётчик достиг 100% лимита.
+        dailyTokensUsed: dailyTokenLimit - reserved,
         lastTokenReset: new Date(),
       });
 
       Object.assign(service, { client: clientWithUsage(60, 40) });
 
-      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
-        userId,
-      });
+      await service.chatWithTools(messages, [], undefined, { userId });
 
-      expect(prisma.state?.dailyTokensUsed).toBe(950);
-      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThan(
-        prisma.state?.dailyTokenLimit ?? 0,
+      expect(
+        warnEvents().some(
+          (event) => event.event === 'gen_ai.budget.soft_limit',
+        ),
+      ).toBe(true);
+      // Мягкий порог не отказ: вызов дошёл до провайдера и сверен.
+      expect(prisma.state?.dailyTokensUsed).toBe(
+        dailyTokenLimit - reserved + (60 + 40),
       );
+      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThan(dailyTokenLimit);
     });
 
     it('не учитывает токены без контекста пользователя', async () => {
@@ -714,6 +1072,171 @@ describe('LlmService', () => {
 
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('fallback usage без usage от провайдера (KI-022)', () => {
+    const userId = '22222222-2222-2222-2222-222222222222';
+    const llmRoute = {
+      id: 'route-gigachat',
+      name: 'gigachat',
+      modelName: 'GigaChat',
+      providerType: 'GigaChat',
+      baseUrl: 'https://gigachat.devices.sberbank.ru/api/v1',
+      apiKeyEnvVar: null,
+    } as unknown as LlmRouteSelection;
+
+    function useAdapter(
+      service: LlmService,
+      adapter: NativeProviderAdapter,
+    ): void {
+      vi.spyOn(
+        service as unknown as {
+          resolveAdapter: () => NativeProviderAdapter | null;
+        },
+        'resolveAdapter',
+      ).mockReturnValue(adapter);
+    }
+
+    function createBudgetService(): {
+      service: LlmService;
+      prisma: PrismaUserMock;
+      billing: BillingMock;
+    } {
+      const prisma = createPrismaUser({
+        id: userId,
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+        prisma as unknown as PrismaService,
+      );
+
+      return { service, prisma, billing };
+    }
+
+    it('оценивает usage, если GigaChat-стрим не прислал usage', async () => {
+      const { service, prisma, billing } = createBudgetService();
+      const messages = [new HumanMessage('привет')];
+      const estimate = estimateUsageFromMessages(
+        messages,
+        'Привет, мир',
+        DEFAULT_SYSTEM_PROMPT,
+      );
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat: vi.fn(),
+        chatStream: async function* () {
+          yield { type: 'delta', text: 'Привет,' };
+          yield { type: 'delta', text: ' мир' };
+
+          return new AIMessage({
+            content: 'Привет, мир',
+            usage_metadata: {
+              input_tokens: 0,
+              output_tokens: 0,
+              total_tokens: 0,
+            },
+          });
+        },
+      };
+
+      useAdapter(service, adapter);
+
+      const logSpy = vi.spyOn(Logger.prototype, 'log');
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+
+      for await (const _chunk of service.chatWithToolsStream(
+        messages,
+        [],
+        llmRoute,
+        { userId },
+      )) {
+        // Итератор нужен только ради учёта расхода.
+      }
+
+      // Счётчик и биллинг считаются по локальной оценке, а не по нулям.
+      expect(prisma.state?.dailyTokensUsed).toBe(estimate.total_tokens);
+      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+        userId,
+        calculateLlmCost(estimate.input_tokens, estimate.output_tokens),
+        'Использование LLM',
+        expect.any(String),
+      );
+
+      const usageEvent = parseEvents(logSpy.mock.calls).find(
+        (event) => event.event === 'gen_ai.usage',
+      );
+
+      expect(usageEvent?.['gen_ai.usage_estimated']).toBe(true);
+      expect(
+        parseEvents(warnSpy.mock.calls).some(
+          (event) => event.event === 'gen_ai.usage.fallback',
+        ),
+      ).toBe(true);
+    });
+
+    it('не использует оценку, если провайдер прислал usage', async () => {
+      const { service, prisma } = createBudgetService();
+      const messages = [new HumanMessage('привет')];
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat: vi.fn().mockResolvedValue(
+          new AIMessage({
+            content: 'Привет',
+            usage_metadata: {
+              input_tokens: 3,
+              output_tokens: 2,
+              total_tokens: 5,
+            },
+          }),
+        ),
+      };
+
+      useAdapter(service, adapter);
+
+      const logSpy = vi.spyOn(Logger.prototype, 'log');
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+
+      await service.chatWithTools(messages, [], llmRoute, { userId });
+
+      expect(prisma.state?.dailyTokensUsed).toBe(5);
+
+      const usageEvent = parseEvents(logSpy.mock.calls).find(
+        (event) => event.event === 'gen_ai.usage',
+      );
+
+      expect(usageEvent?.['gen_ai.usage_estimated']).toBeUndefined();
+      expect(usageEvent?.['gen_ai.prompt_tokens']).toBe(3);
+      expect(usageEvent?.['gen_ai.completion_tokens']).toBe(2);
+      expect(
+        parseEvents(warnSpy.mock.calls).some(
+          (event) => event.event === 'gen_ai.usage.fallback',
+        ),
+      ).toBe(false);
+    });
+
+    it('возвращает резерв, если адаптер ответил ошибкой', async () => {
+      const { service, prisma, billing } = createBudgetService();
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat: vi.fn().mockRejectedValue(new Error('GigaChat: HTTP 500')),
+      };
+
+      useAdapter(service, adapter);
+
+      await expect(
+        service.chatWithTools([new HumanMessage('привет')], [], llmRoute, {
+          userId,
+        }),
+      ).rejects.toThrow('GigaChat: HTTP 500');
+      expect(prisma.state?.dailyTokensUsed).toBe(0);
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
     });
   });
 

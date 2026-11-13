@@ -4,6 +4,62 @@
 
 ## [Unreleased]
 
+### Sprint 15: Pilot Reliability
+
+**HITL & Checkpointer**
+- Prisma-модели `GraphCheckpoint`, `GraphCheckpointWrite`, `PendingApproval`. Интеграция `PrismaCheckpointSaver` с LangGraph.
+- HITL переведён на `interrupt()`/`Command({ resume })`: пауза хранится в БД, `approve_action` возобновляет граф после рестарта API.
+- Escrow-hold создаётся до паузы с идемпотентным ключом; при resume hold переиспользуется.
+- `GET /api/v1/chat/pending` для списка ожидающих одобрения; новое сообщение закрывает старое ожидание.
+
+**LLM Budget Guard**
+- Reserve-before-call: атомарное резервирование `prompt + max_tokens` до вызова (для всех путей).
+- Reconcile после ответа (возврат/добавка), откат резерва при ошибке провайдера.
+- Fallback-токенизатор (js-tiktoken) для GigaChat, если провайдер не прислал `usage`.
+- Оценка токенов вынесена в `token-estimator.ts`.
+
+**Infrastructure & Backups**
+- Offsite-бэкапы в S3 через `rclone` (`upload-backup.sh`), retention.
+- `restore-drill.sh` для проверки восстановления.
+- One-shot `db-migrate` (init-container) вынесен из `entrypoint.sh` API. API ждёт его завершения (`service_completed_successfully`).
+- `/api/v1/health/ready` и `/health/live` для k8s и Compose.
+
+**Billing & Marketplace**
+- Пагинация `GET /api/v1/billing/ledger` (keyset по `createdAt`, `id`), `nextCursor`.
+- Месячный сброс Freemium-лимитов (`freemium-reset.service.ts`).
+
+**Web UI**
+- Проброс `VITE_RAG_MEMORY_ENABLED` через `docker-compose.yml` и staging.
+- Маппинг MCP-ошибок (`errors.mcp_provider`, `mcp_timeout`, `mcp_unavailable`) на RU/EN с fallback.
+
+**Новые известные проблемы:** KI-031 (ранний abort стрима), KI-032 (приблизительный prompt estimate), KI-033 (нет TTL ожиданий), KI-034 (нет retention checkpoint), KI-035–037 (hardening бэкапов и миграций).
+
+### Infrastructure & Backups (Sprint 15)
+
+- Offsite-бэкапы (KI-019): `scripts/backup-db.sh` после успешного локального `pg_dump` и локальной ротации вызывает `scripts/upload-backup.sh`, который через `rclone` выгружает дамп в S3-совместимое хранилище. Конфигурация — `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY`, `BACKUP_S3_PREFIX`, `BACKUP_S3_KEEP_DAYS`; без `BACKUP_S3_BUCKET` offsite выключен и локальный сценарий не меняется. При недоступном S3 локальный дамп сохраняется, ошибка понятна, код возврата `1`; retention offsite удаляет только `${POSTGRES_DB}-*.dump` старше `BACKUP_S3_KEEP_DAYS`.
+- Restore-drill: `scripts/restore-drill.sh` скачивает последний offsite-дамп, создаёт временную БД `drill_*`, восстанавливает `pg_restore` и проверяет `User`/`LedgerEntry`; временная БД удаляется даже при ошибке, `0` возвращается только при успехе.
+- Миграции (KI-007): добавлен one-shot Compose-сервис `db-migrate` (`prisma migrate deploy`, `restart: "no"`); `entrypoint.sh` API больше не запускает миграции, API ждёт `service_completed_successfully`, поэтому `--scale api=2` стартует без гонки. Добавлен Compose healthcheck API на `/api/v1/health/ready` и эндпоинты `/api/v1/health/live` (liveness) и `/api/v1/health/ready` (readiness).
+- Runbook: включение offsite, проверка `restore-drill`, cron 02:00/03:00, откат, диагностика `db-migrate` и `unhealthy` API. Остаточные ограничения — KI-035..KI-037.
+
+### Reliability & HITL (Sprint 15)
+
+- LangGraph Checkpointer в PostgreSQL: новые таблицы `GraphCheckpoint`/`GraphCheckpointWrite` (Prisma-миграция `add_graph_checkpointer_and_pending_approval`), состояние графа сериализуется через `JsonPlusSerializer` в BYTEA и переживает рестарт API. Один диалог — один checkpoint-тред (`thread_id = conversationId`); инструменты в состояние не сериализуются, а пересобираются из снимка навыков в состоянии, поэтому checkpoint остаётся валидным после рестарта.
+- HITL переведён с in-memory Promise на `interrupt()`/`Command({ resume })`: пауза `waiting_approval` хранится в checkpoint'е, а не в карте процесса. `approve_action` возобновляет граф (в том числе после рестарта API) и стримит ответ в текущий сокет; отклонение отменяет escrow-holds.
+- Escrow Pay-per-Outcome: holds создаются до паузы с детерминированным `idempotencyKey` (`approval:<conversationId>:<callId>`) — повторное выполнение узла при resume переиспользует существующий `PENDING`-entry, второй hold не создаётся; capture/cancel остаются через append-only Ledger.
+- Новая таблица `PendingApproval` (conversationId unique, tools/holds в JSON, status, resolvedAt) и `PendingApprovalService` с Zod-валидацией JSON-колонок. Эндпоинт `GET /api/v1/chat/pending` возвращает ожидающие подтверждения пользователя по Zod-контракту `{ items: [{ conversationId, reason, tools, createdAt }] }` (JWT, только свои диалоги).
+- Checkpointer и persistence вынесены в `ChatPersistenceModule` с DI-токеном `GRAPH_CHECKPOINTER`; в тестах подменяется `MemorySaver`. Интеграционный тест эмулирует рестарт: pending approval создан → новый экземпляр `ChatService` → `approve_action` → capture escrow.
+
+### LLM Budget Guard (Sprint 15)
+
+- Дневной жёсткий лимит токенов стал reserve-before-call (KI-021): до вызова провайдера атомарно резервируется `prompt estimate + LLM_RESERVE_OUTPUT_TOKENS` (default 4096), при нехватке — `429 errors.daily_token_limit` до обращения к модели и до первой дельты стрима. После ответа выполняется reconcile (`refund`/добавка, при переполнении — clamp к лимиту и `gen_ai.budget.reconcile_overflow`), при ошибке провайдера резерв откатывается. Мягкий порог 80% логируется (`gen_ai.budget.soft_limit`). Конкурентный тест: из параллельных вызовов успешных ровно столько, сколько помещается.
+- Fallback-токенизатор (KI-022): если провайдер (GigaChat) не прислал `usage`, prompt/completion оцениваются `js-tiktoken` (`cl100k_base`) с эвристическим fallback, оценка учитывается в дневном счётчике и биллинге; события `gen_ai.usage.fallback` и `gen_ai.usage_estimated`. GigaChat тарифицирует input/output одинаково, поэтому стоимость считается по суммарному объёму.
+- Остаточные ограничения зафиксированы: KI-031 (abort стрима оставляет резерв не сверенным), KI-032 (приближение оценки prompt-токенов).
+
+### Billing & Marketplace (Sprint 15)
+
+- Пагинация `GET /api/v1/billing/ledger`: Zod-контракт `{ items, total, nextCursor }`, query `limit`/`offset`/`cursor` (opaque base64url `{createdAt,id}`, strict, курсор+offset → 400 `errors.invalid_request`), keyset-пагинация `(createdAt, id)` без дублей, `total` — все операции пользователя. Web-потребитель `apps/web/src/lib/billing.ts` валидирует новый контракт Zod-схемой, модалка истории показывает `items`.
+- Периодический сброс Freemium-лимитов: `FreemiumResetService` (таймер, env `FREEMIUM_RESET_INTERVAL_MS`, default 24 ч) обнуляет `SkillUsage.callsCount` записей с `lastResetAt` из прошлых месяцев (UTC); операция идемпотентна и безопасна для 2+ реплик API.
+
 ### Security & Sandbox (Sprint 14)
 
 - Кастомный seccomp-профиль `sandbox/seccomp-profile.json` (default-deny, `SCMP_ACT_ERRNO`): allowlist для Node/V8, Python, bash/curl/jq/gh; явный запрет `ptrace`, `mount`, `unshare`, `setns`, `bpf`, `keyctl`, `perf_event_open`, `kexec_*`, `reboot`, `swapon/off`, `init_module`, `pivot_root`, `chroot`, `personality`, `userfaultfd`, `process_vm_*`. `clone` разрешён только без namespace-флагов, `clone3` → `ENOSYS`. `sandbox-worker` читает `SANDBOX_SECCOMP_PROFILE`, валидирует Zod, передаёт inline JSON в Docker `SecurityOpt`. Fail closed при невалидном профиле. Staging — обязателен. Закрывает KI-005.
@@ -21,7 +77,9 @@
 
 ### Web UI (Sprint 14)
 
-- Ошибки распознаются по машиночитаемому `code` (`errors.daily_token_limit`, `errors.insufficient_funds`) с полным fallback на текстовые маркеры старого API. Логика вынесена в `apps/web/src/lib/chat-errors.ts`, покрыта 15 тестами.
+- Ошибки распознаются по машиночитаемому `code` (`errors.daily_token_limit`, `errors.insufficient_funds`, `errors.mcp_provider`, `errors.mcp_timeout`, `errors.mcp_unavailable`) с полным fallback на текстовые маркеры старого API. Логика вынесена в `apps/web/src/lib/chat-errors.ts`, покрыта тестами.
+- MCP-ошибки (`errors.mcp_provider`, `errors.mcp_timeout`, `errors.mcp_unavailable`) показываются пользователю понятным сообщением на RU/EN через i18n (`chat.errors.mcp*`): «MCP-провайдер вернул ошибку / не ответил вовремя / недоступен. Попробуйте позже»; коды имеют приоритет над текстом, fallback на текстовые маркеры сохранён (KI-025 уточнён).
+- `docker-compose.yml` и `docker-compose.staging.yml` пробрасывают `VITE_RAG_MEMORY_ENABLED` в `build.args` сервиса `web` (`${VITE_RAG_MEMORY_ENABLED:-false}`), `.env.example` документирует переменную. Docker-сборка с флагом включает панель «Память», без флага — нет (KI-030 закрыт).
 - Новые KI: KI-025 (не все ошибки API имеют `code`), KI-026 (seccomp профиль — только amd64), KI-027 (MCP structural-only actions), KI-028 (egress IP-pinning/DNS-tunneling/ip6tables), KI-029 (shell-анализатор — эвристика, не полный POSIX-парсер), KI-030 (VITE_RAG_MEMORY_ENABLED не проброшен в compose).
 
 ### MCP Gateway
@@ -52,7 +110,7 @@
 
 - Ошибки чата распознаются по машиночитаемому `code` из `WsException` и JSON-тела ошибки API: `errors.daily_token_limit` и `errors.insufficient_funds` больше не зависят от текста сообщения. HTTP 429 и текстовые маркеры (`Too Many Requests`, `Недостаточно средств`) сохранены как fallback для старого API без `code` (KI-025). Логика вынесена в `apps/web/src/lib/chat-errors.ts` и покрыта тестами: ошибка с `code` распознаётся при произвольном тексте, без `code` — по статусу и тексту.
 - Zod-схема RAG-панели закреплена за контрактом Sprint 14 `{ items: [{ id, content, createdAt }], total? }`: при расхождении API панель показывает ошибку валидации и не подменяет данные. `fetchMemoryEntries` запрашивает `GET /api/v1/chat/memory`; тесты проверяют запрос, невалидный ответ, отрицательный `total` и отбрасывание лишних полей.
-- `apps/web/Dockerfile` принимает build-arg `VITE_RAG_MEMORY_ENABLED` (по умолчанию `false`), поэтому раздел «Память» можно включить и в Docker-сборке. Проброс аргумента через `docker-compose.yml` остаётся отдельной задачей (KI-023).
+- `apps/web/Dockerfile` принимает build-arg `VITE_RAG_MEMORY_ENABLED` (по умолчанию `false`), поэтому раздел «Память» можно включить и в Docker-сборке; проброс аргумента через `docker-compose.yml`/`staging` добавлен в этом изменении (KI-030).
 - Страница настроек дополнена разделом «Память»: feature-flag `VITE_RAG_MEMORY_ENABLED` (по умолчанию выключен) управляет показом списка записей RAG-памяти. После появления `GET /api/v1/chat/memory` (см. раздел «RAG Memory API») раздел работает с реальными данными, вымышленные записи не подставляются (KI-023).
 - Ответ памяти валидируется Zod (`id`, `content`, `createdAt`); панель показывает краткое содержание, тип «фрагмент памяти» и дату создания через `<time>`, поддерживает состояния загрузки, пустоты, ошибки (401/404/сеть/невалидный ответ) и повторную загрузку.
 - Полировка страницы настроек: единый контейнер и отступы секций, `aria-labelledby`/`aria-describedby`, `aria-busy`/`aria-live`, focus-visible у новых кнопок, адаптивная вёрстка; строки добавлены в RU/EN-словари.

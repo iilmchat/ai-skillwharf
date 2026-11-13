@@ -54,7 +54,10 @@
   "errors": {
     "insufficient_funds": "Insufficient funds to run the agent. Top up your balance.",
     "rateLimit": "Too many attempts. Please wait a minute.",
-    "llmAuth": "LLM authorization failed. Check the keys in the Control plane."
+    "llmAuth": "LLM authorization failed. Check the keys in the Control plane.",
+    "mcp_provider": "The MCP provider returned an error. Please try again later.",
+    "mcp_timeout": "The MCP provider did not respond in time. Please try again later.",
+    "mcp_unavailable": "The MCP provider is unavailable. Please try again later."
   },
   "nav": {
     "primary": "Primary navigation",
@@ -554,6 +557,9 @@
       "timeout": "The server did not respond in time. Try again.",
       "invalidResponse": "The server returned an invalid response.",
       "marketplaceUnavailable": "The marketplace service is temporarily unavailable",
+      "mcpProvider": "The MCP provider returned an error. Please try again later.",
+      "mcpTimeout": "The MCP provider did not respond in time. Please try again later.",
+      "mcpUnavailable": "The MCP provider is unavailable. Please try again later.",
       "dailyTokenLimit": "Daily token limit exhausted",
       "insufficientFunds": "Insufficient funds to run code. Top up your balance.",
       "sendFailed": "Could not send the message."
