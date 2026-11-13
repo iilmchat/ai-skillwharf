@@ -59,9 +59,21 @@ services:
       - "127.0.0.1:8080:80"
 
   caddy:
+    # Для голого IP нужен self-signed сертификат: Let's Encrypt не выпускает
+    # сертификаты на IP. Если задан домен, замените Caddyfile.staging на
+    # deploy/Caddyfile и уберите command ниже.
+    command:
+      - caddy
+      - run
+      - --config
+      - /etc/caddy/Caddyfile.staging
+      - --adapter
+      - caddyfile
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required in .env}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required in .env}
       # Let's Encrypt staging: сертификат недоверенный, лимиты не расходуются.
       # Для боевого домена задайте https://acme-v02.api.letsencrypt.org/directory.
       ACME_CA: ${ACME_CA:-https://acme-staging-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./deploy/Caddyfile.staging:/etc/caddy/Caddyfile.staging:ro

@@ -1,0 +1,14 @@
+# Staging на голом IP (без домена): Caddy выпускает self-signed сертификат
+# внутреннего CA. Браузер будет ругаться на недоверенный сертификат — это
+# ожидаемо для staging.
+#
+# Для staging с доменом используйте deploy/Caddyfile (Let's Encrypt staging CA).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	tls internal
+	encode zstd gzip
+	reverse_proxy web:80
+}
