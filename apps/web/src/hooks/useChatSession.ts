@@ -12,6 +12,64 @@ import { useOfficeStore } from '../store/office.store';
 const ACK_TIMEOUT_MS = 90_000;
 const INSUFFICIENT_FUNDS_MARKER = 'Недостаточно средств';
 const ERROR_KEY_PREFIX = 'errors.';
+/** Служебный ответ ошибки короче этого порога заменяем понятным текстом. */
+const TECHNICAL_ERROR_MAX_LENGTH = 400;
+
+const MARKETPLACE_ERROR_MARKERS = [
+  'MCP Error:',
+  'MCP error:',
+  'MCP SSE:',
+  'MCP POST:',
+  'Connection refused',
+  'ECONNREFUSED',
+  'fetch failed',
+] as const;
+
+// Голое «429» здесь намеренно не ищем: цифра часто встречается в обычных
+// ответах ассистента. HTTP-статус приходит из payload `exception`, а текстовые
+// маркеры описывают ошибку однозначно.
+const DAILY_TOKEN_LIMIT_MARKERS = [
+  'Too Many Requests',
+  'too many requests',
+  'HTTP 429',
+  'status code 429',
+  'Дневной лимит токенов',
+  'Daily token limit',
+  'daily token limit',
+] as const;
+
+export type ChatErrorKind = 'marketplace' | 'dailyTokenLimit';
+
+/** Ошибка внешнего marketplace/MCP-сервиса (например, Ozon). */
+export function isMarketplaceError(message: string): boolean {
+  return MARKETPLACE_ERROR_MARKERS.some((marker) => message.includes(marker));
+}
+
+/** Дневной лимит токенов: HTTP 429 или текст ошибки от бэкенда. */
+export function isDailyTokenLimitError(
+  message: string,
+  status?: number,
+): boolean {
+  return (
+    status === 429 ||
+    DAILY_TOKEN_LIMIT_MARKERS.some((marker) => message.includes(marker))
+  );
+}
+
+export function classifyChatError(
+  message: string,
+  status?: number,
+): ChatErrorKind | null {
+  if (isDailyTokenLimitError(message, status)) {
+    return 'dailyTokenLimit';
+  }
+
+  if (isMarketplaceError(message)) {
+    return 'marketplace';
+  }
+
+  return null;
+}
 
 export type ChatRole = 'user' | 'assistant';
 export type ConnectionState = 'connecting' | 'online' | 'offline';
@@ -188,6 +246,20 @@ function normalizeAssistantReply(reply: string): NormalizedReply {
     };
   }
 
+  const errorKind = classifyChatError(reply);
+
+  if (errorKind !== null) {
+    const message = chatErrorNotice(errorKind);
+
+    return {
+      // Технический текст ошибки оставляем, только если это не весь ответ.
+      content:
+        reply.trim().length <= TECHNICAL_ERROR_MAX_LENGTH ? message : reply,
+      notice: message,
+      needsTopUp,
+    };
+  }
+
   return { content: reply, notice: null, needsTopUp };
 }
 
@@ -210,6 +282,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return fallback;
   }
 
+  if (typeof error === 'string' && error !== '') {
+    return translateServerMessage(error);
+  }
+
   if (isMessagePayload(error)) {
     return formatServerMessage(error.message);
   }
@@ -219,6 +295,60 @@ function getErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+function chatErrorNotice(kind: ChatErrorKind): string {
+  return kind === 'marketplace'
+    ? i18n.t('chat.errors.marketplaceUnavailable')
+    : i18n.t('chat.errors.dailyTokenLimit');
+}
+
+/** Приоритет: LLM auth, затем marketplace и дневной лимит токенов. */
+function resolveChatErrorMessage(message: string, status?: number): string {
+  if (isLlmAuthError(message)) {
+    return llmAuthErrorMessage();
+  }
+
+  const errorKind = classifyChatError(message, status);
+
+  return errorKind === null ? message : chatErrorNotice(errorKind);
+}
+
+/**
+ * `statusCode` из payload `exception` (WsException) или из объекта Error.
+ * Сам текст сообщения эту информацию не сохраняет.
+ */
+function getPayloadStatusCode(value: unknown): number | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const { statusCode } = value;
+
+  if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {
+    return statusCode;
+  }
+
+  if (typeof statusCode === 'string' && statusCode.trim() !== '') {
+    const parsed = Number(statusCode);
+
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  return isAxiosError(error)
+    ? error.response?.status
+    : getPayloadStatusCode(error);
+}
+
+function getFailureMessage(error: unknown, fallback: string): string {
+  return resolveChatErrorMessage(
+    getErrorMessage(error, fallback),
+    getErrorStatus(error),
+  );
 }
 
 export function useChatSession(): ChatSession {
@@ -351,13 +481,12 @@ export function useChatSession(): ChatSession {
     };
 
     const handleException = (payload: unknown) => {
+      const status = getPayloadStatusCode(payload);
       const rawMessage = getErrorMessage(
         payload,
         i18n.t('chat.errors.messageFailed'),
       );
-      const message = isLlmAuthError(rawMessage)
-        ? llmAuthErrorMessage()
-        : rawMessage;
+      const message = resolveChatErrorMessage(rawMessage, status);
       const needsTopUp = isInsufficientFundsPayload(payload);
       const pending = pendingRef.current;
 
@@ -613,7 +742,7 @@ export function useChatSession(): ChatSession {
           const needsTopUp = pendingTopUpRef.current;
           pendingTopUpRef.current = false;
 
-          setNotice(getErrorMessage(error, i18n.t('chat.errors.sendFailed')));
+          setNotice(getFailureMessage(error, i18n.t('chat.errors.sendFailed')));
           setNoticeTopUp(needsTopUp);
         })
         .finally(() => {

@@ -25,6 +25,25 @@ export interface RegisteredUser {
   email: string;
 }
 
+/** Профиль пользователя: JWT-данные плюс эффективный дневной расход токенов. */
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: string;
+  dailyTokenLimit: number;
+  dailyTokensUsed: number;
+}
+
+/**
+ * Начало текущих суток в UTC. Дублирует границу из Budget Guard в LlmService,
+ * чтобы auth не зависел от llm-модуля.
+ */
+function startOfUtcDay(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -75,6 +94,40 @@ export class AuthService {
     });
 
     return tokens;
+  }
+
+  /**
+   * Профиль для GET /auth/me. Счётчик токенов сбрасывается лениво при первом
+   * LLM-запросе нового дня, поэтому в read-path «протухший» счётчик отдаём
+   * нулём, не мутируя БД.
+   */
+  async getProfile(userId: string): Promise<UserProfile> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        dailyTokenLimit: true,
+        dailyTokensUsed: true,
+        lastTokenReset: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Пользователь не найден');
+    }
+
+    const resetRequired =
+      user.lastTokenReset.getTime() < startOfUtcDay(new Date()).getTime();
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      dailyTokenLimit: user.dailyTokenLimit,
+      dailyTokensUsed: resetRequired ? 0 : user.dailyTokensUsed,
+    };
   }
 
   /**

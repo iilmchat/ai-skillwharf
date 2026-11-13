@@ -62,6 +62,7 @@
     "skills": "Skills",
     "store": "Store",
     "office": "AI office",
+    "settings": "Settings",
     "admin": "Control plane"
   },
   "skills": {
@@ -535,6 +536,11 @@
     "send": "Send message",
     "sending": "Sending message",
     "inputHint": "Press Enter to send.",
+    "tokens": {
+      "label": "Tokens",
+      "usage": "{{used}} / {{limit}}",
+      "ariaLabel": "Daily token limit: {{used}} of {{limit}}"
+    },
     "errors": {
       "network": "The server is unreachable. Make sure the API is running on localhost:3001.",
       "expired": "Your session has expired. Please sign in again.",
@@ -547,8 +553,25 @@
       "notReady": "The chat is not connected yet. Wait a moment and try again.",
       "timeout": "The server did not respond in time. Try again.",
       "invalidResponse": "The server returned an invalid response.",
+      "marketplaceUnavailable": "The marketplace service is temporarily unavailable",
+      "dailyTokenLimit": "Daily token limit exhausted",
       "insufficientFunds": "Insufficient funds to run code. Top up your balance.",
       "sendFailed": "Could not send the message."
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your account and the assistant's long-term memory.",
+    "backToChat": "Back to chat",
+    "memory": {
+      "title": "Long-term memory",
+      "description": "The assistant remembers details of your conversations to answer more accurately. Clearing will permanently delete all saved memory.",
+      "clear": "Forget me",
+      "clearing": "Clearing…",
+      "cleared": "Memory cleared",
+      "error": "Could not clear the memory. Please try again.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "network": "The server is unreachable. Check your connection."
     }
   }
 }

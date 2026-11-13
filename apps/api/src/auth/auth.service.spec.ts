@@ -14,7 +14,7 @@ const PASSWORD = 'password123';
 type MockFn = ReturnType<typeof vi.fn>;
 
 interface PrismaMock {
-  user: { findUnique: MockFn; create: MockFn };
+  user: { findUnique: MockFn; create: MockFn; updateMany: MockFn };
   session: {
     create: MockFn;
     findMany: MockFn;
@@ -50,7 +50,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     prisma = {
-      user: { findUnique: vi.fn(), create: vi.fn() },
+      user: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
       session: {
         create: vi.fn(),
         findMany: vi.fn(),
@@ -167,6 +167,91 @@ describe('AuthService', () => {
       await expect(
         service.login({ email: EMAIL, password: PASSWORD }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('getProfile', () => {
+    const NOW = new Date('2026-05-14T10:00:00.000Z');
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('возвращает лимит и фактический расход токенов текущих суток', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        role: 'user',
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 15_000,
+        lastTokenReset: new Date('2026-05-14T00:00:00.000Z'),
+      });
+
+      await expect(service.getProfile(USER_ID)).resolves.toEqual({
+        id: USER_ID,
+        email: EMAIL,
+        role: 'user',
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 15_000,
+      });
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          dailyTokenLimit: true,
+          dailyTokensUsed: true,
+          lastTokenReset: true,
+        },
+      });
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('обнуляет расход, если lastTokenReset раньше начала текущих суток UTC', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        role: 'user',
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 42_000,
+        lastTokenReset: new Date('2026-05-13T23:59:59.999Z'),
+      });
+
+      const profile = await service.getProfile(USER_ID);
+
+      expect(profile.dailyTokenLimit).toBe(100_000);
+      expect(profile.dailyTokensUsed).toBe(0);
+      // Read-path не мутирует счётчик: сброс произойдёт в Budget Guard.
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('сохраняет расход, если lastTokenReset ровно в начале текущих суток UTC', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        role: 'user',
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 900,
+        lastTokenReset: new Date('2026-05-14T00:00:00.000Z'),
+      });
+
+      await expect(service.getProfile(USER_ID)).resolves.toMatchObject({
+        dailyTokensUsed: 900,
+      });
+    });
+
+    it('бросает UnauthorizedException, если пользователь не найден', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.getProfile(USER_ID)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
   });
 

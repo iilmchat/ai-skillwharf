@@ -21,6 +21,7 @@ import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
 import { LlmProviderBadge } from '../components/LlmProviderBadge';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TokenUsageWidget } from '../components/TokenUsageWidget';
 import { TopUpModal } from '../components/TopUpModal';
 import {
   useChatSession,
@@ -29,6 +30,7 @@ import {
 } from '../hooks/useChatSession';
 import { useBalance } from '../hooks/useBalance';
 import { useActiveLlm } from '../hooks/useActiveLlm';
+import { useTokenQuota } from '../hooks/useTokenQuota';
 import { ledgerQueryKey } from '../lib/billing';
 import { normalizeProvider } from '../lib/llm';
 import { isAdminRole } from '../lib/roles';
@@ -171,6 +173,8 @@ export function ChatPage() {
   } = useChatSession();
 
   const balanceQuery = useBalance();
+  const tokenQuotaQuery = useTokenQuota();
+  const { refetch: refetchTokenQuota } = tokenQuotaQuery;
   const activeLlmQuery = useActiveLlm();
   const activeLlm = activeLlmQuery.data;
   const { refetch: refetchBalance } = balanceQuery;
@@ -208,6 +212,18 @@ export function ChatPage() {
     nextParams.delete('payment');
     setSearchParams(nextParams, { replace: true });
   }, [searchParams, setSearchParams, refetchBalance, queryClient]);
+
+  // После завершения ответа бэкенд уже списал токены — обновляем квоту.
+  // Ref на предыдущее значение не даёт эффекту запускать refetch повторно.
+  const wasSendingRef = useRef(isSending);
+
+  useEffect(() => {
+    if (wasSendingRef.current && !isSending) {
+      void refetchTokenQuota();
+    }
+
+    wasSendingRef.current = isSending;
+  }, [isSending, refetchTokenQuota]);
 
   // Каждая дельта стрима обновляет messages, поэтому скролл идёт за текстом.
   useEffect(() => {
@@ -326,6 +342,23 @@ export function ChatPage() {
               {t('nav.office')}
             </NavLink>
 
+            <NavLink to="/app/settings" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              {t('nav.settings')}
+            </NavLink>
+
             {isAdmin && (
               <NavLink to="/admin" className={navItemClasses}>
                 <svg
@@ -383,6 +416,8 @@ export function ChatPage() {
               onTopUp={openTopUp}
               onHistory={openHistory}
             />
+
+            <TokenUsageWidget quota={tokenQuotaQuery.data} />
 
             <div className="mt-4 flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-on-surface-variant">
@@ -509,6 +544,26 @@ export function ChatPage() {
                 >
                   <path d="M3 21h18M5 21V7l7-4 7 4v14" />
                   <path d="M9 21v-6h6v6" />
+                </svg>
+              </Link>
+              <Link
+                to="/app/settings"
+                aria-label={t('nav.settings')}
+                title={t('nav.settings')}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
                 </svg>
               </Link>
               <ThemeToggle />

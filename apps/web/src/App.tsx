@@ -43,6 +43,12 @@ const StorePage = lazy(() =>
   })),
 );
 
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((module) => ({
+    default: module.SettingsPage,
+  })),
+);
+
 const AdminPage = lazy(() =>
   import('./pages/AdminPage').then((module) => ({
     default: module.AdminPage,
@@ -109,6 +115,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <StorePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
               </ProtectedRoute>
             }
           />

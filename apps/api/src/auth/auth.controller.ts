@@ -11,7 +11,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
-import { AuthService, type AuthTokens } from './auth.service.js';
+import {
+  AuthService,
+  type AuthTokens,
+  type UserProfile,
+} from './auth.service.js';
 import { Roles } from './decorators/roles.decorator.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshDto } from './dto/refresh.dto.js';
@@ -29,11 +33,7 @@ interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUser;
 }
 
-export interface UserProfile {
-  id: string;
-  email: string;
-  role: string;
-}
+export type { UserProfile } from './auth.service.js';
 
 /** Лимиты можно ослабить в E2E через env, в production по умолчанию строгие. */
 function limitFromEnv(name: string, fallback: number): number {
@@ -73,13 +73,13 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('user', 'admin')
-  me(@Req() request: AuthenticatedRequest): UserProfile {
+  async me(@Req() request: AuthenticatedRequest): Promise<UserProfile> {
     const user = request.user;
 
     if (!user) {
       throw new UnauthorizedException('Пользователь не аутентифицирован');
     }
 
-    return { id: user.userId, email: user.email, role: user.role };
+    return this.authService.getProfile(user.userId);
   }
 }
