@@ -1311,3 +1311,199 @@ docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 поэтому после восстановления ожидания и позиция графа сохраняются вместе с
 Ledger. После восстановления проверьте отсутствие «осиротевших» `PENDING`
 без активных `PendingApproval`.
+
+## 18. Telegram webhook
+
+1. Создайте бота у `@BotFather`, получите `TELEGRAM_BOT_TOKEN`.
+2. Сгенерируйте секрет webhook и запишите его в `.env`:
+
+   ```bash
+   openssl rand -hex 32
+   # TELEGRAM_WEBHOOK_SECRET=<значение>
+   # TELEGRAM_WEBHOOK_RATE_LIMIT=120
+   ```
+
+3. Пересоберите и перезапустите API; Caddy проксирует
+   `/api/v1/webhooks/telegram` напрямую в `api:3000`:
+
+   ```bash
+   docker compose up -d --build api caddy
+   docker compose logs --tail=50 api
+   ```
+
+4. Зарегистрируйте webhook у Telegram (публичный URL — через Caddy):
+
+   ```bash
+   curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+     -H 'content-type: application/json' \
+     -d "{\"url\":\"https://${DOMAIN}/api/v1/webhooks/telegram\",\"secret_token\":\"${TELEGRAM_WEBHOOK_SECRET}\"}"
+   ```
+
+   Альтернатива — admin-эндпоинт
+   `POST /api/v1/integrations/telegram/webhook/register`
+   с `{ "publicUrl": "https://<domain>/api/v1/webhooks/telegram" }`.
+
+5. Проверка:
+
+   ```bash
+   curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+   # Ожидаемо: url = https://<domain>/api/v1/webhooks/telegram, ошибок нет
+
+   # Секрет обязателен: без него/с неверным — 401,
+   # без TELEGRAM_WEBHOOK_SECRET — 503 (fail closed)
+   curl -i -X POST "https://${DOMAIN}/api/v1/webhooks/telegram" \
+     -H 'content-type: application/json' \
+     -H "X-Telegram-Bot-Api-Secret-Token: ${TELEGRAM_WEBHOOK_SECRET}" \
+     -d '{"update_id":1}'
+   ```
+
+   Rate limit — `TELEGRAM_WEBHOOK_RATE_LIMIT` запросов в минуту на IP
+   (Caddy передаёт реальный IP в `X-Forwarded-For`; API настроен на
+   `trust proxy`). На валидный update endpoint отвечает 200.
+
+## 19. Google Workspace OAuth
+
+1. В Google Cloud Console создайте проект, включите Google Sheets API,
+   Google Docs API и Google Calendar API.
+2. Настройте OAuth consent screen (Internal или Testing) и создайте
+   OAuth client типа **Web application**.
+3. Authorized redirect URI:
+
+   ```text
+   https://<domain>/api/v1/integrations/google/callback
+   ```
+
+4. Заполните `.env`:
+
+   ```bash
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=https://<domain>/api/v1/integrations/google/callback
+   # optional: GOOGLE_OAUTH_SCOPES=...
+   # optional: GOOGLE_OAUTH_STATE_SECRET=<отдельный HMAC-секрет>
+   TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32)
+   TOKEN_ENCRYPTION_KEY_ID=local-v1
+   ```
+
+   `TOKEN_ENCRYPTION_KEY` — 32 байта в base64 (или 64 hex-символа). В
+   production храните его в Docker secret/менеджере секретов, не в git.
+
+5. Перезапустите API и проверьте статус:
+
+   ```bash
+   docker compose up -d --build api
+   curl -fsS "http://localhost:3001/api/v1/integrations/google/status" \
+     -H "Authorization: Bearer <JWT>"
+   # Ожидаемо: {"configured":true,"connected":false}
+   ```
+
+6. Получите URL согласия (`GET /api/v1/integrations/google/authorize` с JWT),
+   откройте в браузере и подтвердите доступ. Callback сохранит access и
+   refresh-токены; access обновляется автоматически.
+
+7. Проверка шифрования:
+
+   ```bash
+   docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -c 'SELECT "userId", left("refreshToken", 3) AS prefix, length("refreshToken") FROM "GoogleCredential";'
+   ```
+
+   Ожидаемо: `prefix = v1:`; открытого токена в колонках нет. При потере
+   `TOKEN_ENCRYPTION_KEY` старые токены не расшифруются — см. KI-053.
+
+## 20. Egress api/worker
+
+Внешние запросы API (Telegram, Google OAuth/API) и worker (LLM)
+проверяются allowlist из `@skillwharf/shared`:
+
+```bash
+# В .env / compose
+API_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com
+LLM_WORKER_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru
+```
+
+Правила:
+
+* внешний URL — только `https` и только домен из allowlist;
+* локальные `host.docker.internal`, `127.0.0.1`, RFC1918 и compose-имена
+  разрешены для dev (LM Studio/Ollama);
+* неизвестный домен — `403 errors.outbound_blocked`, запрос не уходит в сеть.
+
+Egress — прикладной allowlist, не замена NetworkPolicy (KI-052).
+
+## 18. Интеграции: Telegram и Google Workspace
+
+### 18.1. Переменные окружения
+
+| Переменная | Назначение |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Токен системного бота (BotFather) для webhook и исходящих по умолчанию |
+| `TELEGRAM_WEBHOOK_SECRET` | Секрет webhook (`openssl rand -hex 32`); без него endpoint отвечает 503 |
+| `TELEGRAM_WEBHOOK_RATE_LIMIT` | Лимит запросов webhook на IP в минуту (по умолчанию 120) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth-клиент Google Cloud Console |
+| `GOOGLE_REDIRECT_URI` | Должен совпадать с redirect URI клиента (например, `https://<host>/api/v1/integrations/google/callback`) |
+| `GOOGLE_OAUTH_SCOPES` | Через запятую; пусто — Sheets/Docs/Calendar по умолчанию |
+| `GOOGLE_OAUTH_STATE_SECRET` | HMAC для OAuth-state; пусто — берётся `TOKEN_ENCRYPTION_KEY` |
+| `GOOGLE_OAUTH_SUCCESS_REDIRECT` | Полный URL веб-приложения для возврата после OAuth; пусто — JSON-ответ |
+| `TOKEN_ENCRYPTION_KEY` | AES-256-GCM ключ для токенов (`openssl rand -base64 32`), только Docker secret/KMS |
+| `GOOGLE_CALENDAR_ID` | Календарь для `google_calendar_create` (`primary` по умолчанию) |
+| `API_OUTBOUND_ALLOWLIST` | Домены egress API: Telegram, Google OAuth/API, Sheets/Docs; только https |
+| `PROVIDER_RETRY_*` | Повторы 429/5xx: max attempts, base/max delay, предел ожидания `retry_after` |
+
+Секреты не коммитить: в `.env` локально, в production — Docker secret или
+KMS. Без `TOKEN_ENCRYPTION_KEY` подключение Google не сохраняется (503
+`errors.provider_not_configured`).
+
+### 18.2. Telegram
+
+1. Создайте бота у `@BotFather`, задайте `TELEGRAM_BOT_TOKEN` и
+   `TELEGRAM_WEBHOOK_SECRET`.
+2. Зарегистрируйте webhook (admin-JWT):
+   `POST /api/v1/integrations/telegram/webhook/register` с
+   `{ "publicUrl": "https://<host>/api/v1/webhooks/telegram" }` либо curl:
+   `curl "https://api.telegram.org/bot<token>/setWebhook" -d "url=https://<host>/api/v1/webhooks/telegram" -d "secret_token=<secret>"`.
+   Caddy проксирует `/api/v1/webhooks/telegram` напрямую в API (см. раздел 10).
+3. Подключите бота в UI (Настройки → Интеграции) или `POST /api/v1/integrations/telegram`
+   с `{ "botToken": "<token>" }` — токен проверяется через `getMe` и
+   сохраняется зашифрованным. Персональный бот используется для исходящих;
+   входящие обслуживает системный бот (KI-056).
+4. Привяжите чат: `POST /api/v1/integrations/telegram/link` с `{ "chatId": "<id>" }`
+   (JWT пользователя). Сообщения из этого чата маршрутизируются в его диалог;
+   непривязанный чат получает подсказку.
+5. Проверка: `GET /api/v1/integrations` → `telegram.status = "active"`,
+   `GET /api/v1/health`; логи `telegram.chat_linked`, `telegram.bot_connected`.
+
+### 18.3. Google Workspace
+
+1. В Google Cloud Console создайте OAuth client (Web application) и добавьте
+   redirect URI `GOOGLE_REDIRECT_URI`; включите Google Sheets API, Google Docs
+   API и Google Calendar API.
+2. Задайте `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`,
+   сгенерируйте `TOKEN_ENCRYPTION_KEY` (32 байта base64) и перезапустите API.
+3. Пользователь открывает Настройки → Интеграции → «Подключить Google»;
+   `GET /api/v1/integrations/google/authorization-url` отдаёт URL согласия,
+   callback сохраняет зашифрованные access/refresh-токены и email. При
+   `GOOGLE_OAUTH_SUCCESS_REDIRECT` браузер возвращается в настройки с
+   `?integration=google&status=success|error`.
+4. Проверка: `GET /api/v1/integrations/google/status` →
+   `{ connected: true, email, expiresAt }`; инструменты
+   `google_sheets_append` / `google_docs_create` / `google_calendar_create`
+   возвращают реальные `spreadsheetId`/`documentId`/`eventId`.
+5. Отключение: `DELETE /api/v1/integrations/google` (локальные токены
+   удаляются; revoke в Google пока не вызывается — KI-054).
+
+### 18.4. Ошибки и лимиты
+
+* 429 после всех повторов — `errors.provider_rate_limited` (повторить позже);
+  5xx/сеть — `errors.provider_unavailable`; 401/403 —
+  `errors.provider_auth_required` (для Google нужно заново пройти OAuth);
+  нет ключей — `errors.provider_not_configured`; запрещённый домен —
+  `errors.outbound_blocked`.
+* Повторы: экспоненциальный backoff (`PROVIDER_RETRY_BASE_DELAY_MS`,
+  `PROVIDER_RETRY_MAX_DELAY_MS`), `Retry-After` учитывается, но ожидание
+  больше `PROVIDER_RETRY_MAX_AFTER_MS` не выполняется — сразу 429.
+* Egress: внешние запросы только https и только домены из
+  `OUTBOUND_ALLOWLIST`; при добавлении нового API обновите allowlist в
+  `.env`/compose.
+* Тесты без реальных ключей: `pnpm --filter api test` — Telegram/Google
+  эмулируются nock (429/401/refresh, тела запросов, webhook secret).

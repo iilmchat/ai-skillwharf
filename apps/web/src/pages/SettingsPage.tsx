@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, NavLink } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
+import { IntegrationsSection } from '../components/IntegrationsSection';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { RagMemoryPanel } from '../components/RagMemoryPanel';
 import { StatusToast } from '../components/StatusToast';
@@ -131,6 +132,8 @@ export function SettingsPage() {
         </p>
 
         <div className="mt-8 space-y-6">
+          <IntegrationsSection />
+
           <section
             aria-labelledby="memory-title"
             aria-describedby="memory-description"

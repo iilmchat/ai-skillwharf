@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { HealthModule } from './health/health.module.js';
+import { IntegrationsModule } from './integrations/integrations.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { LlmRouterModule } from './llm-router/llm-router.module.js';
 import { MetricsModule } from './metrics/metrics.module.js';
@@ -34,6 +35,7 @@ import { SkillsModule } from './skills/skills.module.js';
     AuditModule,
     SandboxModule,
     BillingModule,
+    IntegrationsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -93,10 +93,18 @@ AI-Офис (`/office`, `/app/office`) показывает события аг�
 «Осталось 23 ч» / «Осталось 15 мин»; после истечения — «Срок ожидания истёк».
 Старый API без `expiresAt` поддерживается: таймер просто не рендерится.
 
-## Настройки и память
+Для авторизованного пользователя офис также получает состояние интеграций
+(`useIntegrations`, ключ `['integrations', userId]`). Если Telegram или
+Google Workspace активен, в карточках агентов и в боковой панели появляются
+иконки соответствующих каналов с подсказкой; при недоступном API интеграций
+иконки не показываются.
 
-Страница `/app/settings` содержит два независимых блока:
+## Настройки, интеграции и память
 
+Страница `/app/settings` содержит три независимых блока:
+
+- «Интеграции» — Telegram и Google Workspace: подключение, статус и отзыв
+  доступа (см. раздел «Интеграции» ниже).
 - «Долговременная память» — кнопка «Забыть меня» вызывает
   `DELETE /api/v1/chat/memory` и показывает тост об успехе или ошибке.
 - «Память» — список записей RAG-памяти. Раздел управляется feature-флагом
@@ -125,6 +133,51 @@ docker build -f apps/web/Dockerfile \
 (`docker-compose.yml` и `docker-compose.staging.yml`), поэтому включение —
 `VITE_RAG_MEMORY_ENABLED=true docker compose build web` (или строка в `.env`);
 значение по умолчанию — `false`, после изменения нужна пересборка web.
+
+## Интеграции
+
+Раздел «Интеграции» на странице настроек управляет внешними каналами
+пользователя. Состояние запрашивается через `GET /api/v1/integrations` и
+валидируется Zod (`src/lib/integrations.ts`):
+
+```json
+{
+  "telegram": {
+    "status": "active",
+    "botName": "Wharf Bot",
+    "botUsername": "wharf_bot"
+  },
+  "google": {
+    "status": "active",
+    "email": "owner@example.com"
+  }
+}
+```
+
+`status` принимает `active`, `disconnected` или `error`; необязательное поле
+`error` содержит ключ `errors.*` или текст для объяснения ошибки.
+
+- **Telegram.** Поле `Bot Token` проверяет формат, затем
+  `POST /api/v1/integrations/telegram` с `{ botToken }`; бэкенд вызывает
+  Telegram `getMe`. После успеха показываются имя бота (или `@username`) и
+  статус «Подключено». Кнопка «Отключить» вызывает
+  `DELETE /api/v1/integrations/telegram`. Токен хранится на сервере и после
+  подключения в UI не возвращается.
+- **Google Workspace.** Кнопка «Войти через Google» получает
+  `GET /api/v1/integrations/google/authorize` (`{ url }` или
+  `{ authorizationUrl }`), проверяет, что это абсолютный `https`-URL, и
+  выполняет редирект. После возврата с OAuth статус и email подтягиваются из
+  `GET /api/v1/integrations`; при заданном `GOOGLE_OAUTH_SUCCESS_REDIRECT`
+  backend возвращает браузер в настройки, иначе callback отдаёт JSON для
+  диагностики — откройте `/app/settings` вручную. Кнопка «Отозвать доступ»
+  вызывает `DELETE /api/v1/integrations/google`.
+- **Ошибки.** Коды `errors.provider_auth_required`,
+  `errors.provider_not_configured`, `errors.provider_unavailable`,
+  `errors.provider_rate_limited`, а также `errors.invalid_telegram_token` и
+  `errors.google_oauth_unavailable` переводятся через i18n; для неизвестных
+  ответов показывается локализованная категория по HTTP-статусу (сеть, 401,
+  403, 404, 5xx) или текст сервера. Если API интеграций ещё не развёрнут,
+  карточка показывает ошибку `notFound`, а не вымышленный статус.
 
 ## Навыки
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module.js';
 import { ChatPersistenceModule } from '../chat/persistence/persistence.module.js';
+import { ProvidersModule } from '../integrations/providers.module.js';
 import { SandboxModule } from '../sandbox/sandbox.module.js';
 import { SecurityModule } from '../security/security.module.js';
 import { AgentInternalController } from './agent-internal.controller.js';
@@ -19,6 +20,7 @@ import { LlmWorkerClient } from './llm-worker.client.js';
     SecurityModule,
     SandboxModule,
     ChatPersistenceModule,
+    ProvidersModule,
   ],
   controllers: [AgentInternalController],
   providers: [

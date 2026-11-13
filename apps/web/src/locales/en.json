@@ -66,7 +66,14 @@
     "mcp_timeout": "The MCP provider did not respond in time. Please try again later.",
     "mcp_unavailable": "The MCP provider is unavailable. Please try again later.",
     "llm_unavailable": "All LLM providers are unavailable or out of daily budget. Please try again later.",
-    "marketplace_unavailable": "The marketplace is temporarily unavailable. Please try again later."
+    "marketplace_unavailable": "The marketplace is temporarily unavailable. Please try again later.",
+    "invalid_telegram_token": "Telegram rejected the bot token. Check the value and try again.",
+    "telegram_unavailable": "Telegram is temporarily unavailable. Please try again later.",
+    "google_oauth_unavailable": "Google OAuth is temporarily unavailable. Please try again later.",
+    "provider_auth_required": "The provider rejected the credentials. Check the token or connect the account again.",
+    "provider_not_configured": "The provider is not configured on the server.",
+    "provider_unavailable": "The provider is temporarily unavailable. Please try again later.",
+    "provider_rate_limited": "The provider is temporarily rate-limiting requests. Please try again later."
   },
   "nav": {
     "primary": "Primary navigation",
@@ -355,6 +362,11 @@
     "currentTask": "Current task",
     "open": "Open",
     "openAgent": "Open agent card {{name}}",
+    "channels": {
+      "label": "Connected channels",
+      "telegram": "Telegram connected",
+      "google": "Google Workspace connected"
+    },
     "status": {
       "idle": "Coffee break",
       "working": "Typing",
@@ -391,6 +403,7 @@
       "eyebrow": "Agent card",
       "role": "Role",
       "status": "Status",
+      "channels": "Channels",
       "task": "Current task",
       "conversation": "Conversation",
       "approve": "Approve action",
@@ -614,8 +627,59 @@
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "Manage your account and the assistant's long-term memory.",
+    "subtitle": "Manage your account, integrations, and the assistant's long-term memory.",
     "backToChat": "Back to chat",
+    "integrations": {
+      "title": "Integrations",
+      "description": "Connect Telegram and Google Workspace so agents can receive tasks and work with your documents.",
+      "loading": "Loading integration status…",
+      "retry": "Try again",
+      "status": {
+        "active": "Connected",
+        "disconnected": "Not connected",
+        "error": "Error"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "description": "The bot receives messages and passes tasks to agents.",
+        "botToken": "Bot Token",
+        "botTokenPlaceholder": "123456789:AA...",
+        "botTokenHint": "Token from @BotFather. It is stored on the server and is not shown after connecting.",
+        "connect": "Connect",
+        "connecting": "Checking the token…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "Connected bot",
+        "unknownBot": "Bot name is unavailable",
+        "invalidFormat": "The token must look like 123456789:AA…",
+        "connected": "Telegram connected.",
+        "disconnected": "Telegram disconnected."
+      },
+      "google": {
+        "title": "Google Workspace",
+        "description": "Access Google Sheets, Docs, and Calendar on behalf of your account.",
+        "connect": "Sign in with Google",
+        "redirecting": "Redirecting…",
+        "disconnect": "Revoke access",
+        "disconnecting": "Revoking access…",
+        "connectedAs": "Connected account",
+        "unknownEmail": "Account email is unavailable",
+        "disconnected": "Google Workspace access revoked.",
+        "oauthHint": "A Google page will open. You can revoke access at any time."
+      },
+      "errors": {
+        "network": "The server is unreachable. Check your connection.",
+        "sessionExpired": "Your session has expired. Please sign in again.",
+        "forbidden": "You do not have permission to manage integrations.",
+        "notFound": "The integrations API is not available on the server yet.",
+        "invalidToken": "Telegram rejected the token. Check the value and try again.",
+        "oauthUnavailable": "Google OAuth is not configured on the server.",
+        "unavailable": "The integrations service is temporarily unavailable. Please try again later.",
+        "invalidResponse": "The server returned an invalid integration response.",
+        "requestFailed": "Could not complete the action. Please try again.",
+        "unknown": "Could not complete the action. Please try again later."
+      }
+    },
     "memory": {
       "title": "Long-term memory",
       "description": "The assistant remembers details of your conversations to answer more accurately. Clearing will permanently delete all saved memory.",

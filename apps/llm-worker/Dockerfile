@@ -12,9 +12,12 @@ WORKDIR /app
 # Манифесты воркспейса отдельно: слой кэшируется, пока не менялись зависимости.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/llm-worker/package.json ./apps/llm-worker/package.json
+COPY packages/shared/package.json ./packages/shared/package.json
 RUN pnpm install --frozen-lockfile
 
+COPY packages/shared ./packages/shared
 COPY apps/llm-worker ./apps/llm-worker
+RUN pnpm --filter @skillwharf/shared build
 RUN pnpm --filter llm-worker build
 RUN pnpm --filter llm-worker deploy --prod /prod/llm-worker
 

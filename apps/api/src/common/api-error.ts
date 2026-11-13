@@ -65,3 +65,56 @@ export function marketplaceUnavailableError(message: string): ApiException {
     message,
   });
 }
+
+/** Внешний провайдер исчерпал лимит запросов (429 после backoff). */
+export function providerRateLimitedError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 429,
+    error: 'Too Many Requests',
+    code: 'errors.provider_rate_limited',
+    message,
+  });
+}
+
+/** Внешний провайдер недоступен: 5xx, сеть или некорректный ответ. */
+export function providerUnavailableError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 502,
+    error: 'Bad Gateway',
+    code: 'errors.provider_unavailable',
+    message,
+  });
+}
+
+/**
+ * Провайдер отклонил токен (401/403). Для Google это означает, что
+ * пользователь должен заново пройти OAuth; для Telegram — проверить токен бота.
+ */
+export function providerAuthRequiredError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 502,
+    error: 'Bad Gateway',
+    code: 'errors.provider_auth_required',
+    message,
+  });
+}
+
+/** Интеграция не сконфигурирована в окружении (нет токена/клиента OAuth). */
+export function providerNotConfiguredError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 503,
+    error: 'Service Unavailable',
+    code: 'errors.provider_not_configured',
+    message,
+  });
+}
+
+/** Внешний запрос отклонён egress-политикой (домен не в allowlist). */
+export function outboundBlockedError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 403,
+    error: 'Forbidden',
+    code: 'errors.outbound_blocked',
+    message,
+  });
+}

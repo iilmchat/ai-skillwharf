@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Исполнитель LangGraph/LangChain: LLM-инференс, графы агента, стриминг",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @skillwharf/shared build && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint src/",
@@ -19,6 +19,7 @@
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/platform-express": "^12.0.1",
+    "@skillwharf/shared": "workspace:*",
     "axios": "^1.21.1",
     "js-tiktoken": "^1.0.21",
     "reflect-metadata": "^0.2.2",

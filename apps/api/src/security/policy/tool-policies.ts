@@ -63,6 +63,17 @@ const identifier = (max = 128) => z.string().min(1).max(max);
 /** Свободный текст с верхней границей длины. */
 const text = (max: number) => z.string().min(1).max(max);
 
+/** Дата/время ISO 8601 (Z или смещение) — строкой, как в Google API. */
+const isoDateTime = () =>
+  z
+    .string()
+    .min(1)
+    .max(64)
+    .refine(
+      (value) => !Number.isNaN(Date.parse(value)),
+      'ожидается дата/время ISO 8601',
+    );
+
 /** Ячейка таблицы: примитив, который можно безопасно записать. */
 const tableCell = z.union([
   z.string().max(2000),
@@ -152,6 +163,24 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
         channel: z.enum(['telegram', 'vk', 'whatsapp']),
         to: text(128),
         text: text(4_096),
+        buttons: z
+          .array(
+            z
+              .object({
+                text: text(64),
+                url: z.url().max(2_048).optional(),
+                callbackData: z.string().min(1).max(64).optional(),
+              })
+              .strict()
+              .refine(
+                (button) =>
+                  (button.url === undefined) !==
+                  (button.callbackData === undefined),
+                'кнопка должна содержать ровно одно из полей url или callbackData',
+              ),
+          )
+          .max(8)
+          .optional(),
       })
       .strict(),
     requiredPermission: null,
@@ -166,6 +195,7 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
       .object({
         sheetId: identifier(256),
         values: z.array(z.union([tableCell, tableRow])).max(1_000),
+        range: identifier(128).optional(),
       })
       .strict(),
     requiredPermission: null,
@@ -180,6 +210,24 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
       .object({
         title: text(300),
         content: text(50_000),
+      })
+      .strict(),
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+  },
+  google_calendar_create: {
+    name: 'google_calendar_create',
+    schema: z
+      .object({
+        summary: text(300),
+        start: isoDateTime(),
+        end: isoDateTime(),
+        description: text(5_000).optional(),
+        attendees: z.array(z.email().max(320)).max(20).optional(),
+        timeZone: identifier(64).optional(),
       })
       .strict(),
     requiredPermission: null,

@@ -5,7 +5,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { EgressPolicy } from '../sandbox/egress.js';
-import { marketplaceUnavailableError } from '../common/api-error.js';
+import {
+  invalidRequestError,
+  marketplaceUnavailableError,
+} from '../common/api-error.js';
+import { GoogleApiService } from '../integrations/google/google-api.service.js';
+import { TelegramBotService } from '../integrations/telegram/telegram-bot.service.js';
+import { TelegramService } from '../integrations/telegram/telegram.service.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
 import { McpClient } from './tools/mcp-client.js';
 import { McpGateway, mcpUnavailableError, type McpProvider } from './tools/mcp-gateway.js';
@@ -17,6 +23,7 @@ import {
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
+  GOOGLE_CALENDAR_CREATE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   MONITOR_COMPETITOR_PRICES_TOOL_NAME,
@@ -41,6 +48,7 @@ import {
   ExecToolSchema,
   ExtractDocumentDataToolSchema,
   GenerateImageToolSchema,
+  GoogleCalendarCreateToolSchema,
   GoogleDocsCreateToolSchema,
   GoogleSheetsAppendToolSchema,
   McpToolSchema,
@@ -71,6 +79,11 @@ export interface AgentSkillSnapshot {
 export interface SandboxToolOptions {
   beforeExecute?: () => Promise<void>;
   egress?: EgressPolicy;
+  /**
+   * Владелец вызова: нужен инструментам, работающим от имени пользователя
+   * (Google Workspace — OAuth-токен конкретного пользователя).
+   */
+  userId?: string;
 }
 
 export interface McpToolOptions extends SandboxToolOptions {
@@ -124,7 +137,12 @@ export class AgentToolsService {
   private readonly mcpClients = new Map<string, McpClient>();
   private readonly mcpGateways = new WeakMap<McpClient, McpGateway>();
 
-  constructor(private readonly sandboxService: SandboxService) {}
+  constructor(
+    private readonly sandboxService: SandboxService,
+    private readonly telegram: TelegramService,
+    private readonly google: GoogleApiService,
+    private readonly telegramBots: TelegramBotService,
+  ) {}
 
   /** Есть ли инструмент в реестре (модель могла вызвать несуществующий). */
   has(name: string): boolean {
@@ -147,6 +165,10 @@ export class AgentToolsService {
       [SEND_MESSAGE_TOOL_NAME, SEND_MESSAGE_TOOL_NAME],
       [GOOGLE_SHEETS_APPEND_TOOL_NAME, GOOGLE_SHEETS_APPEND_TOOL_NAME],
       [GOOGLE_DOCS_CREATE_TOOL_NAME, GOOGLE_DOCS_CREATE_TOOL_NAME],
+      [
+        GOOGLE_CALENDAR_CREATE_TOOL_NAME,
+        GOOGLE_CALENDAR_CREATE_TOOL_NAME,
+      ],
       [GENERATE_IMAGE_TOOL_NAME, GENERATE_IMAGE_TOOL_NAME],
       [RUN_WORKFLOW_TOOL_NAME, RUN_WORKFLOW_TOOL_NAME],
       [PUBLISH_TO_DZEN_TOOL_NAME, PUBLISH_TO_DZEN_TOOL_NAME],
@@ -243,9 +265,27 @@ export class AgentToolsService {
       case SEND_MESSAGE_TOOL_NAME: {
         const input = SendMessageToolSchema.parse(args);
 
+        if (input.channel.trim().toLowerCase() !== 'telegram') {
+          throw invalidRequestError(
+            `Канал «${input.channel}» ещё не подключён: доступен только telegram`,
+          );
+        }
+
         await options.beforeExecute?.();
 
-        return `Сообщение отправлено в ${input.channel} для ${input.to}`;
+        const botToken = await this.userBotToken(options.userId);
+        const sent = await this.telegram.sendMessage({
+          chatId: input.to,
+          text: input.text,
+          ...(botToken === null ? {} : { botToken }),
+          ...(input.buttons === undefined ? {} : { buttons: input.buttons }),
+        });
+
+        return JSON.stringify({
+          channel: 'telegram',
+          chatId: sent.chatId,
+          messageId: sent.messageId,
+        });
       }
 
       case GOOGLE_SHEETS_APPEND_TOOL_NAME: {
@@ -253,7 +293,16 @@ export class AgentToolsService {
 
         await options.beforeExecute?.();
 
-        return `Данные добавлены в таблицу ${input.sheetId}`;
+        const result = await this.google.appendSheetRows(
+          requireUserId(options),
+          {
+            spreadsheetId: input.sheetId,
+            values: input.values,
+            ...(input.range === undefined ? {} : { range: input.range }),
+          },
+        );
+
+        return JSON.stringify(result);
       }
 
       case GOOGLE_DOCS_CREATE_TOOL_NAME: {
@@ -261,7 +310,38 @@ export class AgentToolsService {
 
         await options.beforeExecute?.();
 
-        return `Документ "${input.title}" создан`;
+        const created = await this.google.createDocument(
+          requireUserId(options),
+          { title: input.title, content: input.content },
+        );
+
+        return JSON.stringify(created);
+      }
+
+      case GOOGLE_CALENDAR_CREATE_TOOL_NAME: {
+        const input = GoogleCalendarCreateToolSchema.parse(args);
+
+        await options.beforeExecute?.();
+
+        const event = await this.google.createCalendarEvent(
+          requireUserId(options),
+          {
+            summary: input.summary,
+            start: input.start,
+            end: input.end,
+            ...(input.description === undefined
+              ? {}
+              : { description: input.description }),
+            ...(input.attendees === undefined
+              ? {}
+              : { attendees: input.attendees }),
+            ...(input.timeZone === undefined
+              ? {}
+              : { timeZone: input.timeZone }),
+          },
+        );
+
+        return JSON.stringify(event);
       }
 
       case GENERATE_IMAGE_TOOL_NAME:
@@ -329,6 +409,28 @@ export class AgentToolsService {
 
       default:
         throw new Error(`Инструмент «${name}» не найден`);
+    }
+  }
+
+  /**
+   * Токен Telegram-бота пользователя (если подключён). Ошибка расшифровки
+   * или отсутствие ключа не ломают отправку: fallback — системный бот.
+   */
+  private async userBotToken(userId?: string): Promise<string | null> {
+    if (userId === undefined || userId.trim() === '') {
+      return null;
+    }
+
+    try {
+      return await this.telegramBots.getBotToken(userId);
+    } catch (error) {
+      this.logger.warn(
+        `Telegram: не удалось получить бота пользователя ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }; используется системный бот`,
+      );
+
+      return null;
     }
   }
 
@@ -469,8 +571,7 @@ export class AgentToolsService {
 }
 
 /** JSON Schema без `$schema`, чтобы worker мог конвертировать её в Zod. */
-function zToJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  const json = z.toJSONSchema(schema, { io: 'input' }) as Record<
+function zToJsonSchema(schema: z.ZodType): Record<string, unknown> {  const json = z.toJSONSchema(schema, { io: 'input' }) as Record<
     string,
     unknown
   >;
@@ -478,6 +579,19 @@ function zToJsonSchema(schema: z.ZodType): Record<string, unknown> {
   delete json.$schema;
 
   return json;
+}
+
+/** Пользователь-владелец вызова: без него OAuth-инструменты не работают. */
+function requireUserId(options: SandboxToolOptions): string {
+  const userId = options.userId?.trim() ?? '';
+
+  if (userId === '') {
+    throw invalidRequestError(
+      'Инструменту нужен пользователь: OAuth-подключение не найдено',
+    );
+  }
+
+  return userId;
 }
 
 function sandboxEnv(): Record<string, string> {

@@ -4,19 +4,29 @@ import {
   getToolPolicy,
 } from './tool-policies.js';
 
-/** Валидные аргументы для каждого инструмента из llm.service.ts. */
+/** Валидные аргументы для каждого инструмента из tool-schemas.ts. */
 const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
   execute_sandbox_code: { code: 'echo ok' },
   web_search: { query: 'погода в Москве' },
   exec: { command: 'gh --version' },
   ozon_mcp_call: { action: 'ozon_get_prices', params: { sku: ['1'] } },
   wb_mcp_call: { action: 'wb_cards_list', params: { limit: 10 } },
-  send_message: { channel: 'telegram', to: '@user', text: 'привет' },
+  send_message: {
+    channel: 'telegram',
+    to: '@user',
+    text: 'привет',
+    buttons: [{ text: 'Открыть', url: 'https://example.com' }],
+  },
   google_sheets_append: {
     sheetId: 'sheet-1',
     values: [['a', 1, true], ['b']],
   },
   google_docs_create: { title: 'Документ', content: 'Текст' },
+  google_calendar_create: {
+    summary: 'Встреча',
+    start: '2026-11-20T10:00:00Z',
+    end: '2026-11-20T11:00:00Z',
+  },
   generate_image: { prompt: 'кот в космосе' },
   run_workflow: { steps: ['собрать данные', 'посчитать'] },
   publish_to_dzen: {
@@ -36,8 +46,8 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
 const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
-  it('покрывает политикой все инструменты из llm.service.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(18);
+  it('покрывает политикой все инструменты из tool-schemas.ts', () => {
+    expect(TOOL_NAMES).toHaveLength(19);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 

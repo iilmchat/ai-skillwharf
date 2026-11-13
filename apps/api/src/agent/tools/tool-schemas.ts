@@ -34,32 +34,75 @@ export const WB_MCP_TOOL_DESCRIPTION =
   'Вызывает реальный MCP-сервер Wildberries Seller. Передайте имя MCP-инструмента в action (например, wb_cards_list) и аргументы в params';
 export const McpToolSchema = mcpToolCallSchema;
 
-/** Mock-инструмент отправки сообщений. */
+/** Инструмент отправки сообщений в Telegram. */
 export const SEND_MESSAGE_TOOL_NAME = 'send_message';
 export const SEND_MESSAGE_TOOL_DESCRIPTION =
-  'Отправляет сообщение в Telegram/VK/WhatsApp (заглушка)';
+  'Отправляет сообщение в Telegram через Bot API; можно приложить inline-кнопки с URL или callback_data';
 export const SendMessageToolSchema = z.object({
-  channel: z.string().describe('Канал: telegram, vk или whatsapp'),
-  to: z.string().describe('Получатель сообщения'),
+  channel: z.string().describe('Канал: telegram (VK/WhatsApp ещё не подключены)'),
+  to: z.string().describe('Получатель: chat_id или @username Telegram'),
   text: z.string().describe('Текст сообщения'),
+  buttons: z
+    .array(
+      z
+        .object({
+          text: z.string().min(1).max(64).describe('Надпись на кнопке'),
+          url: z.url().max(2_048).optional().describe('Ссылка кнопки'),
+          callbackData: z
+            .string()
+            .min(1)
+            .max(64)
+            .optional()
+            .describe('Данные callback-кнопки'),
+        })
+        .refine(
+          (button) =>
+            (button.url === undefined) !==
+            (button.callbackData === undefined),
+          'кнопка должна содержать ровно одно из полей url или callbackData',
+        ),
+    )
+    .max(8)
+    .optional()
+    .describe('Inline-клавиатура: одна кнопка в ряд'),
 });
 
-/** Mock-инструмент добавления строк в Google Sheets. */
+/** Инструмент добавления строк в Google Sheets. */
 export const GOOGLE_SHEETS_APPEND_TOOL_NAME = 'google_sheets_append';
 export const GOOGLE_SHEETS_APPEND_TOOL_DESCRIPTION =
-  'Добавляет строки в Google Таблицу (заглушка)';
+  'Добавляет строки в Google Таблицу через Sheets API v4 и возвращает обновлённый диапазон';
 export const GoogleSheetsAppendToolSchema = z.object({
-  sheetId: z.string().describe('Идентификатор таблицы'),
+  sheetId: z.string().describe('Идентификатор таблицы (spreadsheetId)'),
   values: z.array(z.unknown()).describe('Строки для добавления'),
+  range: z
+    .string()
+    .optional()
+    .describe('Диапазон для append, по умолчанию A1'),
 });
 
-/** Mock-инструмент создания Google Docs. */
+/** Инструмент создания Google Docs. */
 export const GOOGLE_DOCS_CREATE_TOOL_NAME = 'google_docs_create';
 export const GOOGLE_DOCS_CREATE_TOOL_DESCRIPTION =
-  'Создаёт документ Google Docs (заглушка)';
+  'Создаёт документ Google Docs через Docs API и вставляет текст, возвращает documentId и ссылку';
 export const GoogleDocsCreateToolSchema = z.object({
   title: z.string().describe('Заголовок документа'),
   content: z.string().describe('Содержимое документа'),
+});
+
+/** Инструмент создания события Google Calendar. */
+export const GOOGLE_CALENDAR_CREATE_TOOL_NAME = 'google_calendar_create';
+export const GOOGLE_CALENDAR_CREATE_TOOL_DESCRIPTION =
+  'Создаёт событие в Google Календаре (start/end в ISO 8601) и возвращает eventId и ссылку';
+export const GoogleCalendarCreateToolSchema = z.object({
+  summary: z.string().min(1).describe('Название события'),
+  start: z.string().describe('Начало события, ISO 8601'),
+  end: z.string().describe('Конец события, ISO 8601'),
+  description: z.string().optional().describe('Описание события'),
+  attendees: z
+    .array(z.email())
+    .optional()
+    .describe('Email участников'),
+  timeZone: z.string().optional().describe('Часовой пояс IANA'),
 });
 
 /** Mock-инструмент генерации изображений. */
@@ -187,6 +230,10 @@ export const TOOL_REGISTRY = {
   [GOOGLE_DOCS_CREATE_TOOL_NAME]: {
     description: GOOGLE_DOCS_CREATE_TOOL_DESCRIPTION,
     schema: GoogleDocsCreateToolSchema,
+  },
+  [GOOGLE_CALENDAR_CREATE_TOOL_NAME]: {
+    description: GOOGLE_CALENDAR_CREATE_TOOL_DESCRIPTION,
+    schema: GoogleCalendarCreateToolSchema,
   },
   [GENERATE_IMAGE_TOOL_NAME]: {
     description: GENERATE_IMAGE_TOOL_DESCRIPTION,

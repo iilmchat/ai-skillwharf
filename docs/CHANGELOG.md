@@ -4,20 +4,111 @@
 
 ## [Unreleased]
 
+### Sprint 18: Telegram Webhooks, Google OAuth & Egress
+
+- Caddy (`deploy/Caddyfile`, `deploy/Caddyfile.staging`) проксирует
+  `POST /api/v1/webhooks/telegram` напрямую в `api:3000`, минуя web-контейнер;
+  публичный alias в API — `TelegramPublicWebhookController`. Секрет
+  `X-Telegram-Bot-Api-Secret-Token` проверяется constant-time; без
+  `TELEGRAM_WEBHOOK_SECRET` endpoint отвечает fail closed.
+- Rate limit webhook: `TELEGRAM_WEBHOOK_RATE_LIMIT` (по умолчанию 120
+  запросов/мин на IP) через `@nestjs/throttler`; `trust proxy` уже включает
+  реальный IP из Caddy `X-Forwarded-For`.
+- Google Workspace OAuth: env `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+  `GOOGLE_REDIRECT_URI`, `GOOGLE_OAUTH_SCOPES`; refresh/access-токены
+  сохраняются только в зашифрованном виде (AES-256-GCM,
+  `TOKEN_ENCRYPTION_KEY`), KMS-абстракция `KeyManagementService` оставляет
+  возможность заменить локальный ключ на облачный KMS.
+- Prisma: модели `GoogleCredential`, `TelegramBot`, `TelegramChatLink` и
+  миграция `20261113190000_add_integrations`; токены в БД — envelope
+  `v1:<iv>:<tag>:<ciphertext>`, открытых значений нет.
+- Egress: общий allowlist в `@skillwharf/shared`; API проверяет его в
+  `provider-http` перед Telegram/Google-запросами, worker — перед вызовом
+  LLM. Разрешены `api.telegram.org`, `www.googleapis.com`,
+  `oauth2.googleapis.com`, `sheets.googleapis.com`,
+  `docs.googleapis.com` и домены LLM-провайдеров; локальные dev-адреса
+  проходят отдельно. Env: `API_OUTBOUND_ALLOWLIST`,
+  `LLM_WORKER_OUTBOUND_ALLOWLIST`.
+- Тесты: шифрование/подмена ciphertext, проверка секрета webhook,
+  rate-limit env, egress-allowlist API/worker, shared-парсер.
+
+#### Инструменты и реальные интеграции (KI-012)
+
+- `send_message` вызывает Telegram Bot API с inline-клавиатурой (до 8
+  кнопок `url`/`callbackData`); исходящие идут от бота пользователя
+  (`TelegramBot`, AES-256-GCM), иначе от системного `TELEGRAM_BOT_TOKEN`.
+  Каналы `vk`/`whatsapp` пока не подключены — 400 `errors.invalid_request`.
+- `google_sheets_append` реально добавляет строки (Sheets API v4
+  `values:append`, `USER_ENTERED`), `google_docs_create` создаёт документ и
+  вставляет текст (Docs API `batchUpdate`), добавлен
+  `google_calendar_create` (Calendar API v3, ISO 8601, attendees). Все
+  Google-инструменты работают от имени пользователя: `userId` прокидывается
+  из `AgentRuntimeService` в `AgentToolsService`, токен обновляется по
+  `refresh_token`, при 401 — один принудительный refresh и повтор.
+- OAuth: `GET /integrations/google/authorize|authorization-url` с
+  HMAC-подписанным `state`, `GET /integrations/google/callback`
+  (обмен кода, email из `id_token`, redirect в UI при
+  `GOOGLE_OAUTH_SUCCESS_REDIRECT`), `GET /integrations/google/status`,
+  `DELETE /integrations/google`; подключение бота —
+  `POST/DELETE /integrations/telegram`, сводный статус —
+  `GET /integrations`.
+- Ошибки провайдеров: 429 после экспоненциального backoff (с учётом
+  `Retry-After`/`parameters.retry_after`) → `errors.provider_rate_limited`,
+  5xx/сеть → `errors.provider_unavailable`, 401/403 →
+  `errors.provider_auth_required`, нет ключей →
+  `errors.provider_not_configured`, запрещённый egress →
+  `errors.outbound_blocked`. Env: `PROVIDER_RETRY_*`.
+- Инструменты и политики: новые описания без «заглушек», кнопки
+  `send_message` в strict-схеме policy engine, `google_calendar_create` в
+  `TOOL_REGISTRY`; descriptors включают calendar только если навык объявил
+  его в `dependencies.tools`.
+- Тесты на nock: Telegram (sendMessage, inline keyboard, 429-retry,
+  exhausted 429, 401, 400, getMe, split длинного текста), Google
+  Sheets/Docs/Calendar (тела запросов, 429, 401+refresh),
+  OAuth (state, обмен кода, refresh, шифрование, email из id_token),
+  webhook (секрет, маршрутизация в ChatService, непривязанный чат,
+  callback), контракт `GET /integrations` и инструменты `AgentToolsService`.
+- KI-012 закрыт для `messenger-connector`/`google-workspace`; остаток
+  внешних API — KI-055. KI-050 закрыт (redirect + контракт UI); KI-014
+  (content/HR/legal) вне Sprint 18.
+
+### Sprint 18: Integration Management UI
+
+- На странице настроек появился раздел «Интеграции»: Telegram (`Bot Token`,
+  проверка через `getMe`, имя бота, отключение) и Google Workspace (переход на
+  OAuth URL, статус, email аккаунта, отзыв доступа).
+- Состояние интеграций запрашивается через `GET /api/v1/integrations` и
+  валидируется Zod (`apps/web/src/lib/integrations.ts`); поддерживаются
+  статусы `active`, `disconnected`, `error` и локализованные сообщения об
+  ошибках (неверный токен, недоступный OAuth, сеть, 401/403/404/5xx).
+- В карточках агентов AI-Офиса и в боковой панели показываются иконки
+  активных каналов Telegram/Google.
+- Добавлены строки RU/EN, обновлён `apps/web/README.md`.
+- Контракт UI закрыт бэкендом: `GET /api/v1/integrations`,
+  `POST/DELETE /api/v1/integrations/telegram`,
+  `GET /api/v1/integrations/google/authorize` и
+  `DELETE /api/v1/integrations/google`; Google callback возвращает браузер в
+  настройки при заданном `GOOGLE_OAUTH_SUCCESS_REDIRECT` (KI-050).
+- UI проверен unit-тестами и Playwright с mock API; реальные Telegram/Google
+  требуют ключей окружения.
+
 ### Sprint 17: LLM Worker, Redis & Control Plane UI
 
-**LLM Worker & Architecture**
+#### LLM Worker & Architecture
+
 - Создан отдельный NestJS-микросервис `apps/llm-worker`. В него перенесены `@langchain/*`, LangGraph, адаптеры LLM и токен-эстиматор.
 - API полностью избавлен от `@langchain/*`. Размер образа API снижен до 380 МБ (цель ≤ 400 МБ). Закрывает KI-006.
-- Связь API ↔ worker реализована через внутренний HTTP/NDJSON (`/v1/graphs/run`, `/v1/graphs/resume`). 
+- Связь API ↔ worker реализована через внутренний HTTP/NDJSON (`/v1/graphs/run`, `/v1/graphs/resume`).
 - Восстановлен RAG-контекст при вызове LLM (потерян при рефакторинге).
 
-**Фоновые задачи и Redis**
+#### Фоновые задачи и Redis
+
 - Добавлен Redis (`redis:7-alpine`) в `docker-compose.yml`.
 - Фоновые задачи (`expired-approvals`, `checkpoint-retention`) переведены на BullMQ (`upsertJobScheduler`). Исправлен баг с дублированием джобов и `jobId`.
 - Добавлены внутренние эндпоинты API (`/internal/agent/*`) с защитой по `INTERNAL_API_TOKEN`.
 
-**LLM Router & Control Plane**
+#### LLM Router & Control Plane
+
 - Исправлен 502 `errors.llm_unavailable` для одиночных маршрутов и env-fallback. Закрывает KI-041, KI-044.
 - В Control Plane UI (вкладка «LLM Роутер») добавлены поля `taskType` и `dailyCostLimit`, добавлена валидация Zod и PATCH-эндпоинт.
 - Добавлен маппинг `errors.marketplace_unavailable` (бэкенд и UI). Завершает KI-025.

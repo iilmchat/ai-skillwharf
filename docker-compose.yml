@@ -72,6 +72,8 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       YANDEX_IAM_TOKEN: ${YANDEX_IAM_TOKEN:-}
       YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
+      # Egress worker'а: внешние LLM, Telegram и Google — только эти домены.
+      OUTBOUND_ALLOWLIST: ${LLM_WORKER_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,sheets.googleapis.com,docs.googleapis.com,oauth2.googleapis.com,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru}
     extra_hosts:
       # LLM на хосте (LM Studio/Ollama) доступна так же, как из API.
       - "host.docker.internal:host-gateway"
@@ -112,6 +114,30 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-dev-internal-token}
       # BullMQ: HITL TTL, retention и уведомления.
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Telegram: бот, секрет webhook и лимит запросов на IP.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_WEBHOOK_RATE_LIMIT: ${TELEGRAM_WEBHOOK_RATE_LIMIT:-120}
+      # Google Workspace OAuth: клиент, redirect и scopes.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_OAUTH_SCOPES: ${GOOGLE_OAUTH_SCOPES:-}
+      GOOGLE_OAUTH_STATE_SECRET: ${GOOGLE_OAUTH_STATE_SECRET:-}
+      # Календарь по умолчанию для google_calendar_create.
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
+      # Полный URL веб-приложения для возврата после OAuth (пусто — JSON).
+      GOOGLE_OAUTH_SUCCESS_REDIRECT: ${GOOGLE_OAUTH_SUCCESS_REDIRECT:-}
+      # Ключ AES-256-GCM для refresh/access-токенов (base64, 32 байта).
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      TOKEN_ENCRYPTION_KEY_ID: ${TOKEN_ENCRYPTION_KEY_ID:-local-v1}
+      # Egress API: Telegram и Google — только эти домены.
+      OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com}
+      # Повторы 429/5xx внешних провайдеров (экспоненциальный backoff).
+      PROVIDER_RETRY_MAX_ATTEMPTS: ${PROVIDER_RETRY_MAX_ATTEMPTS:-3}
+      PROVIDER_RETRY_BASE_DELAY_MS: ${PROVIDER_RETRY_BASE_DELAY_MS:-500}
+      PROVIDER_RETRY_MAX_DELAY_MS: ${PROVIDER_RETRY_MAX_DELAY_MS:-5000}
+      PROVIDER_RETRY_MAX_AFTER_MS: ${PROVIDER_RETRY_MAX_AFTER_MS:-30000}
       # OTel включается только при заданном endpoint (см. Runbook).
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-skillwharf-api}

@@ -8,6 +8,10 @@ import {
 } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { ChatOpenAI } from '@langchain/openai';
+import {
+  assertOutboundUrlAllowed,
+  parseOutboundAllowlist,
+} from '@skillwharf/shared';
 import type {
   LlmRouteSelection,
   TokenUsage,
@@ -83,6 +87,9 @@ interface StreamAttemptState {
 export class LlmInferenceService {
   private readonly logger = new Logger(LlmInferenceService.name);
   private readonly client: ChatOpenAI | null;
+  private readonly outboundAllowlist = parseOutboundAllowlist(
+    process.env.OUTBOUND_ALLOWLIST,
+  );
 
   constructor(private readonly bridge: AgentBridgeService) {
     const baseURL = process.env.LLM_BASE_URL;
@@ -92,6 +99,17 @@ export class LlmInferenceService {
       this.client = null;
       this.logger.warn(
         'LLM не настроен (LLM_BASE_URL/LLM_MODEL) — используется эхо-заглушка',
+      );
+
+      return;
+    }
+
+    try {
+      this.assertOutboundAllowed(baseURL);
+    } catch (error) {
+      this.client = null;
+      this.logger.error(
+        `LLM_BASE_URL заблокирован egress-политикой: ${describeError(error)}`,
       );
 
       return;
@@ -382,7 +400,16 @@ export class LlmInferenceService {
 
     for (let index = 0; index < routes.length; index++) {
       const route = routes[index]!;
-      const executor = this.resolveExecutor(route);
+      let executor: LlmExecutor | null;
+
+      try {
+        executor = this.resolveExecutor(route);
+      } catch (error) {
+        this.logger.warn(
+          `Маршрут ${route.name} пропущен: ${describeError(error)}`,
+        );
+        continue;
+      }
 
       if (executor === null) {
         this.logRouterFallback(
@@ -449,6 +476,8 @@ export class LlmInferenceService {
       return this.client;
     }
 
+    this.assertOutboundAllowed(baseURL);
+
     const apiKey = route.apiKeyEnvVar
       ? process.env[route.apiKeyEnvVar]
       : process.env.LLM_API_KEY;
@@ -459,6 +488,19 @@ export class LlmInferenceService {
       configuration: { baseURL },
       temperature: 0.7,
     });
+  }
+
+  /**
+   * Egress-политика worker'а: внешние LLM-эндпоинты только из allowlist.
+   * В тестах (NODE_ENV=test) проверка отключена, чтобы моки могли
+   * использовать синтетический llm.test.
+   */
+  private assertOutboundAllowed(rawUrl: string): void {
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+
+    assertOutboundUrlAllowed(rawUrl, this.outboundAllowlist);
   }
 
   private resolveUsage(

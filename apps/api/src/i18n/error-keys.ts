@@ -25,6 +25,22 @@ export const ERROR_KEYS = {
    */
   marketplaceUnavailable: 'errors.marketplace_unavailable',
   /**
+   * Внешний провайдер (Telegram, Google Workspace) вернул 429 после всех
+   * повторов с экспоненциальным backoff. Повтор возможен позже.
+   */
+  providerRateLimited: 'errors.provider_rate_limited',
+  /** Внешний провайдер недоступен: 5xx, сеть или некорректный ответ. */
+  providerUnavailable: 'errors.provider_unavailable',
+  /**
+   * Провайдер отклонил учётные данные (401/403): токен истёк или отозван.
+   * Для Google пользователю нужно заново пройти OAuth.
+   */
+  providerAuthRequired: 'errors.provider_auth_required',
+  /** Интеграция не настроена: нет токена бота/клиента OAuth в окружении. */
+  providerNotConfigured: 'errors.provider_not_configured',
+  /** Внешний запрос отклонён egress-политикой API/worker. */
+  outboundBlocked: 'errors.outbound_blocked',
+  /**
    * LLM временно недоступен: все маршруты цепочки упали или исчерпали
    * дневной бюджет (LLM Router v2).
    */

@@ -11,9 +11,11 @@ import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Socket } from 'socket.io-client';
 import { Brand } from '../components/Brand';
+import { IntegrationIcon } from '../components/IntegrationIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PendingTtl } from '../components/PendingTtl';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { useIntegrations } from '../hooks/useIntegrations';
 import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import {
   DEFAULT_OFFICE_AGENT_ID,
@@ -22,6 +24,10 @@ import {
   type OfficeAgentStatus,
   type OfficeApprovalReason,
 } from '../lib/office-events';
+import {
+  getActiveIntegrationChannels,
+  type IntegrationProvider,
+} from '../lib/integrations';
 import { pendingApprovalsQueryKey } from '../lib/pending-approvals';
 import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
@@ -203,13 +209,48 @@ const deskVariants: Variants = {
   },
 };
 
+/** Активные каналы интеграций: Telegram/Google видны во всех карточках. */
+function OfficeChannelIcons({
+  channels,
+}: {
+  channels: readonly IntegrationProvider[];
+}) {
+  const { t } = useTranslation();
+
+  if (channels.length === 0) {
+    return null;
+  }
+
+  return (
+    <span
+      role="group"
+      aria-label={t('office.channels.label')}
+      className="inline-flex items-center gap-1"
+    >
+      {channels.map((channel) => (
+        <span
+          key={channel}
+          role="img"
+          aria-label={t(`office.channels.${channel}`)}
+          title={t(`office.channels.${channel}`)}
+          className="grid size-7 place-items-center rounded-full border border-outline-variant bg-surface text-on-surface-variant"
+        >
+          <IntegrationIcon provider={channel} className="size-3.5" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function AgentDesk({
   agent,
   isSelected,
+  channels,
   onSelect,
 }: {
   agent: OfficeAgent;
   isSelected: boolean;
+  channels: readonly IntegrationProvider[];
   onSelect: (agentId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -284,7 +325,7 @@ function AgentDesk({
             </span>
           </div>
 
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <h3 className="font-display text-lg font-bold text-on-surface">
               {agent.name}
             </h3>
@@ -297,6 +338,7 @@ function AgentDesk({
                 {t('office.live')}
               </span>
             )}
+            <OfficeChannelIcons channels={channels} />
           </div>
           <p className="mt-0.5 text-sm text-on-surface-variant">
             {t(agent.roleKey)}
@@ -346,12 +388,14 @@ function AgentDesk({
 
 function AgentSidebar({
   agent,
+  channels,
   isApproved,
   conversationId,
   onApprove,
   onClose,
 }: {
   agent: OfficeAgent;
+  channels: readonly IntegrationProvider[];
   isApproved: boolean;
   conversationId: string | null;
   onApprove: (agentId: string) => void;
@@ -459,6 +503,24 @@ function AgentSidebar({
               {statusLabel}
             </dd>
           </div>
+          {channels.length > 0 && (
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-on-surface-variant">
+                {t('office.sidebar.channels')}
+              </dt>
+              <dd className="mt-1 flex flex-wrap items-center gap-2">
+                {channels.map((channel) => (
+                  <span
+                    key={channel}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant bg-surface-container px-2.5 py-1 text-xs font-medium text-on-surface"
+                  >
+                    <IntegrationIcon provider={channel} className="size-3.5" />
+                    {t(`office.channels.${channel}`)}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-xs font-medium uppercase tracking-wider text-on-surface-variant">
               {t('office.sidebar.task')}
@@ -582,6 +644,10 @@ export function OfficePage() {
   const conversationId = useOfficeStore((state) => state.conversationId);
   const queryClient = useQueryClient();
   const pendingQuery = usePendingApprovals();
+  const integrationsQuery = useIntegrations();
+  const channels = isAuthenticated
+    ? getActiveIntegrationChannels(integrationsQuery.data)
+    : [];
   const pendingApprovals = useMemo(
     () => pendingQuery.data?.items ?? [],
     [pendingQuery.data],
@@ -949,6 +1015,7 @@ export function OfficePage() {
                 <AgentDesk
                   key={agent.id}
                   agent={agent}
+                  channels={channels}
                   isSelected={agent.id === selectedAgentId}
                   onSelect={handleSelect}
                 />
@@ -984,6 +1051,7 @@ export function OfficePage() {
               <AgentSidebar
                 key={selectedAgent.id}
                 agent={selectedAgent}
+                channels={channels}
                 isApproved={approvedAgentId === selectedAgent.id}
                 conversationId={conversationId}
                 onApprove={handleApprove}

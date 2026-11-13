@@ -15,7 +15,7 @@
 | KI-009 | Frontend | Низкая | Открыто | Интерфейс A/B-тестирования промптов пока не реализован |
 | KI-010 | LLM Router | Средняя | Исправлено | `LlmRouter` v2: fallback-цепочки по `priority`/`taskType`, budget guardrails на маршрут через Ledger, 502 при исчерпании всех маршрутов |
 | KI-011 | Marketplace | Средняя | Открыто | MCP-серверы `ozon_mcp` и `wb_mcp` работают в режиме заглушки и возвращают демонстрационные данные |
-| KI-012 | Marketplace | Средняя | Открыто | Навыки внешних API (`messenger-connector`, `google-workspace`, `midjourney-api`, `ozon-seller`, `wb-seller`) работают в режиме Mock |
+| KI-012 | Marketplace | Средняя | Исправлено | Telegram (Bot API, webhook) и Google Workspace (OAuth, Sheets/Docs/Calendar) работают реально; оставшиеся внешние API (Midjourney, Ozon, WB) — отдельные задачи Sprint 19+ |
 | KI-013 | Security | Средняя | Исправлено | `AgentGateway` заменён декларативным policy engine: Zod-схемы, allowlist команд, taint tracking, роли/контекст, аудит блокировок |
 | KI-014 | Content/HR/Legal | Средняя | Открыто | `dzen-article` экспортирует только локальный Markdown-черновик; `fact-checker`, `resume-screener` и `document-analyzer` работают в режиме Mock |
 | KI-015 | Finance | Средняя | Открыто | Финансовые навыки `unit-economics`, `profit-leak-detector`, `price-monitor` и `fraud-shield-audit` работают в режиме Mock |
@@ -53,6 +53,13 @@
 | KI-047 | Notifications | Низкая | Открыто | BullMQ-уведомление об ожидающем подтверждении только пишется структурным логом: нет email/push/webhook и подтверждения доставки |
 | KI-048 | LLM Worker | Средняя | Открыто | Worker синхронно ходит в API на каждый LLM-вызов (бюджет), tool-call, HITL и checkpoint; нет circuit breaker/retry и деградации при недоступности API |
 | KI-049 | E2E | Низкая | Открыто | E2E проверяет чат в echo-режиме (без LLM и tool-calls); путь worker → API tools/approvals/HITL покрыт только unit-тестами |
+| KI-050 | Integrations | Низкая | Исправлено | Контракт UI реализован бэкендом (`GET /integrations`, `POST/DELETE /integrations/telegram`, `authorization-url`, `DELETE /integrations/google`); OAuth-callback умеет redirect (`GOOGLE_OAUTH_SUCCESS_REDIRECT`), иначе JSON; реальные ключи проверяются в staging |
+| KI-051 | Security | Средняя | Открыто | Telegram webhook защищён только секретом и rate limit на IP: нет allowlist сетей Telegram, проверки `update_id` на replay/idempotency и очереди дедупликации |
+| KI-052 | Security | Средняя | Открыто | Egress api/worker — прикладной allowlist (`provider-http`, LLM-маршруты), а не NetworkPolicy/iptables; embeddings, MCP и YooKassa API не все проходят через единый guard |
+| KI-053 | Security | Средняя | Открыто | OAuth-токены шифруются локальным AES-256-GCM ключом из env; нет облачного KMS, keyId в envelope/БД и ротации без потери доступа |
+| KI-054 | Security | Низкая | Открыто | `DELETE /integrations/google` удаляет локальные токены, но не вызывает revoke в Google; refresh-token может оставаться действительным |
+| KI-055 | Marketplace | Средняя | Открыто | Внешние API `midjourney-api`, `ozon-seller`, `wb-seller` остаются Mock (историческая часть KI-012); закрываются интеграциями Sprint 19 |
+| KI-056 | Integrations | Низкая | Открыто | Telegram: webhook обслуживает один системный бот; боты, подключённые пользователями, используются только для исходящих `sendMessage`, входящие для них не принимаются |
 
 ## Детали
 
@@ -227,20 +234,42 @@ A/B-тестирование не входит (KI-009).
 ### KI-012 — Навыки для внешних API работают в режиме Mock
 
 **Влияние:** Навыки `messenger-connector`, `google-workspace`,
-`midjourney-api`, `ozon-seller` и `wb-seller` возвращают фиктивные данные
-вместо реальных ответов внешних сервисов. Агенты строят ответы и отчёты на
-демонстрационных значениях, а пользователь может принять их за реальные.
-Отправка сообщений, работа с Google Workspace, генерация изображений и
-операции с маркетплейсами фактически не выполняются.
+`midjourney-api`, `ozon-seller` и `wb-seller` возвращали фиктивные данные
+вместо реальных ответов внешних сервисов. Агенты строили ответы и отчёты на
+демонстрационных значениях, а пользователь мог принять их за реальные.
 
-**Обход:** Использовать навыки только для демонстраций и E2E-сценариев,
-явно помечать данные как демонстрационные и не подключать их к реальным
-аккаунтам и продажам до появления настоящих адаптеров.
+**Исправлено (Sprint 18) для `messenger-connector` и `google-workspace`:**
 
-**План:** В следующем спринте подключить реальные API-ключи и адаптеры:
-боты мессенджеров, OAuth для Google Workspace, Midjourney API, Ozon Seller
-API и Wildberries API. Добавить таймауты, retry, маппинг ошибок провайдера
-и аудит вызовов. До этого считать слой интеграций Mock.
+- `send_message` вызывает Telegram Bot API (`sendMessage`) с inline-клавиатурой
+  (до 8 кнопок с `url`/`callbackData`); токен бота берётся из подключения
+  пользователя (`TelegramBot`, шифруется AES-256-GCM), иначе — системный
+  `TELEGRAM_BOT_TOKEN`. Неподключённые каналы (`vk`, `whatsapp`) отклоняются
+  400 `errors.invalid_request`.
+- Входящие обновления Telegram приходят через webhook
+  (`POST /api/v1/webhooks/telegram` и alias `/integrations/telegram/webhook`):
+  секрет проверяется constant-time, `update` валидируется Zod, сообщение
+  маршрутизируется в `ChatService` по привязке `TelegramChatLink`, ответ
+  уходит обратно в чат; callback-кнопки подтверждаются `answerCallbackQuery`.
+- `google_sheets_append` добавляет строки через Sheets API v4
+  (`values:append`, `USER_ENTERED`), `google_docs_create` создаёт документ и
+  вставляет текст через Docs API `batchUpdate`, `google_calendar_create`
+  создаёт событие в Calendar API v3. Все вызовы идут от имени пользователя:
+  OAuth-токены хранятся зашифрованными (`GoogleCredential`), access-token
+  обновляется по `refresh_token` за минуту до истечения, при 401 — один
+  принудительный refresh и повтор.
+- OAuth-flow: `GET /integrations/google/authorize` (и alias
+  `authorization-url`) отдаёт URL согласия с подписанным HMAC `state`,
+  callback обменивает код, сохраняет токены и email; при заданном
+  `GOOGLE_OAUTH_SUCCESS_REDIRECT` возвращает браузер в настройки.
+- Rate limit 429 обрабатывается экспоненциальным backoff с учётом
+  `Retry-After`/`parameters.retry_after`; после исчерпания — 429
+  `errors.provider_rate_limited`, 5xx/сеть — `errors.provider_unavailable`,
+  401/403 — `errors.provider_auth_required`, отсутствие ключей —
+  `errors.provider_not_configured`. Egress ограничен allowlist
+  (`OUTBOUND_ALLOWLIST`), внешние адреса — только https.
+
+**Остаток:** `midjourney-api`, `ozon-seller`, `wb-seller` по-прежнему Mock —
+вынесено в KI-055 (Sprint 19).
 
 ### KI-013 — Agent Gateway покрывает только базовые regex-правила
 
@@ -301,6 +330,10 @@ engine (`apps/api/src/security/policy/`):
 фактчекинга, HR/ATS-системы и парсеры документов. Добавить проверку
 качества результата, аудит вызовов и обработку ошибок провайдеров. До
 этого считать навыки Mock-заглушками.
+
+**Вне Sprint 18:** спринт закрывает Telegram и Google Workspace (KI-012);
+контент/HR/legal-навыки остаются Mock и закрываются в Sprint 20 согласно
+`docs/development/SPRINTS-14-PLUS.md`.
 
 ### KI-015 — Финансовые навыки работают в режиме Mock
 
@@ -1002,3 +1035,118 @@ checkpoints) проверяется unit-тестами и ручным stub-с�
 
 **План:** Добавить контрактный тест с mock LLM, возвращающим `tool_calls`, и
 E2E-сценарий approve/reject с проверкой Ledger и `PendingApproval`.
+
+### KI-050 — Возврат из Google OAuth и реальные проверки интеграций
+
+**Влияние:** UI раздела «Интеграции» (`apps/web/src/lib/integrations.ts`)
+рассчитывал на бэкенд-контракт, а Google callback отвечал JSON и не возвращал
+браузер в настройки. Реальные Telegram `getMe` и Google OAuth нельзя было
+проверить без ключей окружения.
+
+**Исправлено (Sprint 18):**
+
+- Бэкенд реализует контракт UI: `GET /integrations` (сводный статус),
+  `POST/DELETE /integrations/telegram` (проверка `getMe`, шифрованное
+  хранение токена бота), `GET /integrations/google/authorization-url`
+  (alias `authorize`), `GET /integrations/google/status`,
+  `DELETE /integrations/google` и `POST /integrations/google/exchange`.
+- `GET /integrations/google/callback` при заданном
+  `GOOGLE_OAUTH_SUCCESS_REDIRECT` отвечает 302 на
+  `<redirect>?integration=google&status=success|error`, иначе — JSON
+  `{ connected, scope, expiresAt }` (для curl/диагностики).
+- Контракт, статусы, ошибки и шифрование покрыты unit-тестами (nock для
+  Telegram/Google), OAuth refresh проверен на mock token-endpoint.
+- **Остаток:** реальные Telegram-бот и Google OAuth client проверяются в
+  staging после выдачи ключей; локально используются тестовые ключи из
+  `.env` и nock.
+
+### KI-051 — Telegram webhook: replay и IP-allowlist
+
+**Влияние:** Публичный `/api/v1/webhooks/telegram` защищён секретом
+`X-Telegram-Bot-Api-Secret-Token` и rate limit на IP. Любой, кто узнал
+секрет, может присылать update с произвольным `update_id`; повторные и
+задержанные доставки не дедуплицируются, IP-сети Telegram на edge не
+ограничены. Rate limit считает по `X-Forwarded-For`, поэтому доверенный
+прокси обязателен.
+
+**Обход:** Хранить секрет только в `.env`/Docker secret, ротировать через
+`setWebhook`; не публиковать API напрямую; мониторить 401/429.
+
+**План:** Хранить обработанные `update_id` в Redis с TTL и отбрасывать
+дубликаты; добавить allowlist сетей Telegram и лимит размера body на Caddy.
+
+### KI-052 — Egress: прикладной allowlist, не сетевая изоляция
+
+**Влияние:** `provider-http` проверяет `OUTBOUND_ALLOWLIST` для Telegram,
+Google OAuth/API и Google Docs/Sheets/Calendar; worker проверяет URL
+LLM-маршрутов. Это защищает от случайного или подменённого URL, но не
+является NetworkPolicy: скомпрометированный процесс может делать соединения
+в обход кода. Часть существующих клиентов API (embeddings, MCP, YooKassa)
+не проходит через единый guard.
+
+**Обход:** В production задавать allowlist и не давать контейнерам лишних
+сетевых маршрутов; выносить egress в прокси/NetworkPolicy.
+
+**План:** Единый egress-прокси с allowlist по SNI/Host, перевести все
+HTTP-клиенты API на общий guard, добавить deny-all NetworkPolicy.
+
+### KI-053 — Ротация ключа шифрования OAuth-токенов
+
+**Влияние:** Токены шифруются AES-256-GCM ключом `TOKEN_ENCRYPTION_KEY` из
+env/Docker secret. Envelope не содержит `keyId`, поэтому после смены ключа
+старые refresh-токены станут нечитаемыми. Облачный KMS и автоматическая
+ротация не подключены.
+
+**Обход:** Хранить ключ в менеджере секретов, делать бэкап ключа вместе с
+БД; при ротации сначала расшифровать и перешифровать все `GoogleCredential`.
+
+**План:** Добавить `keyId` в envelope и колонку `keyId`, поддержку
+previous-key при чтении, миграционный re-encrypt и провайдер Yandex
+KMS/Vault.
+
+### KI-054 — Отзыв Google-токенов при disconnect
+
+**Влияние:** `GoogleOAuthService.disconnect` удаляет строку
+`GoogleCredential`, но не вызывает `https://oauth2.googleapis.com/revoke`.
+Refresh-token остаётся действительным на стороне Google, пока не истечёт
+или не будет отозван вручную.
+
+**Обход:** При компрометации отзывать доступ в Google Account →
+Security → Third-party access.
+
+**План:** Вызывать revoke endpoint перед удалением локальной записи;
+логировать результат best-effort.
+
+### KI-055 — Внешние API Midjourney, Ozon и Wildberries остаются Mock
+
+**Влияние:** Историческая часть KI-012: навыки `midjourney-api`,
+`ozon-seller` и `wb-seller` по-прежнему возвращают демонстрационные данные
+(`generate_image` — placeholder-URL, MCP-коннекторы — заглушки KI-011, либо
+реальный MCP только при заданных ключах). Sprint 18 закрыл Telegram и
+Google Workspace, эти интеграции — нет.
+
+**Обход:** Не использовать перечисленные навыки в продакшене; для Ozon/WB
+подключать реальный MCP-сервер через `mcp_endpoint` манифеста и ключи
+продавца (KI-011).
+
+**План:** Sprint 19 — реальные Ozon Seller API/WB API и Midjourney API,
+ключи и таймауты, ретраи и маппинг ошибок провайдера; после этого закрыть
+KI-011 и KI-015.
+
+### KI-056 — Telegram webhook только для системного бота
+
+**Влияние:** `POST /api/v1/webhooks/telegram` обслуживает один системный бот
+(`TELEGRAM_BOT_TOKEN`). Бот, подключённый пользователем через
+`POST /integrations/telegram`, сохраняется зашифрованным и используется
+только для исходящих `sendMessage`; входящие обновления для него не
+принимаются (у Telegram один webhook на бота, а регистрация per-user
+webhook'ов не реализована).
+
+**Обход:** Для входящих сообщений использовать системного бота и привязку
+чата (`POST /integrations/telegram/link`); персонального бота — только для
+отправки от имени пользователя.
+
+**План:** Поддержать несколько ботов: маршрут
+`/webhooks/telegram/:botId`, проверка секрета per-bot, регистрация
+`setWebhook` для каждого подключённого бота; хранить `webhookSecret` в
+`TelegramBot`.
