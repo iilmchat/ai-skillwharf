@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpStatus,
   Injectable,
   Logger,
   Optional,
@@ -21,6 +22,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { BillingService } from '../billing/billing.service.js';
+import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { LlmRouteSelection } from '../llm-router/llm-router.service.js';
 import {
@@ -46,6 +48,7 @@ import {
   type McpProvider,
 } from './tools/mcp-gateway.js';
 import { MetricsService } from '../metrics/metrics.service.js';
+import { recordGenAiUsageSpan } from '../observability/tracing.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
@@ -87,9 +90,41 @@ export function calculateLlmCost(
 /** Контекст вызова LLM: чей баланс списывать за токены. */
 export interface LlmCallOptions {
   userId?: string;
+  /** Агент, от имени которого выполняется вызов (gen_ai.agent.id). */
+  agentId?: string;
+  /** Навык, инициировавший вызов, если применимо (gen_ai.skill.id). */
+  skillId?: string;
   /** Блок «Долговременная память» из pgvector, добавляется в системный промпт. */
   memoryContext?: string;
 }
+
+/**
+ * Маршрут LLM: одиночный объект (обратная совместимость) или fallback-цепочка
+ * из `LlmRouterService.selectRoutes`. Пустая цепочка — env-fallback.
+ */
+export type LlmRouteInput =
+  | LlmRouteSelection
+  | readonly LlmRouteSelection[];
+
+/** Транспорт попытки: нативный адаптер или OpenAI-совместимый клиент. */
+type LlmExecutor =
+  | { kind: 'adapter'; adapter: NativeProviderAdapter }
+  | { kind: 'client'; client: ChatOpenAI };
+
+/** Одна попытка цепочки: маршрут (undefined — env-fallback) и транспорт. */
+interface LlmAttempt {
+  route: LlmRouteSelection | undefined;
+  executor: LlmExecutor;
+}
+
+/** Состояние стриминговой попытки: отданные дельты и полученный usage. */
+interface StreamAttemptState {
+  emittedDelta: boolean;
+  partialUsage: AIMessage['usage_metadata'];
+}
+
+/** Текст ошибки, когда вся fallback-цепочка недоступна. */
+export const LLM_ROUTES_UNAVAILABLE_MESSAGE = 'Все LLM-маршруты недоступны';
 
 /** Доля жёсткого лимита, после которой Budget Guard пишет предупреждение. */
 export const DAILY_TOKEN_SOFT_LIMIT_RATIO = 0.8;
@@ -453,6 +488,12 @@ export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly client: ChatOpenAI | null;
   private readonly mcpClients = new Map<string, McpClient>();
+  /**
+   * Gateway кешируется на инстанс клиента: discovery `tools/list` ленивый и
+   * one-time на gateway, поэтому при создании нового gateway на каждый вызов
+   * каждый MCP tool-call делал бы лишний `tools/list`.
+   */
+  private readonly mcpGateways = new WeakMap<McpClient, McpGateway>();
 
   constructor(
     private readonly sandboxService: SandboxService,
@@ -626,14 +667,32 @@ export class LlmService {
     options: McpToolOptions,
   ): McpGateway | null {
     if (options.client !== undefined) {
+      // Подменённый транспорт (тесты): listTools недоступен → structural-only.
       return new McpGateway({ provider: platform, client: options.client });
     }
 
     const client = this.getMcpClient(platform, options.endpoint, options.authToken);
 
-    return client === null
-      ? null
-      : new McpGateway({ provider: platform, client });
+    if (client === null) {
+      return null;
+    }
+
+    const cached = this.mcpGateways.get(client);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const gateway = new McpGateway({
+      provider: platform,
+      client,
+      // Arrow: при вызове сохраняется this McpClient.
+      listTools: () => client.listTools(),
+    });
+
+    this.mcpGateways.set(client, gateway);
+
+    return gateway;
   }
 
   private getMcpClient(
@@ -922,148 +981,176 @@ export class LlmService {
    * Вызов LLM с набором инструментов. Возвращает ответ модели как есть:
    * если в нём есть `tool_calls`, их должен выполнить вызывающий граф.
    *
-   * Дневной бюджет резервируется ДО обращения к провайдеру (KI-021): если
+   * `route` — одиночный маршрут (обратная совместимость) или fallback-цепочка
+   * из `LlmRouterService.selectRoutes`. На retriable-ошибку провайдера
+   * (429, >=500, таймаут, обрыв соединения) запрос повторяется на следующем
+   * маршруте; 400/401/403 пробрасываются без переключения (KI-010).
+   *
+   * Дневной бюджет резервируется один раз ДО первой попытки (KI-021): если
    * резерв не помещается в лимит, клиент получает 429, а токены провайдера
-   * не тратятся. После ответа резерв сверяется с фактическим `usage`.
+   * не тратятся. Резерв возвращается или сверяется ровно один раз.
    */
   async chatWithTools(
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
-    route?: LlmRouteSelection,
+    route?: LlmRouteInput,
     options: LlmCallOptions = {},
   ): Promise<AIMessage> {
-    const adapter = this.resolveAdapter(route);
+    const routes = normalizeRouteChain(route);
+    const attempts = this.buildAttempts(routes);
 
-    if (adapter) {
-      return this.chatWithAdapter(adapter, messages, tools, route, options);
-    }
-
-    const client = this.resolveClient(route);
-
-    if (!client) {
-      const lastUserMessage = [...messages]
-        .reverse()
-        .find((message) => message instanceof HumanMessage);
-
-      return new AIMessage(
-        `LLM not configured: ${messageContentToText(lastUserMessage?.content ?? '')}`,
-      );
+    // Ни одного доступного транспорта (LLM не настроен) — эхо-заглушка.
+    if (attempts.length === 0) {
+      return this.echoMessage(messages);
     }
 
     await this.assertCanAffordLlm(options.userId);
 
-    const model = tools.length > 0 ? client.bindTools(tools) : client;
     const systemPrompt = await this.getSystemPrompt(options.memoryContext);
     const reservation = await this.reserveDailyTokens(
       options.userId,
       estimateMessagesTokens(messages, systemPrompt),
     );
+    const taskType = routes[0]?.taskType ?? 'chat';
+    let lastError: unknown;
 
-    let response: AIMessage;
+    for (let index = 0; index < attempts.length; index++) {
+      const attempt = attempts[index]!;
 
-    try {
-      response = await this.trackedLlmCall(route, () =>
-        model.invoke(withLanguageInstruction(messages, systemPrompt)),
-      );
-    } catch (error) {
-      // Провайдер не вернул ответ и usage: возвращаем резерв в бюджет.
-      await this.refundDailyTokens(options.userId, reservation);
-      throw error;
+      try {
+        const response = await this.invokeAttempt(
+          attempt,
+          messages,
+          tools,
+          systemPrompt,
+        );
+
+        await this.recordLlmResponse(
+          attempt.route,
+          options,
+          messages,
+          systemPrompt,
+          reservation,
+          response,
+        );
+
+        return response;
+      } catch (error) {
+        lastError = error;
+
+        const next = attempts[index + 1];
+
+        if (next === undefined || !isRetriableLlmError(error)) {
+          break;
+        }
+
+        this.logRouterFallback(attempt.route, next.route, error, taskType);
+      }
     }
 
-    await this.recordLlmResponse(
-      route,
-      options.userId,
-      messages,
-      systemPrompt,
-      reservation,
-      response,
-    );
+    // Ни одна попытка не дала ответа: возвращаем резерв один раз.
+    await this.refundDailyTokens(options.userId, reservation);
 
-    return response;
+    // 502 отдаём только когда реально была fallback-цепочка: одиночный
+    // маршрут и env-fallback сохраняют прежнее поведение с исходной ошибкой.
+    if (routes.length > 1 && isRetriableLlmError(lastError)) {
+      throw llmUnavailableError();
+    }
+
+    throw lastError;
   }
 
   /**
    * Стриминговый вариант `chatWithTools`: отдаёт текст по мере генерации.
    * Последним элементом итератора приходит собранное сообщение модели —
    * по нему граф решает, нужно ли запускать инструменты.
+   *
+   * Fallback по цепочке маршрутов возможен только ДО первой отданной дельты:
+   * после неё повтор запроса показал бы пользователю текст дважды. Резерв
+   * дневного бюджета берётся один раз до первой попытки, возвращается или
+   * сверяется тоже один раз.
    */
   async *chatWithToolsStream(
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
-    route?: LlmRouteSelection,
+    route?: LlmRouteInput,
     options: LlmCallOptions = {},
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
-    const adapter = this.resolveAdapter(route);
+    const routes = normalizeRouteChain(route);
+    const attempts = this.buildAttempts(routes);
 
-    if (adapter) {
-      await this.assertCanAffordLlm(options.userId);
+    // Ни одного доступного транспорта (LLM не настроен) — эхо-заглушка.
+    if (attempts.length === 0) {
+      const text = this.echoText(messages);
 
-      const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-      const request: NativeChatRequest = { messages, tools, systemPrompt };
-      // Резерв до первой дельты: даже если стрим прервётся, бюджет уже занят.
-      const reservation = await this.reserveDailyTokens(
-        options.userId,
-        estimateMessagesTokens(messages, systemPrompt),
-      );
+      yield { type: 'delta', text };
+      yield { type: 'message', message: new AIMessage(text) };
+      return;
+    }
 
+    await this.assertCanAffordLlm(options.userId);
+
+    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
+    // Резерв до первой попытки и, значит, до первой `delta`.
+    const reservation = await this.reserveDailyTokens(
+      options.userId,
+      estimateMessagesTokens(messages, systemPrompt),
+    );
+    const taskType = routes[0]?.taskType ?? 'chat';
+
+    for (let index = 0; index < attempts.length; index++) {
+      const attempt = attempts[index]!;
+      const state: StreamAttemptState = {
+        emittedDelta: false,
+        partialUsage: undefined,
+      };
       let message: AIMessage;
-      let emittedDelta = false;
 
-      if (adapter.chatStream) {
-        try {
-          const stream = adapter.chatStream(request);
-          let step = await stream.next();
-
-          while (!step.done) {
-            if (step.value.type === 'delta' && step.value.text !== '') {
-              emittedDelta = true;
-              yield { type: 'delta', text: step.value.text };
-            }
-
-            step = await stream.next();
-          }
-
-          message = step.value;
-        } catch (error) {
-          this.recordLlmError(route, error);
-
-          if (emittedDelta) {
-            // Часть ответа уже ушла клиенту: повторять запрос нельзя,
-            // иначе пользователь увидит текст дважды. Usage не получен —
-            // возвращаем неиспользованный резерв.
-            await this.refundDailyTokens(options.userId, reservation);
-            throw error;
-          }
-
-          this.logger.warn(
-            `LLM-адаптер ${adapter.provider}: стриминг недоступен (${describeError(error)}), fallback на обычный режим`,
+      try {
+        message = yield* this.streamAttempt(
+          attempt,
+          messages,
+          tools,
+          systemPrompt,
+          state,
+        );
+      } catch (error) {
+        if (totalTokens(state.partialUsage) > 0) {
+          // Usage успел прийти до сбоя: сверяем резерв с фактическим
+          // расходом один раз; повтор на другом маршруте не нужен.
+          await this.reconcileDailyTokens(
+            options.userId,
+            reservation,
+            state.partialUsage,
           );
-
-          try {
-            message = await this.trackedLlmCall(route, () =>
-              adapter.chat(request),
-            );
-          } catch (fallbackError) {
-            await this.refundDailyTokens(options.userId, reservation);
-            throw fallbackError;
-          }
+          throw error;
         }
-      } else {
-        // Адаптеры без стриминга (например, YandexGPT) отвечают целиком.
-        try {
-          message = await this.trackedLlmCall(route, () =>
-            adapter.chat(request),
-          );
-        } catch (error) {
+
+        if (state.emittedDelta) {
+          // Часть ответа уже ушла клиенту: повторять запрос нельзя.
           await this.refundDailyTokens(options.userId, reservation);
           throw error;
         }
+
+        const next = attempts[index + 1];
+
+        if (next === undefined || !isRetriableLlmError(error)) {
+          await this.refundDailyTokens(options.userId, reservation);
+
+          if (routes.length > 1 && isRetriableLlmError(error)) {
+            throw llmUnavailableError();
+          }
+
+          throw error;
+        }
+
+        this.logRouterFallback(attempt.route, next.route, error, taskType);
+        continue;
       }
 
       await this.recordLlmResponse(
-        route,
-        options.userId,
+        attempt.route,
+        options,
         messages,
         systemPrompt,
         reservation,
@@ -1071,7 +1158,7 @@ export class LlmService {
       );
 
       if (
-        !emittedDelta &&
+        !state.emittedDelta &&
         typeof message.content === 'string' &&
         message.content !== ''
       ) {
@@ -1082,78 +1169,10 @@ export class LlmService {
       return;
     }
 
-    const client = this.resolveClient(route);
-
-    if (!client) {
-      const lastUserMessage = [...messages]
-        .reverse()
-        .find((message) => message instanceof HumanMessage);
-      const text = `LLM not configured: ${messageContentToText(lastUserMessage?.content ?? '')}`;
-
-      yield { type: 'delta', text };
-      yield { type: 'message', message: new AIMessage(text) };
-      return;
-    }
-
-    await this.assertCanAffordLlm(options.userId);
-
-    const model = tools.length > 0 ? client.bindTools(tools) : client;
-    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    // Резерв до вызова провайдера и, значит, до первой `delta`.
-    const reservation = await this.reserveDailyTokens(
-      options.userId,
-      estimateMessagesTokens(messages, systemPrompt),
-    );
-    let accumulated: AIMessageChunk | undefined;
-
-    try {
-      for await (const chunk of await model.stream(
-        withLanguageInstruction(messages, systemPrompt),
-      )) {
-        accumulated = accumulated ? accumulated.concat(chunk) : chunk;
-
-        if (chunk.text) {
-          yield { type: 'delta', text: chunk.text };
-        }
-      }
-    } catch (error) {
-      this.recordLlmError(route, error);
-      const partialUsage = accumulated?.usage_metadata;
-
-      if (totalTokens(partialUsage) > 0) {
-        // Usage успел прийти до сбоя: сверяем резерв с фактическим расходом,
-        // возвращать его целиком нельзя.
-        await this.reconcileDailyTokens(
-          options.userId,
-          reservation,
-          partialUsage,
-        );
-      } else {
-        await this.refundDailyTokens(options.userId, reservation);
-      }
-
-      throw error;
-    }
-
-    const message = accumulated
-      ? new AIMessage({
-          content: accumulated.content,
-          tool_calls: accumulated.tool_calls,
-          invalid_tool_calls: accumulated.invalid_tool_calls,
-          usage_metadata: accumulated.usage_metadata,
-        })
-      : new AIMessage('');
-
-    await this.recordLlmResponse(
-      route,
-      options.userId,
-      messages,
-      systemPrompt,
-      reservation,
-      message,
-    );
-
-    yield { type: 'message', message };
+    // Цепочка исчерпана без ответа (сюда не доходим при штатной работе):
+    // возвращаем резерв один раз и отдаём единый код недоступности.
+    await this.refundDailyTokens(options.userId, reservation);
+    throw llmUnavailableError();
   }
 
   /**
@@ -1368,7 +1387,7 @@ export class LlmService {
    */
   private async recordLlmResponse(
     route: LlmRouteSelection | undefined,
-    userId: string | undefined,
+    options: LlmCallOptions,
     messages: BaseMessage[],
     systemPrompt: string,
     reservation: TokenReservation | null,
@@ -1382,9 +1401,33 @@ export class LlmService {
       message.usage_metadata,
     );
 
-    this.logGenAiUsage(route, usage, estimated);
-    await this.chargeLlmUsage(userId, usage);
-    await this.reconcileDailyTokens(userId, reservation, usage);
+    const promptTokens = usage?.input_tokens ?? 0;
+    const completionTokens = usage?.output_tokens ?? 0;
+    const cost = calculateLlmCost(promptTokens, completionTokens);
+    const model = this.metricsModel(route);
+    const agentId = options.agentId?.trim() || 'unknown';
+
+    this.logGenAiUsage(route, usage, estimated, options, cost);
+    this.metricsService?.countLlmCost(
+      options.userId ?? 'anonymous',
+      model,
+      agentId,
+      cost,
+    );
+    recordGenAiUsageSpan({
+      system: this.metricsProvider(route),
+      model,
+      tenantId: options.userId ?? 'anonymous',
+      agentId,
+      skillId: options.skillId,
+      promptTokens,
+      completionTokens,
+      cost,
+      estimated,
+    });
+
+    await this.chargeLlmUsage(options.userId, usage, route);
+    await this.reconcileDailyTokens(options.userId, reservation, usage);
   }
 
   /**
@@ -1414,10 +1457,14 @@ export class LlmService {
    * Списывает стоимость токенов с баланса пользователя. Ошибку списания
    * только логируем: ответ модели уже получен, и ронять запрос из-за
    * биллинга хуже, чем недополучить копейку.
+   *
+   * `route` попадает в `LedgerEntry.llmRouteName`: по этой колонке дневной
+   * бюджет маршрута считается в `LlmRouterService.selectRoutes` (KI-010).
    */
   private async chargeLlmUsage(
     userId: string | undefined,
     usage: AIMessage['usage_metadata'],
+    route?: LlmRouteSelection,
   ): Promise<void> {
     if (!userId || !this.billingService) {
       return;
@@ -1432,13 +1479,21 @@ export class LlmService {
       return;
     }
 
+    // Пятый аргумент передаём только для маршрута: вызовы без маршрута
+    // сохраняют прежнюю сигнатуру (env-fallback, обратная совместимость).
+    const args: Parameters<BillingService['chargeForSkill']> = [
+      userId,
+      cost,
+      'Использование LLM',
+      randomUUID(),
+    ];
+
+    if (route !== undefined) {
+      args.push(route.name);
+    }
+
     try {
-      await this.billingService.chargeForSkill(
-        userId,
-        cost,
-        'Использование LLM',
-        randomUUID(),
-      );
+      await this.billingService.chargeForSkill(...args);
     } catch (error) {
       this.logger.warn(
         `Не удалось списать ${cost} ₽ за LLM у ${userId}: ${
@@ -1494,9 +1549,14 @@ export class LlmService {
     route: LlmRouteSelection | undefined,
     usage: AIMessage['usage_metadata'],
     estimated = false,
+    options: LlmCallOptions = {},
+    cost = 0,
   ): void {
     const promptTokens = usage?.input_tokens ?? 0;
     const completionTokens = usage?.output_tokens ?? 0;
+    const agentId = options.agentId?.trim() || 'unknown';
+    const tenantId = options.userId ?? 'anonymous';
+    const model = this.metricsModel(route);
 
     this.metricsService?.countLlmTokens(
       this.metricsProvider(route),
@@ -1509,7 +1569,12 @@ export class LlmService {
       JSON.stringify({
         event: 'gen_ai.usage',
         'gen_ai.system': this.metricsProvider(route),
-        'gen_ai.model': route?.modelName.trim() || process.env.LLM_MODEL,
+        'gen_ai.model': model,
+        'gen_ai.route': route?.name ?? 'env',
+        'gen_ai.agent.id': agentId,
+        'gen_ai.tenant.id': tenantId,
+        'gen_ai.skill.id': options.skillId ?? 'unknown',
+        'gen_ai.usage.cost': cost,
         'gen_ai.prompt_tokens': promptTokens,
         'gen_ai.completion_tokens': completionTokens,
         ...(estimated ? { 'gen_ai.usage_estimated': true } : {}),
@@ -1521,54 +1586,232 @@ export class LlmService {
         JSON.stringify({
           event: 'gen_ai.usage.fallback',
           'gen_ai.system': this.metricsProvider(route),
-          'gen_ai.model': this.metricsModel(route),
+          'gen_ai.model': model,
+          'gen_ai.agent.id': agentId,
+          'gen_ai.tenant.id': tenantId,
         }),
       );
     }
   }
 
   /**
-   * Вызов нативного провайдера (YandexGPT/GigaChat): адаптер сам ходит в
-   * свой API, а мы приводим ответ к `AIMessage` и списываем токены. Резерв
-   * дневного бюджета берётся до вызова адаптера, сверка — после ответа.
+   * Разрешает транспорт для каждой попытки цепочки. Пустая цепочка — одна
+   * попытка на env-клиенте (`this.client`). Маршруты без пригодной
+   * конфигурации пропускаются с событием fallback.
    */
-  private async chatWithAdapter(
-    adapter: NativeProviderAdapter,
+  private buildAttempts(routes: LlmRouteSelection[]): LlmAttempt[] {
+    if (routes.length === 0) {
+      const executor = this.resolveExecutor(undefined);
+
+      return executor === null ? [] : [{ route: undefined, executor }];
+    }
+
+    const attempts: LlmAttempt[] = [];
+
+    for (let index = 0; index < routes.length; index++) {
+      const route = routes[index]!;
+      const executor = this.resolveExecutor(route);
+
+      if (executor === null) {
+        this.logRouterFallback(
+          route,
+          routes[index + 1],
+          new Error('маршрут не сконфигурирован'),
+          route.taskType ?? 'chat',
+        );
+        continue;
+      }
+
+      attempts.push({ route, executor });
+    }
+
+    return attempts;
+  }
+
+  /** Маршрут попытки → нативный адаптер или OpenAI-совместимый клиент. */
+  private resolveExecutor(route?: LlmRouteSelection): LlmExecutor | null {
+    const adapter = this.resolveAdapter(route);
+
+    if (adapter !== null) {
+      return { kind: 'adapter', adapter };
+    }
+
+    const client = this.resolveClient(route);
+
+    return client === null ? null : { kind: 'client', client };
+  }
+
+  /** Нестримовая попытка: ответ модели или ошибка провайдера. */
+  private async invokeAttempt(
+    attempt: LlmAttempt,
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
-    route: LlmRouteSelection | undefined,
-    options: LlmCallOptions,
+    systemPrompt: string,
   ): Promise<AIMessage> {
-    await this.assertCanAffordLlm(options.userId);
+    const { executor } = attempt;
 
-    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
-    const reservation = await this.reserveDailyTokens(
-      options.userId,
-      estimateMessagesTokens(messages, systemPrompt),
+    if (executor.kind === 'adapter') {
+      return this.trackedLlmCall(attempt.route, () =>
+        executor.adapter.chat({ messages, tools, systemPrompt }),
+      );
+    }
+
+    const model =
+      tools.length > 0 ? executor.client.bindTools(tools) : executor.client;
+
+    return this.trackedLlmCall(attempt.route, () =>
+      model.invoke(withLanguageInstruction(messages, systemPrompt)),
     );
+  }
 
-    let response: AIMessage;
+  /** Одна стриминговая попытка: адаптер с fallback на его `chat` или клиент. */
+  private async *streamAttempt(
+    attempt: LlmAttempt,
+    messages: BaseMessage[],
+    tools: StructuredToolInterface[],
+    systemPrompt: string,
+    state: StreamAttemptState,
+  ): AsyncGenerator<ChatStreamChunk, AIMessage, unknown> {
+    const { executor } = attempt;
+
+    if (executor.kind === 'adapter') {
+      return yield* this.streamAdapterAttempt(
+        executor.adapter,
+        attempt.route,
+        { messages, tools, systemPrompt },
+        state,
+      );
+    }
+
+    return yield* this.streamClientAttempt(
+      executor.client,
+      attempt.route,
+      messages,
+      tools,
+      systemPrompt,
+      state,
+    );
+  }
+
+  /**
+   * Стриминг нативного провайдера. Если стрима нет или он упал до первой
+   * дельты — тот же адаптер отвечает целиком (`chat`); после дельты ошибка
+   * пробрасывается, повторять запрос нельзя.
+   */
+  private async *streamAdapterAttempt(
+    adapter: NativeProviderAdapter,
+    route: LlmRouteSelection | undefined,
+    request: NativeChatRequest,
+    state: StreamAttemptState,
+  ): AsyncGenerator<ChatStreamChunk, AIMessage, unknown> {
+    if (adapter.chatStream === undefined) {
+      // Адаптеры без стриминга (например, YandexGPT) отвечают целиком.
+      return await this.trackedLlmCall(route, () => adapter.chat(request));
+    }
 
     try {
-      response = await this.trackedLlmCall(route, () =>
-        adapter.chat({ messages, tools, systemPrompt }),
-      );
+      const stream = adapter.chatStream(request);
+      let step = await stream.next();
+
+      while (!step.done) {
+        if (step.value.type === 'delta' && step.value.text !== '') {
+          state.emittedDelta = true;
+          yield { type: 'delta', text: step.value.text };
+        }
+
+        step = await stream.next();
+      }
+
+      return step.value;
     } catch (error) {
-      // Адаптер упал до получения usage: возвращаем резерв и пробрасываем.
-      await this.refundDailyTokens(options.userId, reservation);
+      this.recordLlmError(route, error);
+
+      if (state.emittedDelta) {
+        // Часть ответа уже ушла клиенту: повторять запрос нельзя.
+        throw error;
+      }
+
+      this.logger.warn(
+        `LLM-адаптер ${adapter.provider}: стриминг недоступен (${describeError(error)}), fallback на обычный режим`,
+      );
+
+      return await this.trackedLlmCall(route, () => adapter.chat(request));
+    }
+  }
+
+  /**
+   * Стриминг OpenAI-совместимого клиента. Накапливает чанки, чтобы вернуть
+   * готовое сообщение; при сбое сохраняет полученный usage в состоянии
+   * попытки — по нему резерв сверяется, а не возвращается целиком.
+   */
+  private async *streamClientAttempt(
+    client: ChatOpenAI,
+    route: LlmRouteSelection | undefined,
+    messages: BaseMessage[],
+    tools: StructuredToolInterface[],
+    systemPrompt: string,
+    state: StreamAttemptState,
+  ): AsyncGenerator<ChatStreamChunk, AIMessage, unknown> {
+    const model = tools.length > 0 ? client.bindTools(tools) : client;
+    let accumulated: AIMessageChunk | undefined;
+
+    try {
+      for await (const chunk of await model.stream(
+        withLanguageInstruction(messages, systemPrompt),
+      )) {
+        accumulated = accumulated ? accumulated.concat(chunk) : chunk;
+
+        if (chunk.text) {
+          state.emittedDelta = true;
+          yield { type: 'delta', text: chunk.text };
+        }
+      }
+    } catch (error) {
+      this.recordLlmError(route, error);
+      state.partialUsage = accumulated?.usage_metadata;
       throw error;
     }
 
-    await this.recordLlmResponse(
-      route,
-      options.userId,
-      messages,
-      systemPrompt,
-      reservation,
-      response,
-    );
+    return accumulated
+      ? new AIMessage({
+          content: accumulated.content,
+          tool_calls: accumulated.tool_calls,
+          invalid_tool_calls: accumulated.invalid_tool_calls,
+          usage_metadata: accumulated.usage_metadata,
+        })
+      : new AIMessage('');
+  }
 
-    return response;
+  /** JSON-событие переключения на следующий маршрут fallback-цепочки. */
+  private logRouterFallback(
+    from: LlmRouteSelection | undefined,
+    to: LlmRouteSelection | undefined,
+    error: unknown,
+    taskType: string,
+  ): void {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'gen_ai.router.fallback',
+        from: from?.name ?? 'env',
+        to: to?.name ?? 'env',
+        reason: describeError(error),
+        taskType: from?.taskType ?? to?.taskType ?? taskType,
+      }),
+    );
+  }
+
+  /** Текст эхо-заглушки, когда LLM не настроен. */
+  private echoText(messages: BaseMessage[]): string {
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((message) => message instanceof HumanMessage);
+
+    return `LLM not configured: ${messageContentToText(lastUserMessage?.content ?? '')}`;
+  }
+
+  /** Эхо-заглушка как сообщение модели (нестримовый путь). */
+  private echoMessage(messages: BaseMessage[]): AIMessage {
+    return new AIMessage(this.echoText(messages));
   }
 
   /**
@@ -1691,6 +1934,92 @@ function describeError(error: unknown): string {
 
   return String(error);
 }
+
+/**
+ * Приводит вход `route` к массиву: одиночный маршрут — обратная
+ * совместимость, `undefined` или пустой массив — env-fallback.
+ */
+function normalizeRouteChain(route?: LlmRouteInput): LlmRouteSelection[] {
+  if (route === undefined) {
+    return [];
+  }
+
+  return isRouteChain(route) ? [...route] : [route];
+}
+
+function isRouteChain(
+  route: LlmRouteInput,
+): route is readonly LlmRouteSelection[] {
+  return Array.isArray(route);
+}
+
+/** Единый ответ клиенту, когда вся fallback-цепочка недоступна (502). */
+export function llmUnavailableError(): ApiException {
+  return new ApiException({
+    statusCode: HttpStatus.BAD_GATEWAY,
+    error: 'Bad Gateway',
+    code: ERROR_KEYS.llmUnavailable,
+    message: LLM_ROUTES_UNAVAILABLE_MESSAGE,
+  });
+}
+
+/**
+ * Признаки временной ошибки провайдера, при которой имеет смысл переключиться
+ * на следующий маршрут fallback-цепочки: HTTP 429, HTTP 5xx, таймауты
+ * (AbortError/TimeoutError) и обрывы соединения (ETIMEDOUT/ECONNRESET).
+ * 400/401/403 — ошибки конфигурации или доступа: повтор не поможет.
+ */
+export function isRetriableLlmError(error: unknown): boolean {
+  const status = httpStatusOf(error);
+
+  if (status !== null) {
+    return status === 429 || status >= 500;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (
+    error.name === 'AbortError' ||
+    error.name === 'TimeoutError' ||
+    error.name === 'APIConnectionTimeoutError' ||
+    error.name === 'APIConnectionError'
+  ) {
+    return true;
+  }
+
+  return RETRIABLE_ERROR_PATTERN.test(error.message);
+}
+
+/**
+ * HTTP-статус из ошибки провайдера: LangChain/axios кладут его в `status`,
+ * `statusCode` или `response.status`; нативные адаптеры добавляют статус в
+ * текст сообщения (`GigaChat: HTTP 500`).
+ */
+function httpStatusOf(error: unknown): number | null {
+  if (error === null || typeof error !== 'object') {
+    return null;
+  }
+
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  const raw =
+    candidate.status ?? candidate.statusCode ?? candidate.response?.status;
+  const parsed =
+    typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10);
+
+  return Number.isInteger(parsed) && parsed >= 100 && parsed <= 599
+    ? parsed
+    : null;
+}
+
+/** Статусы/коды, которые считаются временной ошибкой провайдера. */
+const RETRIABLE_ERROR_PATTERN =
+  /(?:^|\D)(?:429|5\d\d)(?:\D|$)|timeout|timed out|таймаут|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|connection reset|network error|fetch failed/i;
 
 /** Проверяет, что все перечисленные env-переменные заданы. */
 function hasEnv(...names: string[]): boolean {

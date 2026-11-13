@@ -16,6 +16,13 @@ export const pendingApprovalItemSchema = z
       (value) => !Number.isNaN(Date.parse(value)),
       { message: 'ожидается дата в формате ISO 8601' },
     ),
+    /** Дедлайн решения для таймера в UI; поле отсутствует, если TTL нет. */
+    expiresAt: z
+      .string()
+      .refine((value) => !Number.isNaN(Date.parse(value)), {
+        message: 'ожидается дата в формате ISO 8601',
+      })
+      .optional(),
   })
   .strict();
 

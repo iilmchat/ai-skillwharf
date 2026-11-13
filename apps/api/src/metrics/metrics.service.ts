@@ -35,6 +35,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly llmCostTotal = new Counter({
+    name: 'llm_cost_total',
+    help: 'Total LLM cost in rubles',
+    labelNames: ['tenant_id', 'model', 'agent_id'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     // process_*, nodejs_* — стандартные метрики клиента Prometheus.
     collectDefaultMetrics({ register: this.registry });
@@ -67,6 +74,28 @@ export class MetricsService {
 
   countLlmError(provider: string, model: string, reason: string): void {
     this.llmErrorsTotal.inc({ provider, model, reason });
+  }
+
+  /**
+   * Стоимость LLM в рублях с разбивкой по tenant/модели/агенту.
+   * tenant_id — userId владельца диалога (не email/PII).
+   */
+  countLlmCost(
+    tenantId: string,
+    model: string,
+    agentId: string,
+    cost: number,
+  ): void {
+    if (cost > 0) {
+      this.llmCostTotal.inc(
+        {
+          tenant_id: tenantId || 'anonymous',
+          model: model || 'unknown',
+          agent_id: agentId || 'unknown',
+        },
+        cost,
+      );
+    }
   }
 
   async render(): Promise<{ contentType: string; body: string }> {

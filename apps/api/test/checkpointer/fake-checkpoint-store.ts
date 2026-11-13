@@ -141,6 +141,7 @@ export interface FakePendingApprovalRecord {
   status: string;
   createdAt: Date;
   resolvedAt: Date | null;
+  expiresAt: Date | null;
 }
 
 /** Внутреннее состояние fake-store; массивы мутируются in-place. */
@@ -595,6 +596,7 @@ export function createFakeCheckpointPrisma(): FakeCheckpointStore {
       defaults: () => ({
         status: 'pending',
         resolvedAt: null,
+        expiresAt: null,
         createdAt: new Date(),
       }),
     }),

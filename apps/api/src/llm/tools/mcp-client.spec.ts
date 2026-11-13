@@ -255,4 +255,154 @@ describe('McpClient', () => {
       client.close();
     }
   });
+
+  it('возвращает tools/list и переиспользует открытую SSE-сессию', async () => {
+    const fetchMock = vi.fn<FetchMock>(
+      createMcpFetchMock((request) => {
+        if (request.method === 'initialize') {
+          return rpcResult(request.id, {});
+        }
+
+        if (request.method === 'tools/call') {
+          return rpcResult(request.id, {
+            content: [{ type: 'text', text: 'ok' }],
+          });
+        }
+
+        if (request.method === 'tools/list') {
+          return rpcResult(request.id, {
+            tools: [
+              {
+                name: 'ozon_get_prices',
+                description: 'Цены товаров',
+                inputSchema: { type: 'object' },
+              },
+              { name: 'ozon_orders_fbs' },
+            ],
+          });
+        }
+
+        return undefined;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new McpClient({
+      baseUrl: 'http://mcp.local',
+      timeoutMs: 1_000,
+    });
+
+    try {
+      await expect(client.callTool('ozon_get_prices', {})).resolves.toBe('ok');
+
+      const tools = await client.listTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'ozon_get_prices',
+        'ozon_orders_fbs',
+      ]);
+      expect(tools[0]?.description).toBe('Цены товаров');
+
+      const sseCalls = fetchMock.mock.calls.filter(
+        ([, init]) => init?.method !== 'POST',
+      );
+
+      expect(sseCalls).toHaveLength(1);
+    } finally {
+      client.close();
+    }
+  });
+
+  it('превращает JSON-RPC error на tools/list в McpProviderError', async () => {
+    const fetchMock = vi.fn<FetchMock>(
+      createMcpFetchMock((request) => {
+        if (request.method === 'initialize') {
+          return rpcResult(request.id, {});
+        }
+
+        if (request.method === 'tools/list') {
+          return rpcError(request.id, -32601, 'Method not found');
+        }
+
+        return undefined;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new McpClient({
+      baseUrl: 'http://mcp.local',
+      timeoutMs: 1_000,
+    });
+
+    try {
+      const error = await captureError(client.listTools());
+
+      expect(error).toBeInstanceOf(McpProviderError);
+      expect((error as McpProviderError).rpcCode).toBe(-32601);
+    } finally {
+      client.close();
+    }
+  });
+
+  it('отклоняет некорректный по схеме ответ tools/list', async () => {
+    const fetchMock = vi.fn<FetchMock>(
+      createMcpFetchMock((request) => {
+        if (request.method === 'initialize') {
+          return rpcResult(request.id, {});
+        }
+
+        if (request.method === 'tools/list') {
+          return rpcResult(request.id, {
+            tools: [{ name: '' }, { description: 'без имени' }],
+          });
+        }
+
+        return undefined;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new McpClient({
+      baseUrl: 'http://mcp.local',
+      timeoutMs: 1_000,
+    });
+
+    try {
+      const error = await captureError(client.listTools());
+
+      expect(error).toBeInstanceOf(McpProviderError);
+      expect((error as McpProviderError).message).toContain(
+        'некорректный ответ',
+      );
+    } finally {
+      client.close();
+    }
+  });
+
+  it('отдаёт McpTimeoutError, если tools/list не ответил за timeoutMs', async () => {
+    const fetchMock = vi.fn<FetchMock>(
+      createMcpFetchMock((request) => {
+        if (request.method === 'initialize') {
+          return rpcResult(request.id, {});
+        }
+
+        return undefined;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new McpClient({
+      baseUrl: 'http://mcp.local',
+      timeoutMs: 10,
+    });
+
+    try {
+      const error = await captureError(client.listTools());
+
+      expect(error).toBeInstanceOf(McpTimeoutError);
+      expect((error as McpTimeoutError).timeoutMs).toBe(10);
+    } finally {
+      client.close();
+    }
+  });
 });

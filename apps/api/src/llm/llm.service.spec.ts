@@ -6,6 +6,7 @@ import {
   HumanMessage,
   SystemMessage,
 } from '@langchain/core/messages';
+import type { ChatOpenAI } from '@langchain/openai';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1167,6 +1168,7 @@ describe('LlmService', () => {
         calculateLlmCost(estimate.input_tokens, estimate.output_tokens),
         'Использование LLM',
         expect.any(String),
+        llmRoute.name,
       );
 
       const usageEvent = parseEvents(logSpy.mock.calls).find(
@@ -1896,6 +1898,400 @@ describe('LlmService', () => {
       expect(messages[0]).toBeInstanceOf(SystemMessage);
       expect(messages[0]?.content).toBe(DEFAULT_SYSTEM_PROMPT);
       expect(messages[1]).toBe(human);
+    });
+  });
+
+  describe('fallback-цепочки маршрутов (KI-010)', () => {
+    const userId = '33333333-3333-3333-3333-333333333333';
+
+    function route(name: string): LlmRouteSelection {
+      return {
+        id: `route-${name}`,
+        name,
+        modelName: 'llama3',
+        providerType: 'OpenAI',
+        baseUrl: `http://${name}.local/v1`,
+        apiKeyEnvVar: null,
+        taskType: 'chat',
+        dailyCostLimit: null,
+      };
+    }
+
+    function invokeClient(invoke: MockFn): ChatOpenAI {
+      return { invoke } as unknown as ChatOpenAI;
+    }
+
+    function streamClient(
+      chunks: readonly AIMessageChunk[],
+      failure?: Error,
+    ): ChatOpenAI {
+      return {
+        stream: async function* () {
+          for (const chunk of chunks) {
+            yield chunk;
+          }
+
+          if (failure !== undefined) {
+            throw failure;
+          }
+        },
+      } as unknown as ChatOpenAI;
+    }
+
+    function httpError(status: number): Error {
+      return Object.assign(new Error(`провайдер ответил HTTP ${status}`), {
+        status,
+      });
+    }
+
+    /** Подменяет клиента каждого маршрута по имени. */
+    function useClients(
+      service: LlmService,
+      clients: Record<string, ChatOpenAI>,
+    ): void {
+      vi.spyOn(
+        service as unknown as {
+          resolveClient: (route?: LlmRouteSelection) => ChatOpenAI | null;
+        },
+        'resolveClient',
+      ).mockImplementation(
+        (attemptedRoute?: LlmRouteSelection) =>
+          attemptedRoute === undefined
+            ? null
+            : (clients[attemptedRoute.name] ?? null),
+      );
+    }
+
+    async function collect(
+      stream: AsyncIterable<ChatStreamChunk>,
+    ): Promise<ChatStreamChunk[]> {
+      const chunks: ChatStreamChunk[] = [];
+
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      return chunks;
+    }
+
+    function fallbackEvents(
+      warnSpy: ReturnType<typeof vi.spyOn>,
+    ): Record<string, unknown>[] {
+      return parseEvents(warnSpy.mock.calls).filter(
+        (event) => event.event === 'gen_ai.router.fallback',
+      );
+    }
+
+    it('переключается на второй маршрут при HTTP 429 и пишет событие fallback', async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+      const primaryInvoke = vi.fn().mockRejectedValue(httpError(429));
+      const backupInvoke = vi
+        .fn()
+        .mockResolvedValue(new AIMessage('ответ резерва'));
+      const service = createService();
+
+      useClients(service, {
+        primary: invokeClient(primaryInvoke),
+        backup: invokeClient(backupInvoke),
+      });
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        ),
+      ).resolves.toBeInstanceOf(AIMessage);
+
+      expect(primaryInvoke).toHaveBeenCalledTimes(1);
+      expect(backupInvoke).toHaveBeenCalledTimes(1);
+      expect(fallbackEvents(warnSpy)).toEqual([
+        expect.objectContaining({
+          event: 'gen_ai.router.fallback',
+          from: 'primary',
+          to: 'backup',
+          taskType: 'chat',
+        }),
+      ]);
+      expect(String(fallbackEvents(warnSpy)[0]?.reason)).toContain('429');
+    });
+
+    it('переключается на второй маршрут при HTTP 500', async () => {
+      const primaryInvoke = vi
+        .fn()
+        .mockRejectedValue(new Error('OpenAI: HTTP 500'));
+      const backupInvoke = vi.fn().mockResolvedValue(new AIMessage('ок'));
+      const service = createService();
+
+      useClients(service, {
+        primary: invokeClient(primaryInvoke),
+        backup: invokeClient(backupInvoke),
+      });
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        ),
+      ).resolves.toBeInstanceOf(AIMessage);
+      expect(backupInvoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('переключается на второй маршрут при таймауте соединения', async () => {
+      const primaryInvoke = vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error('connect ETIMEDOUT'), {
+            code: 'ETIMEDOUT',
+          }),
+        );
+      const backupInvoke = vi.fn().mockResolvedValue(new AIMessage('ок'));
+      const service = createService();
+
+      useClients(service, {
+        primary: invokeClient(primaryInvoke),
+        backup: invokeClient(backupInvoke),
+      });
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        ),
+      ).resolves.toBeInstanceOf(AIMessage);
+      expect(backupInvoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('не переключается на второй маршрут при HTTP 401', async () => {
+      const primaryInvoke = vi.fn().mockRejectedValue(httpError(401));
+      const backupInvoke = vi.fn();
+      const service = createService();
+
+      useClients(service, {
+        primary: invokeClient(primaryInvoke),
+        backup: invokeClient(backupInvoke),
+      });
+
+      await expect(
+        service.chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        ),
+      ).rejects.toThrow('HTTP 401');
+      expect(backupInvoke).not.toHaveBeenCalled();
+    });
+
+    it('возвращает 502 errors.llm_unavailable и резерв, если упали все маршруты', async () => {
+      const prisma = createPrismaUser({
+        id: userId,
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+        prisma as unknown as PrismaService,
+      );
+
+      useClients(service, {
+        primary: invokeClient(vi.fn().mockRejectedValue(httpError(500))),
+        backup: invokeClient(vi.fn().mockRejectedValue(httpError(503))),
+      });
+
+      const error = await service
+        .chatWithTools(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+          { userId },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(502);
+      expect((error as ApiException).getResponse()).toMatchObject({
+        code: 'errors.llm_unavailable',
+      });
+      // В сообщении нет деталей провайдера/секретов.
+      expect(String((error as ApiException).message)).not.toContain('HTTP');
+
+      // Резерв вернулся один раз: счётчик в исходном состоянии.
+      expect(prisma.state?.dailyTokensUsed).toBe(0);
+      expect(billing.chargeForSkill).not.toHaveBeenCalled();
+      expect(
+        (prisma.user.updateMany.mock.calls as [UpdateManyArgs][]).filter(
+          ([args]) => {
+            const update = args.data.dailyTokensUsed;
+
+            return (
+              typeof update === 'object' && update.decrement !== undefined
+            );
+          },
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('в стриме переключается на резервный маршрут до первой дельты', async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+      const service = createService();
+
+      useClients(service, {
+        primary: streamClient([], httpError(500)),
+        backup: streamClient([
+          new AIMessageChunk({ content: 'При' }),
+          new AIMessageChunk({ content: 'вет' }),
+          new AIMessageChunk({
+            content: '',
+            usage_metadata: {
+              input_tokens: 10,
+              output_tokens: 5,
+              total_tokens: 15,
+            },
+          }),
+        ]),
+      });
+
+      const chunks = await collect(
+        service.chatWithToolsStream(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        ),
+      );
+      const deltas = chunks.filter(
+        (chunk): chunk is { type: 'delta'; text: string } =>
+          chunk.type === 'delta',
+      );
+
+      expect(deltas.map((chunk) => chunk.text)).toEqual(['При', 'вет']);
+      expect(chunks[chunks.length - 1]?.type).toBe('message');
+      expect(fallbackEvents(warnSpy)).toEqual([
+        expect.objectContaining({
+          from: 'primary',
+          to: 'backup',
+          taskType: 'chat',
+        }),
+      ]);
+    });
+
+    it('в стриме не переключается после первой дельты', async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+      const backupStream = vi.fn();
+      const service = createService();
+
+      useClients(service, {
+        primary: streamClient(
+          [new AIMessageChunk({ content: 'Начало' })],
+          new Error('connection reset'),
+        ),
+        backup: { stream: backupStream } as unknown as ChatOpenAI,
+      });
+
+      const chunks: ChatStreamChunk[] = [];
+      const attempt = (async () => {
+        for await (const chunk of service.chatWithToolsStream(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+        )) {
+          chunks.push(chunk);
+        }
+      })();
+
+      await expect(attempt).rejects.toThrow('connection reset');
+      expect(backupStream).not.toHaveBeenCalled();
+      expect(
+        chunks.filter((chunk) => chunk.type === 'delta'),
+      ).toHaveLength(1);
+      expect(fallbackEvents(warnSpy)).toHaveLength(0);
+    });
+
+    it('в стриме возвращает 502 и резерв, если упали все маршруты', async () => {
+      const prisma = createPrismaUser({
+        id: userId,
+        dailyTokenLimit: 100_000,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        undefined,
+        prisma as unknown as PrismaService,
+      );
+
+      useClients(service, {
+        primary: streamClient([], httpError(500)),
+        backup: streamClient([], httpError(502)),
+      });
+
+      const attempt = collect(
+        service.chatWithToolsStream(
+          [new HumanMessage('привет')],
+          [],
+          [route('primary'), route('backup')],
+          { userId },
+        ),
+      );
+      const error = await attempt.catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(502);
+      expect(prisma.state?.dailyTokensUsed).toBe(0);
+    });
+
+    it('пишет cost и маршрут в gen_ai.usage и llmRouteName в списание', async () => {
+      const logSpy = vi.spyOn(Logger.prototype, 'log');
+      const billing = createBilling();
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        billing as unknown as BillingService,
+      );
+
+      useClients(service, {
+        primary: invokeClient(
+          vi.fn().mockResolvedValue(
+            new AIMessage({
+              content: 'ок',
+              usage_metadata: {
+                input_tokens: 100,
+                output_tokens: 50,
+                total_tokens: 150,
+              },
+            }),
+          ),
+        ),
+      });
+
+      await service.chatWithTools(
+        [new HumanMessage('привет')],
+        [],
+        route('primary'),
+        { userId },
+      );
+
+      const usageEvent = parseEvents(logSpy.mock.calls).find(
+        (event) => event.event === 'gen_ai.usage',
+      );
+
+      expect(usageEvent?.['gen_ai.route']).toBe('primary');
+      expect(usageEvent?.['gen_ai.usage.cost']).toBe(
+        calculateLlmCost(100, 50),
+      );
+      expect(billing.chargeForSkill).toHaveBeenCalledWith(
+        userId,
+        calculateLlmCost(100, 50),
+        'Использование LLM',
+        expect.any(String),
+        'primary',
+      );
     });
   });
 

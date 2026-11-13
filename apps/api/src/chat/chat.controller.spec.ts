@@ -77,6 +77,7 @@ describe('ChatController', () => {
           reason: 'payment',
           tools: ['publish_to_dzen'],
           createdAt: '2026-11-13T12:00:00.000Z',
+          expiresAt: '2026-11-14T12:00:00.000Z',
         },
       ]);
 
@@ -95,6 +96,7 @@ describe('ChatController', () => {
             reason: 'payment',
             tools: ['publish_to_dzen'],
             createdAt: '2026-11-13T12:00:00.000Z',
+            expiresAt: '2026-11-14T12:00:00.000Z',
           },
         ],
       });

@@ -785,33 +785,127 @@ WebSocket (`/socket.io/`) идёт через тот же домен: edge-Caddy
 
 ## 12. Наблюдаемость (AgentOps)
 
-API пишет OTel-совместимые события в лог приложения. Пока это JSON в stdout;
-те же атрибуты можно позже отправить в OTLP-коллектор без изменения кода.
+API отправляет OTLP-спаны в OTel Collector (профиль `monitoring`) и
+по-прежнему пишет OTel-совместимые JSON-события в stdout. Коллектор по
+умолчанию печатает трейсы в свой stdout и не отправляет их во внешние SaaS.
 
-**Вызов LLM** (`apps/api/src/llm/llm.service.ts`) — одна запись на каждый
-ответ модели:
+**Вызов LLM** (`apps/api/src/llm/llm.service.ts`) — одна запись и один спан
+на каждый ответ модели:
 
 ```json
 {
   "event": "gen_ai.usage",
   "gen_ai.system": "openai",
   "gen_ai.model": "qwen2.5-coder-7b-instruct",
+  "gen_ai.agent.id": "office",
+  "gen_ai.tenant.id": "<user-id>",
+  "gen_ai.skill.id": "<skill-id>",
+  "gen_ai.usage.cost": 0.015,
   "gen_ai.prompt_tokens": 128,
   "gen_ai.completion_tokens": 42
 }
 ```
 
-**Запуск агента** (`apps/api/src/chat/chat.service.ts`) — запись перед
+**Запуск агента** (`apps/api/src/chat/chat.service.ts`) — запись и спан перед
 обработкой сообщения:
 
 ```json
 {
   "event": "gen_ai.agent.run",
-  "gen_ai.agent.id": "nova",
+  "gen_ai.agent.id": "office",
   "gen_ai.tenant.id": "<user-id>",
+  "gen_ai.skill.id": "<skill-id>",
   "conversationId": "<conversation-id>"
 }
 ```
+
+### OTel Collector
+
+1. Включите экспорт в `.env`:
+
+   ```text
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+   OTEL_SERVICE_NAME=skillwharf-api
+   ```
+
+2. Поднимите коллектор и пересоздайте API, чтобы он прочитал env:
+
+   ```bash
+   docker compose --profile monitoring up -d otel-collector
+   docker compose up -d api
+   ```
+
+3. Проверьте, что коллектор принимает спаны:
+
+   ```bash
+   docker compose logs -f otel-collector
+   curl -fsS http://localhost:3001/api/v1/health/ready
+   ```
+
+   В логах появятся `service.name=skillwharf-api`, HTTP/Nest-спаны и
+   атрибуты `gen_ai.*`. OTLP-порты `4317`/`4318` опубликованы только на
+   `127.0.0.1`.
+
+**Откат:** очистите `OTEL_EXPORTER_OTLP_ENDPOINT` и выполните
+`docker compose up -d api`. Коллектор можно остановить командой
+`docker compose stop otel-collector`; API продолжит работать без трейсов.
+Конфигурация коллектора — `infra/otel/otel-collector.yml`; файл/внешний
+экспортёр добавляйте осознанно, чтобы не отправлять данные в SaaS.
+
+### Sentry
+
+Sentry выключен, пока `SENTRY_DSN` пуст. Для включения задайте в `.env`:
+
+```text
+SENTRY_DSN=https://<public-key>@<sentry-host>/<project-id>
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=<git-sha>
+```
+
+и пересоздайте API (`docker compose up -d api`). DSN — секрет: не коммитьте
+его и не передавайте в логи.
+
+Перед отправкой события Sentry удаляются HTTP-заголовки, тела запросов,
+cookies, query string, `user`, контексты и переменные stack frame; токены в
+сообщениях и breadcrumbs маскируются (`[REDACTED]`). В key integration
+отключены user info, AI inputs/outputs и MCP content (`dataCollection`).
+Ошибки 4xx не считаются необработанными; фильтр `SentryGlobalFilter`
+перехватывает непредвиденные исключения и 5xx, сохраняя JSON-формат Nest.
+
+**Проверка:** временно вызовите тестовый 500/исключение на стенде и
+убедитесь, что событие появилось в Sentry без заголовков `Authorization`,
+тел запросов и токенов. **Откат:** очистите `SENTRY_DSN` и пересоздайте API.
+
+### Grafana: стоимость по tenant
+
+API экспортирует Prometheus-метрику:
+
+```text
+llm_cost_total{tenant_id="<user-id>",model="<model>",agent_id="<agent>"}
+```
+
+Стоимость — в рублях, рассчитывается по `LLM_COST_PER_1K_TOKENS` и
+фактическому/оценочному usage. `tenant_id` — внутренний userId, не email.
+
+```promql
+# Стоимость за выбранный период по tenant
+sum by (tenant_id) (increase(llm_cost_total[$__range]))
+
+# Токены по модели
+sum by (model) (increase(llm_tokens_total[$__range]))
+```
+
+На дашборде `SkillWharf Overview` добавлены панели **Cost by Tenant** и
+**Tokens by Model**. Запуск мониторинга:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+Grafana: <http://localhost:3003/>, Prometheus: <http://localhost:9090/>.
+Если `llm_cost_total` ещё не появилась, выполните хотя бы один вызов LLM с
+настроенным провайдером — Counter создаёт серию только после первого
+инкремента.
 
 Как читать логи:
 

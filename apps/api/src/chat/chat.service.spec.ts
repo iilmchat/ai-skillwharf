@@ -83,6 +83,7 @@ class FakePendingApprovals {
       status: 'pending',
       createdAt: existing?.createdAt ?? new Date(),
       resolvedAt: null,
+      expiresAt: existing?.expiresAt ?? null,
     };
 
     this.rows.set(input.conversationId, record);
@@ -154,6 +155,7 @@ interface SkillsMock {
 
 interface RouterMock {
   selectRoute: MockFn;
+  selectRoutes: MockFn;
 }
 
 interface MemoryMock {
@@ -314,7 +316,10 @@ describe('ChatService', () => {
       cancelHold: vi.fn(),
     };
     skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
-    router = { selectRoute: vi.fn().mockResolvedValue(null) };
+    router = {
+      selectRoute: vi.fn().mockResolvedValue(null),
+      selectRoutes: vi.fn().mockResolvedValue([]),
+    };
     memory = {
       buildContext: vi.fn().mockResolvedValue(''),
       remember: vi.fn().mockResolvedValue(undefined),
@@ -387,13 +392,18 @@ describe('ChatService', () => {
         { role: 'assistant', content: 'предыдущий ответ' },
         { role: 'user', content: 'привет' },
       ]);
-      router.selectRoute.mockResolvedValue({
-        id: 'route-1',
-        name: 'local',
-        modelName: 'llama3',
-        baseUrl: 'http://localhost:11435/v1',
-        apiKeyEnvVar: null,
-      });
+      router.selectRoutes.mockResolvedValue([
+        {
+          id: 'route-1',
+          name: 'local',
+          modelName: 'llama3',
+          providerType: 'OpenAI',
+          baseUrl: 'http://localhost:11435/v1',
+          apiKeyEnvVar: null,
+          taskType: 'chat',
+          dailyCostLimit: null,
+        },
+      ]);
       chatWithToolsStream.mockReturnValueOnce(
         streamOf(new AIMessage('ответ ассистента')),
       );
@@ -432,7 +442,7 @@ describe('ChatService', () => {
         }),
       );
 
-      const [messages, tools, llmRoute] = chatWithToolsStream.mock.calls[0] as [
+      const [messages, tools, llmRoutes] = chatWithToolsStream.mock.calls[0] as [
         BaseMessage[],
         { name: string }[],
         unknown,
@@ -445,9 +455,11 @@ describe('ChatService', () => {
       expect(messages[1]).toBeInstanceOf(AIMessage);
       expect(messages[1]?.content).toBe('предыдущий ответ');
 
-      // Роутер выбран до вызова LLM, маршрут ушёл в модель.
-      expect(router.selectRoute).toHaveBeenCalledTimes(1);
-      expect(llmRoute).toMatchObject({ modelName: 'llama3' });
+      // Роутер выбрал цепочку до вызова LLM, она ушла в модель.
+      expect(router.selectRoutes).toHaveBeenCalledWith('chat');
+      expect(llmRoutes).toEqual([
+        expect.objectContaining({ modelName: 'llama3' }),
+      ]);
 
       // LLM получает инструменты песочницы, поиска и shell-команд.
       expect(tools.map((tool) => tool.name)).toEqual([

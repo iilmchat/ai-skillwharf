@@ -57,6 +57,7 @@ import {
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MemoryService } from '../memory/memory.service.js';
+import { recordAgentRunSpan } from '../observability/tracing.js';
 import type { EgressPolicy } from '../sandbox/egress.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import {
@@ -179,9 +180,9 @@ const ChatStateAnnotation = Annotation.Root({
     default: () => [],
   }),
   /** Маршрут LLM, выбранный роутером перед запуском графа. */
-  llmRoute: Annotation<LlmRouteSelection | null>({
+  llmRoutes: Annotation<LlmRouteSelection[]>({
     reducer: (_previous, next) => next,
-    default: () => null,
+    default: () => [],
   }),
   /** Блок «Долговременная память», подобранный под последний вопрос. */
   memoryContext: Annotation<string>({
@@ -648,8 +649,13 @@ function buildChatGraph(
       for await (const chunk of llmService.chatWithToolsStream(
         state.messages,
         resolveTools(state),
-        state.llmRoute ?? undefined,
-        { userId: state.userId, memoryContext: state.memoryContext },
+        state.llmRoutes,
+        {
+          userId: state.userId,
+          memoryContext: state.memoryContext,
+          agentId: DEFAULT_OFFICE_AGENT_ID,
+          skillId: state.skills.map((skill) => skill.id).join(',') || undefined,
+        },
       )) {
         if (chunk.type === 'delta') {
           text += chunk.text;
@@ -953,6 +959,8 @@ export class ChatService {
       reason: ChatApprovalReason;
       tools: string[];
       createdAt: string;
+      /** Дедлайн решения (ISO) для таймера в UI; нет поля — ожидание без TTL. */
+      expiresAt?: string;
     }>
   > {
     const pending = await this.pendingApprovalService.listPending(userId);
@@ -962,6 +970,11 @@ export class ChatService {
       reason: item.reason,
       tools: item.tools,
       createdAt: item.createdAt.toISOString(),
+      // Просроченные не отдаются сервисом; старое ожидание без TTL просто
+      // не содержит поле, чтобы клиент не показывал таймер.
+      ...(item.expiresAt == null
+        ? {}
+        : { expiresAt: item.expiresAt.toISOString() }),
     }));
   }
 
@@ -990,14 +1003,17 @@ export class ChatService {
     conversationId: string,
     content: string,
   ): Promise<ChatReply> {
-    this.logAgentContext(userId, conversationId);
-
     const prepared = await this.prepareMessage(
       userId,
       conversationId,
       content,
     );
-    const llmRoute = await this.llmRouterService.selectRoute();
+    this.logAgentContext(
+      userId,
+      conversationId,
+      prepared.skills.map((skill) => skill.id),
+    );
+    const llmRoutes = await this.llmRouterService.selectRoutes('chat');
 
     let reply: string;
 
@@ -1010,7 +1026,7 @@ export class ChatService {
           skills: prepared.skills,
           approvalRequiredTools: prepared.approvalRequiredTools,
           outcomePrices: prepared.outcomePrices,
-          llmRoute,
+          llmRoutes,
           memoryContext: prepared.memoryContext,
           userRole: prepared.userRole,
           toolSkills: prepared.toolSkills,
@@ -1053,14 +1069,17 @@ export class ChatService {
     onDelta: (text: string) => void,
     onOfficeEvent?: (event: OfficeEvent) => void,
   ): Promise<ChatReply> {
-    this.logAgentContext(userId, conversationId);
-
     const prepared = await this.prepareMessage(
       userId,
       conversationId,
       content,
     );
-    const llmRoute = await this.llmRouterService.selectRoute();
+    this.logAgentContext(
+      userId,
+      conversationId,
+      prepared.skills.map((skill) => skill.id),
+    );
+    const llmRoutes = await this.llmRouterService.selectRoutes('chat');
 
     let reply = '';
 
@@ -1073,7 +1092,7 @@ export class ChatService {
           skills: prepared.skills,
           approvalRequiredTools: prepared.approvalRequiredTools,
           outcomePrices: prepared.outcomePrices,
-          llmRoute,
+          llmRoutes,
           memoryContext: prepared.memoryContext,
           userRole: prepared.userRole,
           toolSkills: prepared.toolSkills,
@@ -1415,15 +1434,27 @@ export class ChatService {
    * OTel-атрибуты запуска агента: агент и tenant (владелец диалога).
    * Пишем JSON в лог приложения, чтобы позже подключить OTLP-экспорт.
    */
-  private logAgentContext(userId: string, conversationId: string): void {
+  private logAgentContext(
+    userId: string,
+    conversationId: string,
+    skillIds: readonly string[] = [],
+  ): void {
     this.logger.log(
       JSON.stringify({
         event: 'gen_ai.agent.run',
         'gen_ai.agent.id': DEFAULT_OFFICE_AGENT_ID,
         'gen_ai.tenant.id': userId,
+        'gen_ai.skill.id':
+          skillIds.length > 0 ? skillIds.join(',') : 'unknown',
         conversationId,
       }),
     );
+
+    recordAgentRunSpan({
+      agentId: DEFAULT_OFFICE_AGENT_ID,
+      tenantId: userId,
+      skillIds,
+    });
   }
 
   /**

@@ -109,9 +109,12 @@ model LedgerEntry {
   description    String
   idempotencyKey String   @unique
   createdAt      DateTime @default(now())
+  /// Для LLM-списаний — имя маршрута LlmRoute (бюджеты на маршрут).
+  llmRouteName   String?
   wallet         Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId, createdAt])
+  @@index([llmRouteName, createdAt])
 }
 
 model InstalledSkill {
@@ -171,10 +174,14 @@ model LlmRoute {
   apiKeyEnvVar String?
   priority     Int      @default(0)
   isActive     Boolean  @default(true)
+  /// Тип задачи маршрута: chat | embeddings | ... (fallback — в рамках одного).
+  taskType     String   @default("chat")
+  /// Дневной лимит затрат на маршрут (₽). NULL — без лимита.
+  dailyCostLimit Decimal? @db.Decimal(18, 2)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@index([isActive, priority])
+  @@index([isActive, taskType, priority])
 }
 
 /// Сохранённое состояние LangGraph (checkpointer) после супершага.
@@ -224,12 +231,15 @@ model PendingApproval {
   tools          Json
   /// {callId,toolName,entryId}[] — зарезервированные escrow-holds.
   holds          Json
-  /// pending | approved | rejected
+  /// pending | approved | rejected | expired
   status         String    @default("pending")
   createdAt      DateTime  @default(now())
   resolvedAt     DateTime?
+  /// Дедлайн решения: после него фоновый job отменяет hold и чистит checkpoint.
+  expiresAt      DateTime?
 
   @@index([userId, status, createdAt])
+  @@index([status, expiresAt])
 }
 
 /// Аудит изменений Control Plane: кто, что и когда изменил.

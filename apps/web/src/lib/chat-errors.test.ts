@@ -126,6 +126,7 @@ describe('classifyChatError', () => {
     { code: ERROR_CODES.mcpProvider, kind: 'mcpProvider' },
     { code: ERROR_CODES.mcpTimeout, kind: 'mcpTimeout' },
     { code: ERROR_CODES.mcpUnavailable, kind: 'mcpUnavailable' },
+    { code: ERROR_CODES.llmUnavailable, kind: 'llmUnavailable' },
   ] as const)(
     'распознаёт MCP-код $code как отдельную категорию',
     ({ code, kind }) => {
@@ -148,6 +149,30 @@ describe('classifyChatError', () => {
         status: 504,
       }),
     ).toBe('mcpTimeout');
+  });
+
+  it.each([
+    { code: ERROR_CODES.invalidRequest, kind: 'invalidRequest', status: 400 },
+    { code: ERROR_CODES.policyBlocked, kind: 'policyBlocked', status: 403 },
+  ] as const)(
+    'распознаёт код $code как отдельную категорию',
+    ({ code, kind, status }) => {
+      expect(
+        classifyChatError('Не удалось выполнить вызов инструмента', {
+          code,
+          status,
+        }),
+      ).toBe(kind);
+    },
+  );
+
+  it('код политики важнее текстовых маркеров', () => {
+    expect(
+      classifyChatError('Too Many Requests', {
+        code: ERROR_CODES.policyBlocked,
+        status: 403,
+      }),
+    ).toBe('policyBlocked');
   });
 
   it('без `code` старый MCP-текст остаётся marketplace-fallback', () => {

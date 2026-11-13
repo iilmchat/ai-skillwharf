@@ -5,13 +5,16 @@ import {
   useReducedMotion,
   type Variants,
 } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Socket } from 'socket.io-client';
 import { Brand } from '../components/Brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { PendingTtl } from '../components/PendingTtl';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import {
   DEFAULT_OFFICE_AGENT_ID,
   parseOfficeEvent,
@@ -19,6 +22,7 @@ import {
   type OfficeAgentStatus,
   type OfficeApprovalReason,
 } from '../lib/office-events';
+import { pendingApprovalsQueryKey } from '../lib/pending-approvals';
 import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
 import { useOfficeStore } from '../store/office.store';
@@ -33,6 +37,8 @@ interface OfficeAgent {
   status: OfficeAgentStatus;
   /** Причина waiting_approval: оплата или обычное одобрение. */
   reason?: OfficeApprovalReason;
+  /** TTL ожидания из `GET /api/v1/chat/pending`; нет у старого API. */
+  expiresAt?: string;
   desk: string;
   live?: boolean;
 }
@@ -309,6 +315,9 @@ function AgentDesk({
                 />
               )}
             </p>
+            {isWaiting && agent.expiresAt !== undefined && (
+              <PendingTtl expiresAt={agent.expiresAt} className="mt-2" />
+            )}
           </div>
 
           <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-on-surface-variant">
@@ -486,6 +495,9 @@ function AgentSidebar({
                   ? t('office.payment.body')
                   : t('office.approval.body')}
               </p>
+              {agent.expiresAt !== undefined && (
+                <PendingTtl expiresAt={agent.expiresAt} className="mt-2" />
+              )}
             </div>
           </div>
         )}
@@ -568,9 +580,35 @@ export function OfficePage() {
   const [isLive, setIsLive] = useState(false);
 
   const conversationId = useOfficeStore((state) => state.conversationId);
+  const queryClient = useQueryClient();
+  const pendingQuery = usePendingApprovals();
+  const pendingApprovals = useMemo(
+    () => pendingQuery.data?.items ?? [],
+    [pendingQuery.data],
+  );
+
+  // Для текущего диалога TTL берём из REST: событие `office_event` его не
+  // содержит, а старый API может не присылать `expiresAt` вовсе.
+  const displayAgents = useMemo(() => {
+    const activePending = pendingApprovals.find(
+      (item) => item.conversationId === conversationId,
+    );
+    const expiresAt = activePending?.expiresAt;
+
+    if (expiresAt === undefined) {
+      return agents;
+    }
+
+    return agents.map((agent) =>
+      agent.id === DEFAULT_OFFICE_AGENT_ID &&
+      agent.status === 'waiting_approval'
+        ? { ...agent, expiresAt }
+        : agent,
+    );
+  }, [agents, conversationId, pendingApprovals]);
 
   const selectedAgent =
-    agents.find((agent) => agent.id === selectedAgentId) ?? null;
+    displayAgents.find((agent) => agent.id === selectedAgentId) ?? null;
 
   useEffect(() => {
     // Сокет — внешняя система: синхронизируем ссылку на неё с auth-состоянием.
@@ -616,6 +654,13 @@ export function OfficePage() {
       }
 
       setAgents((current) => applyLiveEvent(current, event));
+
+      // Агент больше не ждёт решения — список ожиданий устарел.
+      if (event.status !== 'waiting_approval') {
+        void queryClient.invalidateQueries({
+          queryKey: pendingApprovalsQueryKey,
+        });
+      }
     };
 
     // Завершение ответа — единственный сигнал, что агент освободился.
@@ -651,7 +696,7 @@ export function OfficePage() {
       socket.off('office_event', handleOfficeEvent);
       socket.off('stream_end', handleStreamEnd);
     };
-  }, [socket, t]);
+  }, [socket, t, queryClient]);
 
   useEffect(() => {
     if (selectedAgentId === null) {
@@ -714,6 +759,10 @@ export function OfficePage() {
       ),
     );
     setApprovedAgentId(agentId);
+    // Ожидание закрыто оптимистично; список ожиданий обновим с сервера.
+    void queryClient.invalidateQueries({
+      queryKey: pendingApprovalsQueryKey,
+    });
   }
 
   function closeSidebar() {
@@ -838,13 +887,65 @@ export function OfficePage() {
               </motion.ul>
             </motion.div>
 
+            {isAuthenticated && pendingApprovals.length > 0 && (
+              <section
+                aria-labelledby="office-pending-title"
+                className="mt-8 rounded-2xl border border-warning/40 bg-warning-container/30 p-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 max-w-xl">
+                    <h2
+                      id="office-pending-title"
+                      className="font-display text-lg font-bold text-on-surface"
+                    >
+                      {t('office.pending.title')}
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-on-surface-variant">
+                      {t('office.pending.description')}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center rounded-full border border-warning/40 bg-surface px-3 py-1 text-sm font-semibold text-on-warning-container">
+                    {pendingApprovals.length}
+                    <span className="sr-only">
+                      {t('office.pending.countLabel')}
+                    </span>
+                  </span>
+                </div>
+
+                <ul className="mt-4 space-y-2">
+                  {pendingApprovals.map((item) => (
+                    <li
+                      key={item.conversationId}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/25 bg-surface/70 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-on-surface">
+                          {item.reason === 'payment'
+                            ? t('office.pending.payment')
+                            : t('office.pending.approval')}
+                        </p>
+                        {item.tools.length > 0 && (
+                          <p className="mt-0.5 break-words text-xs text-on-surface-variant">
+                            {t('office.pending.tools', {
+                              tools: item.tools.join(', '),
+                            })}
+                          </p>
+                        )}
+                      </div>
+                      <PendingTtl expiresAt={item.expiresAt} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             <motion.ul
               initial="hidden"
               animate="show"
               variants={gridVariants}
               className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
             >
-              {agents.map((agent) => (
+              {displayAgents.map((agent) => (
                 <AgentDesk
                   key={agent.id}
                   agent={agent}

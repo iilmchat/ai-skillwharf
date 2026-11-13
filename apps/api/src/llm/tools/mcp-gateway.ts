@@ -4,25 +4,31 @@
  *
  * Задачи слоя:
  *  - провалидировать аргументы вызова ДО отправки на MCP-сервер (Zod);
+ *  - по `tools/list` проверить, что действие реально существует у провайдера
+ *    (динамический discovery, KI-027);
  *  - ограничить вызов таймаутом и аккуратным retry;
  *  - смаппить любые сбои в единый JSON ошибки API (`ApiException`).
  *
- * Для известных действий провайдера применяется строгая схема параметров,
- * неизвестные действия проходят только структурную проверку
- * `mcpToolCallSchema`. Это осознанный residual risk: список инструментов
- * MCP-сервера может расширяться без обновления gateway, поэтому неизвестное
- * действие не блокируется, но его параметры всё равно ограничены
- * примитивами, длиной строк и количеством ключей.
+ * Для известных действий провайдера применяется строгая схема параметров.
+ * Если discovery доступен и успешен, неизвестные набору действия
+ * отклоняются; если discovery недоступен, остаётся структурная проверка
+ * `mcpToolCallSchema` — осознанный residual risk: список инструментов
+ * MCP-сервера может расширяться без обновления gateway, но параметры всё
+ * равно ограничены примитивами, длиной строк и количеством ключей.
  */
-import { HttpStatus } from '@nestjs/common';
+import { HttpStatus, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { ApiException, invalidRequestError } from '../../common/api-error.js';
 import { ERROR_KEYS } from '../../i18n/error-keys.js';
 import {
   McpTimeoutError,
   McpTransportError,
+  safeDetail,
   type McpClient,
+  type McpToolDescriptor,
 } from './mcp-client.js';
+
+export type { McpToolDescriptor } from './mcp-client.js';
 
 /** MCP-провайдер, с которым работает gateway. */
 export type McpProvider = 'ozon' | 'wb';
@@ -167,6 +173,11 @@ const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
 export interface McpGatewayOptions {
   provider: McpProvider;
   client: Pick<McpClient, 'callTool'>;
+  /**
+   * Ленивое one-time discovery инструментов провайдера (`McpClient.listTools`
+   * либо его обёртка). Без колбэка gateway работает в structural-only режиме.
+   */
+  listTools?: () => Promise<readonly McpToolDescriptor[]>;
   timeoutMs?: number;
   maxRetries?: number;
 }
@@ -207,12 +218,16 @@ export function validateMcpCall(input: unknown): {
 export class McpGateway {
   private readonly provider: McpProvider;
   private readonly client: Pick<McpClient, 'callTool'>;
+  private readonly listTools: McpGatewayOptions['listTools'];
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
+  private readonly logger = new Logger(McpGateway.name);
+  private discovery: Promise<ReadonlySet<string> | null> | null = null;
 
   constructor(options: McpGatewayOptions) {
     this.provider = options.provider;
     this.client = options.client;
+    this.listTools = options.listTools;
     this.timeoutMs = options.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS;
     this.maxRetries = options.maxRetries ?? MCP_MAX_RETRIES;
   }
@@ -220,9 +235,13 @@ export class McpGateway {
   /**
    * Валидирует аргументы и вызывает MCP-инструмент. Возвращает текстовый
    * результат как есть, а любые сбои превращает в `ApiException`.
+   *
+   * Порядок проверок: структурная Zod-схема → discovery-проверка действия →
+   * строгая схема известного действия → `client.callTool`.
    */
   async call(input: unknown): Promise<string> {
     const { action, params } = validateMcpCall(input);
+    await this.assertDiscoveredAction(action);
     const validatedParams = this.validateKnownAction(action, params);
 
     for (let attempt = 0; ; attempt += 1) {
@@ -252,6 +271,62 @@ export class McpGateway {
         throw mcpProviderException(action);
       }
     }
+  }
+
+  /**
+   * Отклоняет действие, которого нет в успешно полученном `tools/list`.
+   * Неудачный или отключённый discovery не валит вызов: остаётся
+   * structural-only режим (с JSON-логом один раз на инстанс).
+   */
+  private async assertDiscoveredAction(action: string): Promise<void> {
+    const toolNames = await this.resolveToolNames();
+
+    if (toolNames !== null && !toolNames.has(action)) {
+      throw invalidRequestError(
+        `MCP-действие ${action} не найдено в tools/list провайдера`,
+      );
+    }
+  }
+
+  /** Ленивое one-time discovery: один промис на инстанс (успех или сбой). */
+  private resolveToolNames(): Promise<ReadonlySet<string> | null> {
+    this.discovery ??= this.loadToolNames();
+
+    return this.discovery;
+  }
+
+  /** Загружает имена инструментов; при любой ошибке — лог и null. */
+  private async loadToolNames(): Promise<ReadonlySet<string> | null> {
+    const listTools = this.listTools;
+
+    if (listTools === undefined) {
+      this.logToolsListUnavailable('listTools не сконфигурирован');
+
+      return null;
+    }
+
+    try {
+      const tools = await listTools();
+
+      return new Set(tools.map((tool) => tool.name));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logToolsListUnavailable(safeDetail(message));
+
+      return null;
+    }
+  }
+
+  /** JSON-лог недоступности discovery: без секретов и тел запросов. */
+  private logToolsListUnavailable(message: string): void {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'mcp.tools_list_unavailable',
+        provider: this.provider,
+        message,
+      }),
+    );
   }
 
   /** Применяет строгую схему известного действия; неизвестное пропускает. */

@@ -242,12 +242,16 @@ export class BillingService {
    * Списание атомарное: условный `updateMany` с `balance >= amount` исключает
    * гонку между проверкой баланса и вычитанием (баланс не уйдёт в минус).
    * `idempotencyKey` защищает от повторных списаний.
+   *
+   * `llmRouteName` заполняется только для LLM-списаний: по этой колонке
+   * LlmRouterService считает дневной бюджет маршрута (KI-010).
    */
   async chargeForSkill(
     userId: string,
     amount: number,
     description: string,
     idempotencyKey: string,
+    llmRouteName?: string,
   ): Promise<LedgerOperationResult> {
     this.assertPositiveAmount(amount);
     this.assertIdempotencyKey(idempotencyKey);
@@ -289,6 +293,7 @@ export class BillingService {
             type: 'debit',
             description,
             idempotencyKey,
+            ...(llmRouteName === undefined ? {} : { llmRouteName }),
           },
         });
 

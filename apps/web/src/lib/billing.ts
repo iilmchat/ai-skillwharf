@@ -1,5 +1,4 @@
 import { isAxiosError } from 'axios';
-import { z } from 'zod';
 import i18n from '../i18n';
 import { api } from './api';
 
@@ -12,42 +11,6 @@ export interface WalletBalance {
 export interface PaymentLink {
   url: string;
 }
-
-export interface LedgerEntry {
-  id: string;
-  amount: string;
-  balanceAfter: string;
-  type: string;
-  description: string;
-  createdAt: string;
-}
-
-/**
- * Контракт пагинированной истории операций (`GET /api/v1/billing/ledger`).
- * Ответ валидируется Zod: при расхождении UI показывает ошибку, а не
- * вымышленные строки.
- */
-export const ledgerEntrySchema = z.object({
-  id: z.string().min(1),
-  amount: z.string(),
-  balanceAfter: z.string(),
-  type: z.string(),
-  description: z.string(),
-  createdAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: 'ожидается дата в формате ISO 8601',
-  }),
-});
-
-export const ledgerPageSchema = z.object({
-  items: z.array(ledgerEntrySchema),
-  total: z.number().int().nonnegative(),
-  nextCursor: z.string().nullable(),
-});
-
-export type LedgerPage = z.infer<typeof ledgerPageSchema>;
-
-/** Ключ кэша истории операций. */
-export const ledgerQueryKey = ['ledger'] as const;
 
 interface MessagePayload {
   message: string | string[];
@@ -95,13 +58,6 @@ export async function createPayment(amount: number): Promise<PaymentLink> {
   });
 
   return data;
-}
-
-/** Первая страница истории операций (limit по умолчанию — серверный). */
-export async function fetchLedger(): Promise<LedgerPage> {
-  const { data } = await api.get<unknown>('/billing/ledger');
-
-  return ledgerPageSchema.parse(data);
 }
 
 export function getBillingErrorMessage(

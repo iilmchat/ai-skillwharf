@@ -226,9 +226,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
 const CHAT_ERROR_NOTICE_KEYS: Record<ChatErrorKind, string> = {
   marketplace: 'chat.errors.marketplaceUnavailable',
   dailyTokenLimit: 'chat.errors.dailyTokenLimit',
+  invalidRequest: 'chat.errors.invalidRequest',
+  policyBlocked: 'chat.errors.policyBlocked',
   mcpProvider: 'chat.errors.mcpProvider',
   mcpTimeout: 'chat.errors.mcpTimeout',
   mcpUnavailable: 'chat.errors.mcpUnavailable',
+  llmUnavailable: 'chat.errors.llmUnavailable',
 };
 
 function chatErrorNotice(kind: ChatErrorKind): string {

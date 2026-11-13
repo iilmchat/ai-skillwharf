@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+import type { MockInstance } from 'vitest';
 import { ApiException } from '../../common/api-error.js';
 import {
   McpProviderError,
@@ -12,12 +14,15 @@ import {
   validateMcpCall,
   type McpGatewayOptions,
   type McpProvider,
+  type McpToolDescriptor,
 } from './mcp-gateway.js';
 
 type CallTool = (
   name: string,
   args: Record<string, unknown>,
 ) => Promise<string>;
+
+type ListTools = () => Promise<readonly McpToolDescriptor[]>;
 
 type ErrorBody = {
   statusCode: number;
@@ -35,7 +40,9 @@ const OZON_VALID_CALL = {
 function createGateway(
   provider: McpProvider,
   callTool: CallTool,
-  overrides: Partial<Pick<McpGatewayOptions, 'timeoutMs' | 'maxRetries'>> = {},
+  overrides: Partial<
+    Pick<McpGatewayOptions, 'timeoutMs' | 'maxRetries' | 'listTools'>
+  > = {},
 ): McpGateway {
   return new McpGateway({ provider, client: { callTool }, ...overrides });
 }
@@ -55,7 +62,29 @@ async function expectApiError(promise: Promise<unknown>): Promise<ErrorBody> {
   return (error as ApiException).getResponse();
 }
 
+/** Разбирает JSON-сообщения, которые gateway писал в Logger.warn. */
+function loggedEvents(spy: MockInstance): Array<Record<string, unknown>> {
+  return spy.mock.calls.map((call) => {
+    const payload: unknown = call[0];
+
+    return JSON.parse(String(payload)) as Record<string, unknown>;
+  });
+}
+
 describe('McpGateway', () => {
+  let loggerWarn: MockInstance;
+
+  beforeEach(() => {
+    // Gateway логирует недоступность discovery; в тестах сообщения не нужны.
+    loggerWarn = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe('валидация до вызова клиента', () => {
     const invalidActions = [
       'OZON_GET_PRICES',
@@ -321,6 +350,176 @@ describe('McpGateway', () => {
       expect(body.statusCode).toBe(504);
       expect(body.code).toBe('errors.mcp_timeout');
       expect(callTool).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('динамический discovery tools/list', () => {
+    const DISCOVERED_TOOLS: readonly McpToolDescriptor[] = [
+      { name: 'ozon_get_prices' },
+      { name: 'ozon_orders_fbs' },
+    ];
+
+    it('вызывает listTools один раз на несколько call (кеш)', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi.fn<ListTools>().mockResolvedValue(DISCOVERED_TOOLS);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await gateway.call(OZON_VALID_CALL);
+      await gateway.call({
+        action: 'ozon_orders_fbs',
+        params: { shop_id: '123' },
+      });
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(loggerWarn).not.toHaveBeenCalled();
+    });
+
+    it('параллельные вызовы используют одно discovery', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi.fn<ListTools>().mockResolvedValue(DISCOVERED_TOOLS);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await Promise.all([
+        gateway.call(OZON_VALID_CALL),
+        gateway.call({ action: 'ozon_orders_fbs', params: {} }),
+      ]);
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledTimes(2);
+    });
+
+    it('отклоняет действие, которого нет в tools/list, до callTool', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi
+        .fn<ListTools>()
+        .mockResolvedValue([{ name: 'ozon_get_prices' }]);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      const body = await expectApiError(
+        gateway.call({ action: 'ozon_orders_fbs', params: {} }),
+      );
+
+      expect(body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'errors.invalid_request',
+        message: expect.any(String),
+      });
+      expect(callTool).not.toHaveBeenCalled();
+      expect(listTools).toHaveBeenCalledTimes(1);
+    });
+
+    it('пропускает действие из tools/list и сохраняет strict-схему', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi.fn<ListTools>().mockResolvedValue(DISCOVERED_TOOLS);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await expect(gateway.call(OZON_VALID_CALL)).resolves.toBe('ok');
+      expect(callTool).toHaveBeenCalledTimes(1);
+    });
+
+    it('валидирует params известного действия из tools/list строгой схемой', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi.fn<ListTools>().mockResolvedValue(DISCOVERED_TOOLS);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      const body = await expectApiError(
+        gateway.call({ action: 'ozon_get_prices', params: { limit: 0 } }),
+      );
+
+      expect(body.statusCode).toBe(400);
+      expect(callTool).not.toHaveBeenCalled();
+    });
+
+    it('discovery reject → structural-only вызов, лог mcp.tools_list_unavailable', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi
+        .fn<ListTools>()
+        .mockRejectedValue(new McpTransportError('MCP SSE: ошибка сети'));
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await expect(
+        gateway.call({
+          action: 'ozon_custom_report',
+          params: { shop_id: '123' },
+        }),
+      ).resolves.toBe('ok');
+
+      expect(callTool).toHaveBeenCalledTimes(1);
+
+      const events = loggedEvents(loggerWarn);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        event: 'mcp.tools_list_unavailable',
+        provider: 'ozon',
+      });
+      expect(String(events[0]?.message)).toContain('MCP SSE: ошибка сети');
+    });
+
+    it('сбой discovery тоже кешируется: повторного listTools нет', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi
+        .fn<ListTools>()
+        .mockRejectedValue(new McpTransportError('MCP SSE: ошибка сети'));
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await gateway.call({
+        action: 'ozon_custom_report',
+        params: { shop_id: '1' },
+      });
+      await gateway.call({
+        action: 'ozon_custom_report',
+        params: { shop_id: '2' },
+      });
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(loggedEvents(loggerWarn)).toHaveLength(1);
+    });
+
+    it('маскирует токен в сообщении discovery-ошибки', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi
+        .fn<ListTools>()
+        .mockRejectedValue(
+          new McpTransportError('Auth: Bearer super-secret-token'),
+        );
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      await gateway.call({ action: 'ozon_custom_report', params: {} });
+
+      const events = loggedEvents(loggerWarn);
+      expect(String(events[0]?.message)).not.toContain('super-secret-token');
+      expect(String(events[0]?.message)).toContain('[REDACTED]');
+    });
+
+    it('listTools отсутствует → structural-only, ровно один лог', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const gateway = createGateway('ozon', callTool);
+
+      await gateway.call({
+        action: 'ozon_custom_report',
+        params: { shop_id: '1' },
+      });
+      await gateway.call({
+        action: 'ozon_custom_report',
+        params: { shop_id: '2' },
+      });
+
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(loggedEvents(loggerWarn)).toHaveLength(1);
+    });
+
+    it('пустой tools/list отклоняет любое действие', async () => {
+      const callTool = vi.fn<CallTool>().mockResolvedValue('ok');
+      const listTools = vi.fn<ListTools>().mockResolvedValue([]);
+      const gateway = createGateway('ozon', callTool, { listTools });
+
+      const body = await expectApiError(gateway.call(OZON_VALID_CALL));
+
+      expect(body.statusCode).toBe(400);
+      expect(callTool).not.toHaveBeenCalled();
     });
   });
 

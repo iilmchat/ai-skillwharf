@@ -1,6 +1,10 @@
 import {
   buildContainerConfig,
   buildEgressSetup,
+  buildExtraHosts,
+  buildHostsEntries,
+  DNS_ALLOWED_UID,
+  DNS_PORT,
   DNS_RESOLVER_IP,
   EGRESS_ALLOWLIST_ENV,
   EGRESS_SETUP_PATH,
@@ -9,7 +13,9 @@ import {
   normalizeEgressAllowlist,
   parseExecutePayload,
   resolveEffectiveNetwork,
+  resolveEgressHosts,
   SANDBOX_CODE_ENV,
+  type EgressDnsResolver,
   type SandboxRuntimeConfig,
 } from './egress.js';
 
@@ -116,6 +122,111 @@ describe('normalizeEgressAllowlist и resolveEffectiveNetwork', () => {
   });
 });
 
+describe('resolveEgressHosts и buildExtraHosts', () => {
+  function fakeResolver(
+    map4: Record<string, string[]>,
+    map6: Record<string, string[]> = {},
+  ): EgressDnsResolver {
+    return {
+      resolve4: async (fqdn) => {
+        const addresses = map4[fqdn];
+
+        if (!addresses) {
+          throw new Error('ENOTFOUND');
+        }
+
+        return addresses;
+      },
+      resolve6: async (fqdn) => {
+        const addresses = map6[fqdn];
+
+        if (!addresses) {
+          throw new Error('ENODATA');
+        }
+
+        return addresses;
+      },
+    };
+  }
+
+  it('резолвит v4 и v6, нормализует и дедуплицирует allowlist', async () => {
+    const result = await resolveEgressHosts(
+      ['api.tavily.com', ' API.Tavily.com '],
+      fakeResolver(
+        { 'api.tavily.com': ['1.2.3.4', '1.2.3.4'] },
+        { 'api.tavily.com': ['2001:db8::1'] },
+      ),
+    );
+
+    expect(result.resolved).toEqual([
+      {
+        fqdn: 'api.tavily.com',
+        addresses4: ['1.2.3.4'],
+        addresses6: ['2001:db8::1'],
+      },
+    ]);
+    expect(result.unresolved).toEqual([]);
+    expect(result.ipv6Only).toEqual([]);
+  });
+
+  it('пропускает домен с ошибкой DNS, остальные резолвит', async () => {
+    const result = await resolveEgressHosts(
+      ['bad.example', 'ok.example'],
+      fakeResolver({ 'ok.example': ['5.6.7.8'] }),
+    );
+
+    expect(result.resolved).toEqual([
+      { fqdn: 'ok.example', addresses4: ['5.6.7.8'], addresses6: [] },
+    ]);
+    expect(result.unresolved).toEqual(['bad.example']);
+  });
+
+  it('отдельно помечает IPv6-only домены (ExtraHosts их не поддерживает)', async () => {
+    const result = await resolveEgressHosts(
+      ['v6.example'],
+      fakeResolver({}, { 'v6.example': ['2001:db8::2'] }),
+    );
+
+    expect(result.resolved).toEqual([]);
+    expect(result.unresolved).toEqual([]);
+    expect(result.ipv6Only).toEqual(['v6.example']);
+  });
+
+  it('строит fqdn:ipv4 и игнорирует IPv6/дубликаты', () => {
+    expect(
+      buildExtraHosts([
+        {
+          fqdn: 'api.tavily.com',
+          addresses4: ['1.2.3.4', '1.2.3.4'],
+          addresses6: ['2001:db8::1'],
+        },
+        {
+          fqdn: 'api.github.com',
+          addresses4: ['5.6.7.8', '9.9.9.9'],
+          addresses6: [],
+        },
+      ]),
+    ).toEqual([
+      'api.tavily.com:1.2.3.4',
+      'api.github.com:5.6.7.8',
+      'api.github.com:9.9.9.9',
+    ]);
+  });
+
+  it('дедуплицирует FQDN', () => {
+    expect(
+      buildExtraHosts([
+        { fqdn: 'a.example', addresses4: ['1.1.1.1'], addresses6: [] },
+        { fqdn: 'A.example', addresses4: ['2.2.2.2'], addresses6: [] },
+      ]),
+    ).toEqual(['a.example:1.1.1.1']);
+  });
+
+  it('пустой allowlist → пустой ExtraHosts', () => {
+    expect(buildExtraHosts([])).toEqual([]);
+  });
+});
+
 describe('buildContainerConfig', () => {
   it('без allowlist: network none, без NET_ADMIN и entrypoint, User 65534', () => {
     const config = buildContainerConfig(
@@ -128,6 +239,7 @@ describe('buildContainerConfig', () => {
 
     expect(config.HostConfig.NetworkMode).toBe('none');
     expect(config.HostConfig.CapAdd).toBeUndefined();
+    expect(config.HostConfig.ExtraHosts).toBeUndefined();
     expect(config.HostConfig.CapDrop).toEqual(['ALL']);
     expect(config.Entrypoint).toBeUndefined();
     expect(config.User).toBe('65534:65534');
@@ -161,6 +273,49 @@ describe('buildContainerConfig', () => {
       `${EGRESS_ALLOWLIST_ENV}=${JSON.stringify(['api.tavily.com'])}`,
     );
     expect(config.Env).toContain(`${SANDBOX_CODE_ENV}=curl https://api.tavily.com`);
+  });
+
+  it('пробрасывает ExtraHosts для allowlist-доменов (prod-путь hosts)', () => {
+    const config = buildContainerConfig(
+      parseExecutePayload({
+        code: 'curl https://api.tavily.com',
+        network: 'bridge',
+        egressAllowlist: ['api.tavily.com'],
+      }),
+      RUNTIME,
+      ['api.tavily.com:1.2.3.4'],
+    );
+
+    expect(config.HostConfig.ExtraHosts).toEqual(['api.tavily.com:1.2.3.4']);
+  });
+
+  it('без allowlist ExtraHosts не добавляются', () => {
+    const config = buildContainerConfig(
+      parseExecutePayload({ code: 'echo hi' }),
+      RUNTIME,
+      ['api.tavily.com:1.2.3.4'],
+    );
+
+    expect(config.HostConfig.ExtraHosts).toBeUndefined();
+  });
+
+  it('фильтрует ExtraHosts не из allowlist, IPv6 и дубликаты', () => {
+    const config = buildContainerConfig(
+      parseExecutePayload({
+        code: 'true',
+        network: 'bridge',
+        egressAllowlist: ['api.tavily.com'],
+      }),
+      RUNTIME,
+      [
+        'evil.example:6.6.6.6',
+        'api.tavily.com:1.2.3.4',
+        'api.tavily.com:1.2.3.4',
+        'api.tavily.com:2001:db8::1',
+      ],
+    );
+
+    expect(config.HostConfig.ExtraHosts).toEqual(['api.tavily.com:1.2.3.4']);
   });
 
   it('bridge без allowlist не создаёт контейнер в сети', () => {
@@ -248,17 +403,17 @@ describe('buildEgressSetup', () => {
     ).toHaveLength(2);
   });
 
-  it('ставит политику OUTPUT/INPUT/FORWARD DROP и разрешает DNS 127.0.0.11', () => {
+  it('ставит политику OUTPUT/INPUT/FORWARD DROP и разрешает DNS 127.0.0.11 только root', () => {
     const plan = buildEgressSetup(['api.tavily.com'], () => ['1.2.3.4']);
 
     expect(plan.iptables).toContain('iptables -P OUTPUT DROP');
     expect(plan.iptables).toContain('iptables -P INPUT DROP');
     expect(plan.iptables).toContain('iptables -P FORWARD DROP');
     expect(plan.iptables).toContain(
-      `iptables -A OUTPUT -p udp -d ${DNS} --dport 53 -j ACCEPT`,
+      `iptables -A OUTPUT -p udp -m conntrack --ctorigdst ${DNS} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
     );
     expect(plan.iptables).toContain(
-      `iptables -A OUTPUT -p tcp -d ${DNS} --dport 53 -j ACCEPT`,
+      `iptables -A OUTPUT -p tcp -m conntrack --ctorigdst ${DNS} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
     );
     expect(plan.iptables).toContain(
       'iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
@@ -313,13 +468,128 @@ describe('buildEgressSetup', () => {
 
     expect(plan.resolved).toEqual({});
     expect(plan.unresolved).toEqual([]);
+    expect(plan.hosts).toEqual([]);
     expect(onlyAcceptRules(plan.iptables)).toEqual([
       'iptables -A INPUT -i lo -j ACCEPT',
+      `iptables -A OUTPUT -p udp -m conntrack --ctorigdst ${DNS} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+      `iptables -A OUTPUT -p tcp -m conntrack --ctorigdst ${DNS} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
       'iptables -A OUTPUT -o lo -j ACCEPT',
-      `iptables -A OUTPUT -p udp -d ${DNS} --dport 53 -j ACCEPT`,
-      `iptables -A OUTPUT -p tcp -d ${DNS} --dport 53 -j ACCEPT`,
       'iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
       'iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+    ]);
+  });
+});
+
+describe('buildEgressSetup: DNS anti-tunneling', () => {
+  it('разрешает DNS 127.0.0.11:53 только root и явно DROP-ает DNS остальным', () => {
+    const plan = buildEgressSetup(['api.tavily.com'], () => ['1.2.3.4']);
+
+    expect(plan.iptables).toContain(
+      `iptables -A OUTPUT -p udp -m conntrack --ctorigdst ${DNS_RESOLVER_IP} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    );
+    expect(plan.iptables).toContain(
+      `iptables -A OUTPUT -p tcp -m conntrack --ctorigdst ${DNS_RESOLVER_IP} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    );
+    expect(plan.iptables).toEqual(
+      expect.arrayContaining([
+        `iptables -A OUTPUT -p udp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+        `iptables -A OUTPUT -p tcp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+      ]),
+    );
+  });
+
+  it('DROP DNS стоит до общего loopback-ACCEPT и политики OUTPUT DROP', () => {
+    const plan = buildEgressSetup(['api.tavily.com'], () => ['1.2.3.4']);
+    const dnsDropIndex = plan.iptables.indexOf(
+      `iptables -A OUTPUT -p udp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+    );
+    const loopbackAcceptIndex = plan.iptables.indexOf(
+      'iptables -A OUTPUT -o lo -j ACCEPT',
+    );
+    const policyIndex = plan.iptables.indexOf('iptables -P OUTPUT DROP');
+
+    expect(dnsDropIndex).toBeGreaterThan(-1);
+    // Иначе общий `-o lo ACCEPT` пропускал бы DNS для всех.
+    expect(loopbackAcceptIndex).toBeGreaterThan(dnsDropIndex);
+    expect(policyIndex).toBeGreaterThan(loopbackAcceptIndex);
+  });
+
+  it('DROP DNS матчит оригинальный dport (conntrack), а не --dport после DNAT', () => {
+    const plan = buildEgressSetup([], () => []);
+
+    for (const rule of plan.iptables) {
+      if (rule.includes('-j DROP')) {
+        expect(rule).toContain('--ctorigdstport');
+        expect(rule).not.toContain('--dport');
+      }
+    }
+  });
+});
+
+describe('buildEgressSetup: ip6tables', () => {
+  it('строит явные DROP-правила и DNS-DROP для IPv6', () => {
+    const plan = buildEgressSetup(['api.tavily.com'], () => ['2001:db8::1']);
+
+    expect(plan.ip6tables).toEqual(
+      expect.arrayContaining([
+        'ip6tables -A INPUT -i lo -j ACCEPT',
+        'ip6tables -A OUTPUT -o lo -j ACCEPT',
+        'ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+        'ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+        `ip6tables -A OUTPUT -p udp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+        `ip6tables -A OUTPUT -p tcp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+        'ip6tables -P INPUT DROP',
+        'ip6tables -P FORWARD DROP',
+        'ip6tables -P OUTPUT DROP',
+      ]),
+    );
+    expect(plan.ip6tables).toContain(
+      'ip6tables -A OUTPUT -p tcp -d 2001:db8::1 --dport 443 -j ACCEPT',
+    );
+  });
+
+  it('разрешает DNS к ::1 только root', () => {
+    const plan = buildEgressSetup([], () => []);
+
+    expect(plan.ip6tables).toContain(
+      `ip6tables -A OUTPUT -p udp -m conntrack --ctorigdst ::1 --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    );
+    expect(plan.ip6tables).toContain(
+      `ip6tables -A OUTPUT -p tcp -m conntrack --ctorigdst ::1 --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    );
+  });
+});
+
+describe('hosts-записи для egress', () => {
+  it('строит <ip> <fqdn> для IPv4 и IPv6', () => {
+    const plan = buildEgressSetup(['api.tavily.com'], () => [
+      '1.2.3.4',
+      '2001:db8::1',
+    ]);
+
+    expect(plan.hosts).toEqual([
+      '1.2.3.4 api.tavily.com',
+      '2001:db8::1 api.tavily.com',
+    ]);
+  });
+
+  it('не пишет hosts для нерезолвнутого домена', () => {
+    const plan = buildEgressSetup(['unknown.example'], () => []);
+
+    expect(plan.hosts).toEqual([]);
+    expect(plan.unresolved).toEqual(['unknown.example']);
+  });
+
+  it('buildHostsEntries сохраняет порядок доменов и IP', () => {
+    expect(
+      buildHostsEntries({
+        'a.example': ['1.1.1.1'],
+        'b.example': ['2.2.2.2', '2001:db8::2'],
+      }),
+    ).toEqual([
+      '1.1.1.1 a.example',
+      '2.2.2.2 b.example',
+      '2001:db8::2 b.example',
     ]);
   });
 });

@@ -3,6 +3,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -17,6 +18,14 @@ export const LLM_PROVIDER_TYPES = [
 ] as const;
 
 export type LlmProviderType = (typeof LLM_PROVIDER_TYPES)[number];
+
+/**
+ * Типы задач маршрутизации. Fallback-цепочка строится только внутри одного
+ * типа: чат не должен незаметно уходить на embeddings-модель.
+ */
+export const LLM_TASK_TYPES = ['chat', 'analysis', 'embeddings'] as const;
+
+export type LlmTaskType = (typeof LLM_TASK_TYPES)[number];
 
 export class CreateLlmRouteDto {
   @IsString()
@@ -62,4 +71,15 @@ export class CreateLlmRouteDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** Тип задачи маршрута; по умолчанию `chat`. */
+  @IsOptional()
+  @IsIn(LLM_TASK_TYPES)
+  taskType?: LlmTaskType;
+
+  /** Дневной лимит затрат на маршрут в рублях; не задан — без лимита. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dailyCostLimit?: number;
 }

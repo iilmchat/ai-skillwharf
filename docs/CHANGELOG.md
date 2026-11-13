@@ -4,33 +4,106 @@
 
 ## [Unreleased]
 
+### Sprint 16: Observability, LLM Router v2 & Reliability
+
+**Observability & Cost Attribution**
+- OTel Collector добавлен в `docker-compose.yml` (профиль `monitoring`). API отправляет спаны по OTLP, коллектор пишет в stdout.
+- Sentry для NestJS: включён при наличии `SENTRY_DSN`, фильтрует PII (headers, bodies, токены).
+- Метрика `llm_cost_total` (рубли) с лейблами `tenant_id`, `model`, `agent_id`. В Grafana добавлены панели «Cost by Tenant» и «Tokens by Model».
+
+**LLM Router v2**
+- В `LlmRoute` добавлены `taskType` и `dailyCostLimit` (дневной лимит в ₽). Расход считается по append-only Ledger.
+- Fallback-цепочки: при 429, 5xx или таймауте LLM Router переключается на следующий маршрут по `priority`. Для 400/401/403 fallback не применяется.
+- 502 `errors.llm_unavailable` при исчерпании цепочки маршрутов.
+- В Ledger добавлено поле `llmRouteName` для точного учёта расходов по маршрутам.
+
+**HITL TTL & Checkpoint Retention**
+- В `PendingApproval` добавлено `expiresAt` (`HITL_APPROVAL_TTL_HOURS`). Фоновый job отменяет escrow-hold, удаляет checkpoint и логирует `hitl.approval_expired`.
+- Фоновый job `checkpoint-retention` удаляет старые `GraphCheckpoint` (неактивные диалоги без ожиданий, `CHECKPOINT_RETENTION_DAYS`).
+- `GET /api/v1/chat/pending` отдаёт `expiresAt` для UI.
+
+**MCP & Egress Hardening**
+- MCP Gateway: динамическое обнаружение действий через `tools/list` (с кешированием на сессию), валидация `action` до вызова.
+- Egress: DNS-запросы разрешены только от root (защита от tunneling через non-root код). Настроен `ip6tables` (строгий DROP по умолчанию). Исправлен баг с Docker DNAT и инжектом `/etc/hosts` при `read-only rootfs`.
+
+**Web UI**
+- Бесконечная пагинация истории Ledger (`useInfiniteQuery`, кнопка «Загрузить ещё»).
+- Маппинг кодов `errors.invalid_request` и `errors.policy_blocked` в i18n (RU/EN).
+- В AI-Офисе добавлен таймер TTL ожиданий (`expiresAt`), с обратной совместимостью для старых API.
+
+**Новые известные проблемы:** KI-038–040 (OTel/Sentry hardening), KI-041 (Router UI), KI-042 (Egress SNI), KI-043 (Retention resolved).
+
+### LLM Router v2 (Sprint 16)
+
+- `LlmRoute` получил `taskType` (default `chat`) и `dailyCostLimit` (₽/сутки; NULL — без лимита), миграция `add_llm_router_v2`; CRUD/DTO и аудит поддерживают новые поля. Fallback-цепочки строятся в рамках одного `taskType` по `priority asc`.
+- Budget guardrails на маршрут: расход за текущие UTC-сутки считается по append-only Ledger (`LedgerEntry.llmRouteName`, заполняется при LLM-списании); при `spend >= dailyCostLimit` маршрут исключается из выбора (`gen_ai.router.budget_exceeded`), остальные маршруты продолжают работать. Если все маршруты исчерпали бюджет — 503 `errors.llm_unavailable`; пустая таблица маршрутов по-прежнему означает env-fallback.
+- Fallback при сбоях провайдера: HTTP 429/5xx, таймаут/AbortError/ETIMEDOUT/ECONNRESET переводят вызов на следующий маршрут цепочки с событием `gen_ai.router.fallback {from,to,reason,taskType}`; резерв токенов берётся один раз, reconcile/refund — один раз; стриминг переключается только до первой дельты; исчерпание всей цепочки — refund + 502 `errors.llm_unavailable`. Ошибки 400/401/403 не ретраятся.
+- `gen_ai.usage` дополнен `gen_ai.route` (вместе с `gen_ai.usage.cost`); web распознаёт `errors.llm_unavailable` и показывает локализованное сообщение.
+
+### HITL TTL & Checkpoint Retention (Sprint 16)
+
+- `PendingApproval.expiresAt` + TTL `HITL_APPROVAL_TTL_HOURS` (default 24 ч); просроченные ожидания не считаются активными (approve после дедлайна отклоняется), `GET /api/v1/chat/pending` отдаёт `expiresAt` для таймера в UI.
+- Фоновый `ExpiredApprovalsService` (интервал `HITL_EXPIRY_CHECK_INTERVAL_MS`, default 5 мин, первый тик сразу): отменяет escrow-hold'ы просроченных ожиданий, удаляет checkpoint треда, переводит запись в `expired`, логирует `hitl.approval_expired`; граф не возобновляется, ошибки изолированы по записям.
+- Фоновый `CheckpointRetentionService` (`CHECKPOINT_RETENTION_DAYS`, default 30; интервал default 6 ч): удаляет `GraphCheckpoint`/`GraphCheckpointWrite` для диалогов, неактивных дольше cutoff и без активного ожидания, а также orphan-треды без `Conversation`; логирует `checkpoint.retention_cleaned`. Активные диалоги и ожидания не затрагиваются.
+- Новые переменные `.env.example`: `HITL_APPROVAL_TTL_HOURS`, `HITL_EXPIRY_CHECK_INTERVAL_MS`, `CHECKPOINT_RETENTION_DAYS`, `CHECKPOINT_RETENTION_CHECK_INTERVAL_MS`.
+
+### MCP Dynamic Discovery (Sprint 16)
+
+- `McpClient.listTools()` (`tools/list`) с Zod-валидацией ответа; `McpGateway` лениво (один раз на SSE-клиент) получает набор действий и отклоняет неизвестный `action` 400 `errors.invalid_request` до `callTool`. Strict-схемы известных ozon/wb-действий и структурная валидация сохранены.
+- Если `tools/list` недоступен, вызов не падает: structural-only + однократный лог `mcp.tools_list_unavailable` (провайдер, маскированное сообщение); пустой список означает отказ всех действий.
+- `LlmService` кеширует gateway на инстанс `McpClient`, чтобы discovery не повторялся на каждый tool-call.
+
+### Egress Hardening (Sprint 16)
+
+- DNS-tunneling закрыт: DNS (udp/tcp 53) разрешён только root-entrypoint (`-m owner --uid-owner 0`), для кода под uid 65534 стоит explicit DROP по исходному dport через `conntrack --ctorigdstport` (до loopback ACCEPT). Docker DNAT `127.0.0.11:53` учтён — `--dport 53` не работает.
+- `ip6tables` настраивается строго: при наличии IPv6-стека обязательны DROP-политики и loopback/ESTABLISHED/DNS-root правила; ошибка ip6tables → sandbox не запускается (fail closed); без IPv6 — skip с логом.
+- Read-only rootfs: worker резолвит allowlist через `node:dns` и передаёт `HostConfig.ExtraHosts`, поэтому разрешённые домены резолвятся кодом и при `read_only: true` (проверено Docker: `getent hosts`/`curl` 200, `nslookup` fail). `/etc/hosts` из entrypoint остаётся dev-fallback.
+- Зафиксированы остаточные риски: SNI/Host-фильтрация (нужен TLS egress-прокси), DNS rebinding/SSRF, IPv4-only ExtraHosts (KI-042).
+
+### Observability & Cost Attribution (Sprint 16)
+
+- OTel Collector в профиле `monitoring` (`otel/opentelemetry-collector-contrib:0.164.0`, конфиг `infra/otel/otel-collector.yml`): API отправляет OTLP-спаны на `otel-collector:4318`, коллектор выводит их в stdout (debug exporter), без внешних SaaS. OTLP-порты опубликованы только на `127.0.0.1`.
+- OTel SDK в API: `@opentelemetry/sdk-node`, OTLP HTTP exporter, HTTP/Express/Nest-инструментации. Трассировка включается только при `OTEL_EXPORTER_OTLP_ENDPOINT`; без endpoint SDK не стартует.
+- Спаны `gen_ai.*` с `gen_ai.system`, `gen_ai.agent.id`, `gen_ai.tenant.id`, `gen_ai.skill.id`, `gen_ai.request.model`, `gen_ai.usage.cost` (рубли), input/output/total tokens и `gen_ai.usage_estimated`.
+- Sentry (`@sentry/nestjs`): `SentryGlobalFilter` для необработанных исключений/5xx, инициализация только при `SENTRY_DSN`. PII-фильтр отключает сбор headers/bodies/cookies/query/user/genAI inputs и MCP content, маскирует токены в сообщениях и breadcrumbs; `enableOpenTelemetrySetup: false`, чтобы не конфликтовать с OTel SDK.
+- Метрика `llm_cost_total{tenant_id,model,agent_id}` в рублях; `MetricsService.countLlmCost` вызывается после каждого LLM usage (фактического или fallback). В дашборд `SkillWharf Overview` добавлены панели «Cost by Tenant» и «Tokens by Model».
+- Runbook: включение/отключение OTel Collector, просмотр трейсов, настройка Sentry и PII-политика, PromQL для стоимости по tenant. Остаточные ограничения — KI-038..KI-040.
+
 ### Sprint 15: Pilot Reliability
 
-**HITL & Checkpointer**
+#### HITL & Checkpointer
+
 - Prisma-модели `GraphCheckpoint`, `GraphCheckpointWrite`, `PendingApproval`. Интеграция `PrismaCheckpointSaver` с LangGraph.
 - HITL переведён на `interrupt()`/`Command({ resume })`: пауза хранится в БД, `approve_action` возобновляет граф после рестарта API.
 - Escrow-hold создаётся до паузы с идемпотентным ключом; при resume hold переиспользуется.
 - `GET /api/v1/chat/pending` для списка ожидающих одобрения; новое сообщение закрывает старое ожидание.
 
-**LLM Budget Guard**
+#### LLM Budget Guard
+
 - Reserve-before-call: атомарное резервирование `prompt + max_tokens` до вызова (для всех путей).
 - Reconcile после ответа (возврат/добавка), откат резерва при ошибке провайдера.
 - Fallback-токенизатор (js-tiktoken) для GigaChat, если провайдер не прислал `usage`.
 - Оценка токенов вынесена в `token-estimator.ts`.
 
-**Infrastructure & Backups**
+#### Infrastructure & Backups
+
 - Offsite-бэкапы в S3 через `rclone` (`upload-backup.sh`), retention.
 - `restore-drill.sh` для проверки восстановления.
 - One-shot `db-migrate` (init-container) вынесен из `entrypoint.sh` API. API ждёт его завершения (`service_completed_successfully`).
 - `/api/v1/health/ready` и `/health/live` для k8s и Compose.
 
-**Billing & Marketplace**
+#### Billing & Marketplace
+
 - Пагинация `GET /api/v1/billing/ledger` (keyset по `createdAt`, `id`), `nextCursor`.
 - Месячный сброс Freemium-лимитов (`freemium-reset.service.ts`).
 
-**Web UI**
+#### Web UI (Sprint 15)
+
 - Проброс `VITE_RAG_MEMORY_ENABLED` через `docker-compose.yml` и staging.
 - Маппинг MCP-ошибок (`errors.mcp_provider`, `mcp_timeout`, `mcp_unavailable`) на RU/EN с fallback.
+- История операций в модалке стала пагинируемой: `useInfiniteQuery` по keyset-курсору `nextCursor`, кнопка «Загрузить ещё», состояние подгрузки и отдельная ошибка следующей страницы; уже загруженные записи не теряются. Zod-контракт вынесен в `apps/web/src/lib/ledger.ts`, дубликаты по `id` отбрасываются.
+- Ошибки `errors.invalid_request` и `errors.policy_blocked` показываются переведёнными сообщениями RU/EN (`chat.errors.invalidRequest`/`chat.errors.policyBlocked`); `code` имеет приоритет над текстом, текстовый fallback сохранён. KI-025 закрыт.
+- AI-Офис показывает панель «Ожидают решения» по `GET /api/v1/chat/pending`: причина (одобрение/оплата), инструменты и таймер TTL «Осталось 23 ч» по необязательному `expiresAt`. Ответ валидируется Zod (`apps/web/src/lib/pending-approvals.ts`); если `expiresAt` нет (старый API), таймер не рендерится.
 
 **Новые известные проблемы:** KI-031 (ранний abort стрима), KI-032 (приблизительный prompt estimate), KI-033 (нет TTL ожиданий), KI-034 (нет retention checkpoint), KI-035–037 (hardening бэкапов и миграций).
 

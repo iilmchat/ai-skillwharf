@@ -13,7 +13,7 @@
 | KI-007 | Инфраструктура | Высокая | Исправлено | Миграции вынесены в one-shot `db-migrate`; API-реплики ждут его успешного завершения |
 | KI-008 | Sandbox | Высокая | Исправлено | Egress по манифесту: `egress_allowlist` → iptables-allowlist в sandbox-контейнере, без списка сеть запрещена (deny by default) |
 | KI-009 | Frontend | Низкая | Открыто | Интерфейс A/B-тестирования промптов пока не реализован |
-| KI-010 | LLM Router | Средняя | Открыто | `LlmRouter` использует упрощённую логику выбора без A/B-тестирования и fallback-цепочек |
+| KI-010 | LLM Router | Средняя | Исправлено | `LlmRouter` v2: fallback-цепочки по `priority`/`taskType`, budget guardrails на маршрут через Ledger, 502 при исчерпании всех маршрутов |
 | KI-011 | Marketplace | Средняя | Открыто | MCP-серверы `ozon_mcp` и `wb_mcp` работают в режиме заглушки и возвращают демонстрационные данные |
 | KI-012 | Marketplace | Средняя | Открыто | Навыки внешних API (`messenger-connector`, `google-workspace`, `midjourney-api`, `ozon-seller`, `wb-seller`) работают в режиме Mock |
 | KI-013 | Security | Средняя | Исправлено | `AgentGateway` заменён декларативным policy engine: Zod-схемы, allowlist команд, taint tracking, роли/контекст, аудит блокировок |
@@ -28,19 +28,25 @@
 | KI-022 | LLM | Средняя | Исправлено | При отсутствии `usage` (GigaChat) расход оценивается fallback-токенизатором и учитывается в счётчике и биллинге |
 | KI-023 | Frontend/Backend | Высокая | Исправлено | Read-API `GET /api/v1/chat/memory` с Zod-контрактом, права владельца и пагинацией; UI-панель памяти готова и включается флагом |
 | KI-024 | Frontend/Backend | Низкая | Открыто | `MemoryChunk` не хранит тип, источник, `updatedAt` и confidence; UI показывает только текст и дату создания |
-| KI-025 | Frontend/Backend | Низкая | Открыто | Не все ошибки API маппятся в UI по `code`: MCP-коды распознаются, но `invalid_request`/`policy_blocked` и часть старых ответов пока идут по тексту |
+| KI-025 | Frontend/Backend | Низкая | Исправлено | Все коды ошибок API (`invalid_request`, `policy_blocked`, MCP, лимиты) маппятся в UI по `code` с i18n RU/EN; текстовый fallback сохранён |
 | KI-026 | Sandbox | Низкая | Открыто | Seccomp-профиль рассчитан на linux/amd64 и проверяется smoke-тестом вне worker; смена профиля требует перезапуска worker |
-| KI-027 | Security | Средняя | Открыто | MCP Gateway валидирует неизвестные MCP-действия только структурно: per-action strict-схемы есть у известных actions, расширение — через `tools/list` |
-| KI-028 | Sandbox | Средняя | Открыто | Egress разрешает FQDN по IP, зафиксированным на старте контейнера: DNS rebinding/ротация IP и DNS-туннель через `127.0.0.11` не исключены; ip6tables best-effort |
+| KI-027 | Security | Средняя | Исправлено | MCP Gateway использует `tools/list` для dynamic discovery и отклоняет неизвестные actions до вызова; при недоступности — structural-only с логом |
+| KI-028 | Sandbox | Средняя | Исправлено | Egress: DNS только для root-entrypoint, strict ip6tables, ExtraHosts для read-only rootfs; остаточные SNI/SSRF — KI-042 |
 | KI-029 | Security | Средняя | Открыто | Структурный анализатор shell — эвристика, а не полный POSIX-парсер; интерпретаторы (`python3`, `node`) могут строить команды/сеть внутри процесса, allowlist команд — defense-in-depth |
 | KI-030 | Frontend/Build | Низкая | Исправлено | `VITE_RAG_MEMORY_ENABLED` проброшен в build-args `docker-compose.yml` и `docker-compose.staging.yml`; `.env.example` документирует переменную |
 | KI-031 | LLM | Низкая | Открыто | Ранний abort клиентского стрима (или падение native-стрима без usage) оставляет резерв токенов не сверенным: счётчик завышен до суточного сброса, жёсткий лимит не превышается |
 | KI-032 | LLM | Низкая | Открыто | Оценка prompt-токенов приблизительная (`cl100k_base`, схемы tools не учитываются); при `actual > reserved` счётчик клампится к лимиту — возможен дрейф учёта |
-| KI-033 | Finance/Chat | Средняя | Открыто | Ожидающие одобрения не имеют TTL: неотвеченный запрос оставляет escrow `PENDING` (деньги заморожены) и checkpoint навсегда |
-| KI-034 | Persistence | Низкая | Открыто | Checkpoint'ы и записи ожиданий без ретенции: при удалении диалога не вызывается `deleteThread`, старые треды накапливаются в PostgreSQL |
+| KI-033 | Finance/Chat | Средняя | Исправлено | HITL TTL: `expiresAt`, фоновый job отменяет просроченные ожидания, hold возвращается, checkpoint удаляется, `GET /chat/pending` отдаёт `expiresAt` |
+| KI-034 | Persistence | Низкая | Исправлено | Retention-job удаляет checkpoint'ы завершённых/осиротевших тредов (после `CHECKPOINT_RETENTION_DAYS`), не трогая активные и ожидающие |
 | KI-035 | Инфраструктура | Низкая | Открыто | Offsite-бэкапы зависят от rclone на хосте; нет object-lock/versioning, KMS-шифрования и проверки checksum на уровне скрипта |
 | KI-036 | Инфраструктура | Низкая | Открыто | Restore-drill выполняется на том же PostgreSQL и проверяет только наличие таблиц; алерты ограничены кодом возврата и логами cron |
 | KI-037 | Инфраструктура | Низкая | Открыто | `db-migrate` — Compose one-shot; в Kubernetes нужен Job, а при одновременном запуске нескольких `compose up` защита опирается на advisory locks Prisma |
+| KI-038 | Observability | Низкая | Открыто | OTel Collector хранит трейсы только в stdout (debug), без durable backend, sampling, retention, auth/TLS; спаны usage фиксируют итог вызова, а не полную latency |
+| KI-039 | Observability | Низкая | Открыто | Sentry включён только для backend-ошибок и только при DSN; PII-фильтр — эвристика по regex, frontend Sentry и алертинг не подключены |
+| KI-040 | Observability | Низкая | Открыто | `llm_cost_total` считает стоимость по единому `LLM_COST_PER_1K_TOKENS`, без per-model тарифов/скидок; `tenant_id` — unbounded user id, возможна кардинальность Prometheus |
+| KI-041 | LLM Router | Низкая | Открыто | 502 `errors.llm_unavailable` отдаётся только для реальной цепочки маршрутов; одиночный маршрут/env-fallback пробрасывает исходную ошибку провайдера, а Control Plane UI не редактирует `taskType`/`dailyCostLimit` |
+| KI-042 | Sandbox | Средняя | Открыто | Egress: нет SNI/Host-фильтрации (allowlist — IP:port, разрешённый IP можно использовать с любым Host), DNS rebinding/SSRF через разрешённый FQDN, ротация IP/CDN и рассинхрон worker/entrypoint, ExtraHosts только IPv4 |
+| KI-043 | Persistence/MCP | Низкая | Открыто | Resolved-записи `PendingApproval` не чистятся retention-job; MCP `tools/list` кешируется на время SSE-сессии, изменения набора действий подхватываются после переподключения |
 
 ## Детали
 
@@ -164,20 +170,35 @@ KI-029 (обход allowlist через интерпретаторы).
 
 ### KI-010 — LlmRouter использует упрощённую логику выбора
 
-**Влияние:** Сейчас `LlmRouterService` выбирает один активный маршрут с
-наименьшим `priority` для всех запросов. Нет классификации задачи, A/B-
-тестирования, распределения трафика, fallback-цепочки при 429/5xx и
-бюджетных предохранителей. Если выбранный провайдер недоступен, запрос
-завершится ошибкой, а не переключится на резервный маршрут.
+**Влияние:** `LlmRouterService` выбирал один активный маршрут с наименьшим
+`priority` для всех запросов. Не было классификации задачи, fallback-цепочки
+при 429/5xx, бюджетных предохранителей. Если выбранный провайдер недоступен,
+запрос завершался ошибкой, а не переключался на резервный маршрут.
 
-**Обход:** Держать в БД один проверенный маршрут; при проблемах провайдера
-отключать маршрут (`isActive: false`) или менять его `priority` вручную.
-Если активных маршрутов нет, используется env-fallback
-(`LLM_MODEL`/`LLM_BASE_URL`).
+**Исправлено (Sprint 16, LLM Router v2):**
 
-**План:** Добавить правила маршрутизации по типу задачи, A/B-тесты,
-fallback-цепочки и budget guardrails; покрыть выбор маршрута метриками
-latency/cost. До этого считать механизм MVP-уровня.
+- `LlmRoute` получил `taskType` (default `chat`) и `dailyCostLimit`
+  (₽/сутки, NULL — без лимита); миграция `add_llm_router_v2`. CRUD/DTO и аудит
+  поддерживают новые поля.
+- `LlmRouterService.selectRoutes(taskType, now)` возвращает цепочку активных
+  маршрутов задачи по `priority asc`. Для маршрутов с лимитом расход за
+  текущие UTC-сутки считается по append-only Ledger
+  (`LedgerEntry.llmRouteName`, который заполняется при LLM-списании); при
+  `spend >= limit` маршрут исключается с событием
+  `gen_ai.router.budget_exceeded`. Если все маршруты исчерпаны — 503
+  `errors.llm_unavailable`; пустая таблица по-прежнему означает env-fallback.
+- `LlmService` принимает цепочку (`LlmRouteSelection | readonly
+  LlmRouteSelection[]`), при retriable-ошибке провайдера (HTTP 429/5xx,
+  таймаут/AbortError/ETIMEDOUT/ECONNRESET) переключается на следующий
+  маршрут и логирует `gen_ai.router.fallback {from,to,reason,taskType}`.
+  Токены резервируются один раз до попыток, reconcile/refund — один раз;
+  стрим переключается только до первой дельты; исчерпание всей цепочки —
+  refund + 502 `errors.llm_unavailable`. Ошибки 400/401/403 не ретраятся.
+- `gen_ai.usage` дополнен `gen_ai.route` (и `gen_ai.usage.cost`), web
+  распознаёт `errors.llm_unavailable` и показывает локализованное сообщение.
+
+**Остатки:** см. KI-041 (502 только для реальной цепочки; Control Plane UI
+не редактирует новые поля маршрута; A/B-тестирование не входит).
 
 ### KI-011 — MCP-серверы Ozon и Wildberries работают в режиме заглушки
 
@@ -469,28 +490,27 @@ Docker-сборке выполнен (KI-030); осталось включить
 этого вывести бейджи типа/источника, дату обновления и (опционально)
 нормализованную релевантность с явной подписью, что это не «точность».
 
-### KI-025 — Не все ошибки API маппятся в UI по `code`
+### KI-025 — Не все ошибки API маппились в UI по `code`
 
-**Влияние:** UI уже умеет распознавать по `code` ошибки
-`errors.daily_token_limit`, `errors.insufficient_funds`,
-`errors.mcp_provider`, `errors.mcp_timeout`, `errors.mcp_unavailable`
-(MCP-коды — Sprint 14 follow-up). Но бэкенд пока отдаёт `insufficient_funds`
-как `BadRequestException` без `code`; `errors.invalid_request` и
-`errors.policy_blocked` UI не маппит в i18n и показывает сырой русскоязычный
-текст бэкенда (на EN не переводится); старые ошибки marketplace кода не
-имеют — для них сохранён текстовый fallback.
+**Влияние:** Часть ошибок API отдаёт машиночитаемый `code`, но UI переводил
+в i18n только `daily_token_limit`, `insufficient_funds` и MCP-коды.
+`errors.invalid_request` и `errors.policy_blocked` показывались сырым
+русскоязычным текстом бэкенда (на EN не переводились), а старые ошибки
+marketplace кода не имеют — для них нужен текстовый fallback.
 
-**Обход:** В `apps/web/src/lib/chat-errors.ts` код имеет приоритет, а
-текстовые маркеры и HTTP 429 — fallback для старого API. MCP-коды
-переводятся через i18n (`chat.errors.mcpProvider`, `chat.errors.mcpTimeout`,
-`chat.errors.mcpUnavailable`), поэтому технический текст провайдера
-пользователю не показывается.
+**Исправлено:** В `apps/web/src/lib/chat-errors.ts` добавлены коды
+`errors.invalid_request` и `errors.policy_blocked` (категории
+`invalidRequest`/`policyBlocked`); код имеет приоритет над текстом, сообщения
+переводятся через i18n (`chat.errors.invalidRequest`,
+`chat.errors.policyBlocked`, а также top-level `errors.invalid_request`/
+`errors.policy_blocked` на случай, если бэкенд присылает ключ строкой).
+Текстовые маркеры и HTTP 429 сохранены как fallback для старого API. Покрыто
+тестами в `apps/web/src/lib/chat-errors.test.ts`.
 
-**План:** Добавить i18n-сообщения для `errors.invalid_request` и
-`errors.policy_blocked` (и решить, показывать ли детали валидации),
-перевести `insufficient_funds` на отдельное исключение с `code`, ввести
-`errors.marketplace_unavailable` для старых marketplace-ошибок. После этого
-убрать текстовые fallback-маркеры, оставив HTTP-статус.
+**Остаток (не дефект маппинга):** `insufficient_funds` может приходить без
+`code` (текстовый fallback), для marketplace-ошибок кода в API нет. Новые
+коды, которые появятся в `apps/api/src/i18n/error-keys.ts`, нужно добавлять в
+тот же switch и i18n-словари.
 
 ### KI-026 — Остаточные ограничения seccomp-профиля
 
@@ -516,43 +536,62 @@ Docker-сборке выполнен (KI-030); осталось включить
 
 ### KI-027 — Неизвестные MCP-действия валидируются только структурно
 
-**Влияние:** MCP Gateway (`apps/api/src/llm/tools/mcp-gateway.ts`) валидирует
-`action` и `params` Zod-схемой до отправки на MCP-сервер. Для известных
-действий (ozon/wb) действуют strict-схемы с запретом лишних ключей, но MCP-
-серверы расширяемы: их полный список отдаёт `tools/list`, а до discovery
-неизвестное действие проверяется только структурно (плоские примитивы,
-лимиты размера и числа ключей). Поэтому опечатка или неверный тип параметра
-неизвестного действия дойдёт до MCP-сервера и вернётся его ошибкой (502),
-а не 400.
+**Влияние:** MCP Gateway валидировал `action` и `params` Zod-схемой до
+отправки на MCP-сервер, но список действий MCP-сервера (`tools/list`) не
+использовался: неизвестное действие проверялось только структурно (плоские
+примитивы, лимиты размера), поэтому опечатка в имени действия доходила до
+MCP-сервера и возвращалась его ошибкой (502), а не 400.
 
-**Обход:** Использовать известные действия из реестра; ошибки MCP-провайдера
-маппятся в единый JSON `errors.mcp_provider` и не ломают диалог. При
-подключении нового MCP-сервера сначала добавить его действия в реестр.
+**Исправлено (Sprint 16):**
 
-**План:** Кешировать `tools/list` при инициализации MCP-сессии и строить
-Zod-схемы параметров из JSON Schema инструмента (`inputSchema`), а
-неизвестные действия блокировать до discovery.
+- `McpClient.listTools()` выполняет JSON-RPC `tools/list` в существующей
+  SSE-сессии (тот же таймаут/typed errors), ответ валидируется Zod-схемой
+  `{ tools: [{ name, description?, inputSchema? }] }`.
+- `McpGateway` принимает `listTools`, лениво (один раз на инстанс, кеш
+  промиса) получает набор действий и отклоняет неизвестное действие
+  `400 errors.invalid_request` до `client.callTool`. Strict-схемы известных
+  ozon/wb-действий применяются после discovery; структурная валидация — до.
+- Если `tools/list` недоступен/упал, gateway не падает: structural-only как
+  раньше + однократный лог `mcp.tools_list_unavailable` (провайдер и
+  маскированное сообщение). Пустой `tools/list` означает «сервер не
+  объявляет действий» — все действия отклоняются.
+- `LlmService` кеширует gateway на инстанс `McpClient`, поэтому в production
+  discovery выполняется один раз за жизнь SSE-сессии.
+
+**Остаток:** набор действий кешируется на время SSE-сессии; изменения
+`tools/list` на сервере подхватываются после переподключения (KI-043).
 
 ### KI-028 — Egress по IP на старте контейнера
 
-**Влияние:** Egress-gateway резолвит FQDN из `egress_allowlist` в IP на старте
-контейнера и разрешает tcp 80/443 только на эти IP. Остаточные риски:
-DNS rebinding/SSRF — если разрешённый домен резолвится во внутренний или
-metadata-IP, соединение будет разрешено (нет проверки диапазонов и SNI/Host);
-DNS-туннель — `127.0.0.11:53` открыт всему коду контейнера, хотя нужен
-только entrypoint; `ip6tables` настраивается best-effort (ошибки не фатальны,
-IPv6-трафик может остаться под общим default-policy хоста); `getent ahosts`
-может вернуть не все A/AAAA-записи, а ротация IP у CDN потребует
-перезапуска контейнера.
+**Влияние:** Egress-gateway резолвил FQDN из `egress_allowlist` в IP на старте
+контейнера и разрешал tcp 80/443 только на эти IP. DNS-туннель был возможен
+(`127.0.0.11:53` открыт всему коду), `ip6tables` настраивался best-effort
+(IPv6-трафик мог остаться под default-policy хоста), а запись `/etc/hosts`
+не работала при `ReadonlyRootfs: true`.
 
-**Обход:** Объявлять в `egress_allowlist` только собственные API-домены
-(без публичных CDN и доменов, у которых есть private-answer); держать
-`bridge`-сеть без доступа к внутренним сервисам; проверять `docker inspect`
-контейнера при инциденте. Долгосрочно — egress-прокси, а не iptables.
+**Исправлено (Sprint 16):**
 
-**План:** Перейти на исходящий HTTP-прокси с allowlist по SNI/Host (или
-DNS-резолвер с pinning и проверкой диапазонов), ограничить DNS только
-uid entrypoint, включить ip6tables жёстко на уровне профиля хоста.
+- DNS-tunneling закрыт: DNS (udp/tcp 53) разрешён только root-entrypoint
+  (`-m owner --uid-owner 0`), а для кода под uid 65534 действует явный DROP
+  по исходному порту назначения (`conntrack --ctorigdstport 53`) — правило
+  стоит до generic loopback ACCEPT, поэтому loopback его не обходит. Docker
+  DNATит `127.0.0.11:53` на локальный порт, поэтому `--dport 53` не
+  использовался (найден и исправлен реальный bug).
+- `ip6tables` настраивается строго: при наличии IPv6-стека
+  (`/proc/net/if_inet6`) обязательны `-P INPUT/FORWARD/OUTPUT DROP`,
+  loopback/ESTABLISHED/DNS-root правила; ошибка ip6tables → worker завершает
+  запуск песочницы (fail closed). Без IPv6 — skip с логом.
+- Read-only rootfs: worker резолвит `egress_allowlist` через `node:dns` и
+  передаёт `HostConfig.ExtraHosts` (`<fqdn>:<ipv4>`), Docker инжектит записи
+  в `/etc/hosts` даже при `read_only: true`; проверено на Docker
+  (`getent hosts` + `curl` → 200, `nslookup` → fail). Запись `/etc/hosts` из
+  entrypoint остаётся best-effort для dev.
+- Разрешённые домены резолвятся без DNS для кода; неразрешённые не
+  резолвятся вовсе.
+
+**Остаточные риски (KI-042):** SNI/Host-фильтрации нет (allowlist — IP:port),
+DNS rebinding/SSRF через разрешённый FQDN, ротация IP/CDN и двойной резолв
+worker/entrypoint, ExtraHosts только IPv4.
 
 ### KI-029 — Структурный анализатор shell не заменяет песочницу
 
@@ -633,32 +672,50 @@ build-args (`VITE_API_URL`) и остальные сервисы не затро
 ### KI-033 — Нет TTL для ожидающих одобрения
 
 **Влияние:** Если пользователь не отправил `approve_action` (закрыл вкладку,
-забыл), запись `PendingApproval` остаётся `pending`, а escrow-hold остаётся
-`PENDING` в Ledger: соответствующая сумма заморожена в `heldBalance`
-бессрочно. Checkpoint графа тоже сохраняется. Список ожидающих и API
-позволяют увидеть/закрыть такие запросы вручную, автоматического истечения
-нет.
+забыл), запись `PendingApproval` оставалась `pending`, а escrow-hold —
+`PENDING` в Ledger: сумма замораживалась в `heldBalance` бессрочно.
+Checkpoint графа тоже сохранялся.
 
-**Обход:** Периодически проверять `GET /api/v1/chat/pending` и отклонять
-зависшие действия; при необходимости — `cancelHold` администратором.
+**Исправлено (Sprint 16):**
 
-**План:** TTL (например, 24 часа): фоновый job переводит просроченные
-ожидания в `expired`, отменяет holds и удаляет checkpoint треда; метрика
-`chat.approvals.expired_total`.
+- `PendingApproval.expiresAt` (миграция `add_pending_approval_expiry`);
+  TTL задаётся `HITL_APPROVAL_TTL_HOURS` (default 24 ч) и пересчитывается при
+  повторном ожидании. `findPending`/`listPending` не отдают просроченные
+  ожидания — approve после дедлайна получает «нет ожидания».
+- `ExpiredApprovalsService` (интервал `HITL_EXPIRY_CHECK_INTERVAL_MS`,
+  default 5 мин, первый тик сразу) находит просроченные: отменяет каждый
+  escrow-hold (best-effort), удаляет checkpoint треда через checkpointer,
+  переводит запись в `expired` и логирует
+  `hitl.approval_expired {conversationId,userId,reason,holds}`. Граф не
+  возобновляется; ошибка одной записи не останавливает остальные.
+- `GET /api/v1/chat/pending` отдаёт `expiresAt` (ISO, поле отсутствует, если
+  TTL нет); AI-Офис показывает таймер «Осталось N ч» и перезапрашивает
+  список после истечения.
+
+**Остаток:** до ближайшего тика job'а (≤5 мин) просроченное ожидание уже не
+активно, но hold ещё не разморожен — окно ограничено интервалом проверки.
 
 ### KI-034 — Checkpoint'ы без ретенции
 
 **Влияние:** Каждый шаг графа сохраняется в `GraphCheckpoint`/
-`GraphCheckpointWrite`, а ожидания — в `PendingApproval`. При удалении
-диалога (`Conversation` delete) связанные checkpoint'ы не удаляются:
-`deleteThread` у checkpointer'а есть, но вызывающего кода/каскада нет.
-Таблицы растут с числом диалогов и шагов; отдельного retention-job нет.
+`GraphCheckpointWrite`; при удалении диалога или после завершённых тредов
+строки накапливались — вызывающего кода для `deleteThread`/ретенции не было.
 
-**Обход:** Периодическая очистка старых тредов SQL-запросом по `createdAt`;
-в пилоте объём мал.
+**Исправлено (Sprint 16):** `CheckpointRetentionService`
+(`CHECKPOINT_RETENTION_DAYS`, default 30; интервал
+`CHECKPOINT_RETENTION_CHECK_INTERVAL_MS`, default 6 ч, первый тик сразу):
 
-**План:** Каскадное удаление тредов при удалении диалога, retention по
-`createdAt` (например, 30 дней) и метрика размера таблиц checkpoint'ов.
+- находит диалоги с `updatedAt` старше cutoff, у которых нет активного
+  `PendingApproval` (батч 200);
+- находит orphan-треды: `threadId` из `GraphCheckpoint`, для которых нет
+  `Conversation` (например, диалог удалён);
+- удаляет `GraphCheckpointWrite` и `GraphCheckpoint` по этим тредам,
+  логирует `checkpoint.retention_cleaned {threads,checkpoints,writes}`;
+- активные диалоги и треды с ожидающим решением не трогаются.
+
+**Остаток:** resolved-записи `PendingApproval` (approved/rejected/expired)
+пока не чистятся — история растёт медленно (KI-043); retention выполняется
+в каждом процессе API, операция идемпотентна (deleteMany по списку тредов).
 
 ### KI-035 — Offsite-бэкапы без object-lock и KMS
 
@@ -713,3 +770,108 @@ compose-файл этого не создаёт. При одновременно
 
 **План:** Добавить Kubernetes Job/Helm-хук, распределённую блокировку
 миграций и метрику `db_migrate_duration_seconds`/алерт на неуспешный запуск.
+
+### KI-038 — OTel Collector без durable backend
+
+**Влияние:** Коллектор принимает OTLP и выводит спаны через `debug` exporter
+в stdout. Нет постоянного хранилища, sampling-политики, retention, TLS и
+аутентификации приёмника; порты опубликованы только на `127.0.0.1`, поэтому
+удалённый сбор невозможен без отдельного решения. Спаны `gen_ai.usage`
+создаются после получения ответа и фиксируют итоговые атрибуты/стоимость;
+длительность запроса видна по HTTP/Nest-спанам, а не по usage-спану.
+
+**Обход:** Для локальной диагностики использовать
+`docker compose logs -f otel-collector`; для production подключить
+collector с persistent backend (Tempo/Jaeger/OTLP SaaS) и sampling осознанно.
+Не публиковать 4317/4318 наружу.
+
+**План:** Добавить OTLP backend с retention и sampling, TLS/mTLS и
+аутентификацию, корреляцию `trace_id` с JSON-логами, а также измерение
+latency непосредственно вокруг вызова провайдера.
+
+### KI-039 — Sentry только для backend и с эвристическим PII-фильтром
+
+**Влияние:** Sentry инициализируется только при `SENTRY_DSN` и ловит
+необработанные исключения/5xx backend. Frontend Sentry, performance tracing
+и интеграция с алертингом не настроены. PII-фильтр отключает сбор
+headers/bodies/cookies/query/user/genAI-контента и маскирует известные
+форматы токенов, но это regex-эвристика: нестандартный секрет в тексте
+исключения может остаться. DSN хранится в `.env`.
+
+**Обход:** Не передавать секреты в сообщения исключений; проверять события
+Sentry после релиза; использовать отдельный проект/ключ для staging и
+production. Считать фильтр defense-in-depth, а не гарантией отсутствия PII.
+
+**План:** Добавить frontend Sentry с теми же фильтрами, структурированные
+коды ошибок вместо свободного текста, тесты на новые форматы токенов и
+алерты по частоте 5xx/новым issue.
+
+### KI-040 — Стоимость LLM считается по единому тарифу
+
+**Влияние:** `llm_cost_total` и списание используют
+`LLM_COST_PER_1K_TOKENS` (0.01 ₽ за 1000 токенов) для всех моделей и
+провайдеров. Реальные тарифы GigaChat/OpenAI/Yandex различаются, поэтому
+метрика и Ledger могут расходиться с фактическим счётом. Лейбл `tenant_id`
+содержит userId и растёт с числом пользователей — возможна высокая
+кардинальность Prometheus; серия появляется только после первого вызова.
+
+**Обход:** Использовать метрику для относительного сравнения tenant'ов, а
+не как биллинг; деньги сверять по Ledger/провайдеру. Для контроля
+кардинальности ограничить retention/агрегацию в Prometheus.
+
+**План:** Ввести тарифы по модели/провайдеру (таблица или конфиг), учитывать
+input/output отдельно, добавить per-model стоимость и метрику расхождения
+с фактическим счётом; при необходимости агрегировать tenant'ов.
+
+### KI-041 — Остатки LLM Router v2
+
+**Влияние:** Fallback-цепочка и бюджеты работают, но есть осознанные
+ограничения. 502 `errors.llm_unavailable` возвращается только когда была
+реальная цепочка (`routes.length > 1`); при одиночном маршруте или
+env-fallback исходная ошибка провайдера пробрасывается как раньше (обратная
+совместимость тестов/поведения). Control Plane UI (`apps/web/src/lib/admin.ts`)
+не показывает и не редактирует новые поля `taskType`/`dailyCostLimit` —
+задавать их можно через API. A/B-тестирование и распределение трафика не
+реализованы.
+
+**Обход:** Настраивать маршруты через admin-API; для одиночного маршрута
+ошибки провайдера видны клиенту в исходном виде. Бюджет задаётся
+`dailyCostLimit` в рублях на сутки.
+
+**План:** 502 и для одиночного маршрута (с обновлением тестов), поля
+`taskType`/`dailyCostLimit` в Control Plane UI, метрики fallback/latency по
+маршрутам, затем A/B-тесты (KI-009).
+
+### KI-042 — Остатки Egress hardening
+
+**Влияние:** Egress allowlist работает на уровне IP:port: разрешённый IP можно
+использовать с любым `Host`/SNI (TLS-прокси нет). Остаются DNS
+rebinding/SSRF (разрешённый домен может резолвиться во внутренний/metadata-IP
+— нет проверки диапазонов), ротация IP у CDN требует перезапуска контейнера,
+worker и entrypoint резолвят независимо (при ротации может разойтись
+`ExtraHosts` и iptables-ACCEPT), ExtraHosts поддерживает только IPv4
+(AAAA-only домены пропускаются с логом).
+
+**Обход:** Объявлять в `egress_allowlist` только собственные API-домены без
+публичных CDN; держать bridge-сеть без доступа к внутренним сервисам;
+проверять логи worker (`unresolved`/`ipv6Only`) при проблемах с доменом.
+
+**План:** TLS egress-прокси с allowlist по SNI/Host (и DNS-pinning с
+range-денлистом), единый резолв IP для hosts и iptables, поддержка IPv6 в
+ExtraHosts при появлении в Docker.
+
+### KI-043 — Rows PendingApproval и кеш tools/list
+
+**Влияние:** `PendingApproval` хранит resolved-записи (approved/rejected/
+expired) бессрочно — таблица растёт медленно, но retention для неё не
+настроен. MCP discovery кеширует `tools/list` на время SSE-сессии: если
+сервер обновил набор инструментов, API увидит изменения только после
+переподключения (перезапуска) MCP-клиента.
+
+**Обход:** Периодическая очистка resolved-записей SQL-запросом по
+`createdAt`; переподключение MCP-сервера/перезапуск API после обновления его
+инструментов.
+
+**План:** Ретенция `PendingApproval` (например, 30 дней) в том же job'е, что
+и checkpoint'ы; TTL/ручное обновление кеша discovery (`tools/list` при
+открытии новой сессии уже перечитывается).

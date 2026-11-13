@@ -52,6 +52,13 @@ services:
       YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
       # API ходит к sandbox-worker по внутренней сети compose.
       SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
+      # OTel включается только при заданном endpoint (см. Runbook).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-skillwharf-api}
+      # Sentry выключен, пока SENTRY_DSN пуст; PII фильтруется в коде.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       # Строгие лимиты по умолчанию; E2E может ослабить их через env.
       AUTH_LOGIN_LIMIT: ${AUTH_LOGIN_LIMIT:-5}
       AUTH_REGISTER_LIMIT: ${AUTH_REGISTER_LIMIT:-10}
@@ -148,6 +155,20 @@ services:
       - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
+
+  # OTel Collector: API отправляет OTLP-спаны на otel-collector:4318,
+  # коллектор печатает их в stdout. Профиль monitoring, без внешних SaaS.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.164.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector.yml"]
+    volumes:
+      - ./infra/otel/otel-collector.yml:/etc/otel-collector.yml:ro
+    ports:
+      # Только localhost: OTLP-приёмник не должен быть доступен из сети.
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
 
   # Мониторинг: Prometheus скрейпит api:3000/metrics, Grafana показывает
   # провижиненный дашборд. Профиль monitoring — в обычном dev/CI не поднимается:

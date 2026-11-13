@@ -30,12 +30,17 @@
     "history": {
       "button": "History",
       "title": "Transaction history",
-      "subtitle": "The last 50 transactions on your wallet.",
+      "subtitle": "Operation history for your wallet. Entries load page by page.",
       "loading": "Loading history…",
       "emptyTitle": "No transactions yet",
       "emptyBody": "Top-ups and charges will appear here.",
       "errorTitle": "Could not load history",
       "retry": "Retry",
+      "loadMore": "Load more",
+      "loadingMore": "Loading…",
+      "nextPageError": "Could not load the next page.",
+      "allLoaded": "All operations loaded.",
+      "total": "Total operations: {{total}}",
       "credit": "Credit",
       "debit": "Debit",
       "pending": "Pending",
@@ -55,9 +60,12 @@
     "insufficient_funds": "Insufficient funds to run the agent. Top up your balance.",
     "rateLimit": "Too many attempts. Please wait a minute.",
     "llmAuth": "LLM authorization failed. Check the keys in the Control plane.",
+    "invalid_request": "The request did not pass validation. Check the details and try again.",
+    "policy_blocked": "The action was blocked by the security policy. Change the request and try again.",
     "mcp_provider": "The MCP provider returned an error. Please try again later.",
     "mcp_timeout": "The MCP provider did not respond in time. Please try again later.",
-    "mcp_unavailable": "The MCP provider is unavailable. Please try again later."
+    "mcp_unavailable": "The MCP provider is unavailable. Please try again later.",
+    "llm_unavailable": "The LLM is temporarily unavailable: all routes are busy or out of budget. Please try again later."
   },
   "nav": {
     "primary": "Primary navigation",
@@ -327,6 +335,17 @@
       "title": "Approval pending",
       "body": "The agent paused before an action and is waiting for your confirmation."
     },
+    "pending": {
+      "title": "Awaiting decision",
+      "description": "Actions waiting for your confirmation. Their waiting time is limited.",
+      "countLabel": "Pending decisions",
+      "approval": "Approval required",
+      "payment": "Payment approval",
+      "tools": "Tools: {{tools}}",
+      "expiresInHours": "{{hours}} h left",
+      "expiresInMinutes": "{{minutes}} min left",
+      "expired": "The waiting time has expired"
+    },
     "backHome": "Home",
     "backToChat": "Chat",
     "login": "Sign in",
@@ -557,9 +576,12 @@
       "timeout": "The server did not respond in time. Try again.",
       "invalidResponse": "The server returned an invalid response.",
       "marketplaceUnavailable": "The marketplace service is temporarily unavailable",
+      "invalidRequest": "The request did not pass validation. Check the details and try again.",
+      "policyBlocked": "The action was blocked by the security policy. Change the request and try again.",
       "mcpProvider": "The MCP provider returned an error. Please try again later.",
       "mcpTimeout": "The MCP provider did not respond in time. Please try again later.",
       "mcpUnavailable": "The MCP provider is unavailable. Please try again later.",
+      "llmUnavailable": "The LLM is temporarily unavailable: all routes are busy or out of budget. Please try again later.",
       "dailyTokenLimit": "Daily token limit exhausted",
       "insufficientFunds": "Insufficient funds to run code. Top up your balance.",
       "sendFailed": "Could not send the message."

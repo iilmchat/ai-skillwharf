@@ -7,6 +7,7 @@ describe('MetricsService', () => {
     service.observeHttpRequest('GET', '/api/v1/health', 200);
     service.countLlmTokens('openai', 'gpt-4o', 10, 5);
     service.countLlmError('openai', 'gpt-4o', 'TypeError');
+    service.countLlmCost('user-1', 'gpt-4o', 'office', 0.015);
 
     const { contentType, body } = await service.render();
 
@@ -23,6 +24,9 @@ describe('MetricsService', () => {
     );
     expect(body).toMatch(
       /llm_errors_total\{[^}]*provider="openai"[^}]*model="gpt-4o"[^}]*reason="TypeError"[^}]*\} 1/,
+    );
+    expect(body).toMatch(
+      /llm_cost_total\{[^}]*tenant_id="user-1"[^}]*model="gpt-4o"[^}]*agent_id="office"[^}]*\} 0\.015/,
     );
   });
 });

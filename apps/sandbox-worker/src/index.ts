@@ -3,9 +3,12 @@ import express, { type Request, type Response } from 'express';
 import { Writable } from 'node:stream';
 import {
   buildContainerConfig,
+  buildExtraHosts,
   isCodeTooLong,
   parseExecutePayload,
+  resolveEgressHosts,
   type SandboxContainerConfig,
+  type SandboxExecutePayload,
 } from './egress.js';
 import {
   buildSecurityOpts,
@@ -64,12 +67,19 @@ app.post('/execute', async (request: Request, response: Response) => {
 
   try {
     // Сеть: none без allowlist; bridge + iptables только для разрешённых FQDN.
-    const containerConfig = buildContainerConfig(payload, {
-      image: SANDBOX_IMAGE,
-      securityOpts: SANDBOX_SECURITY_OPTS,
-      memoryLimitBytes: SANDBOX_MEMORY_LIMIT_BYTES,
-      nanoCpus: SANDBOX_NANO_CPUS,
-    });
+    // Allowlist резолвится в worker-е ДО createContainer: ExtraHosts Docker
+    // инжектит в /etc/hosts даже при read-only rootfs (prod-путь без DNS).
+    const extraHosts = await resolveSandboxExtraHosts(payload);
+    const containerConfig = buildContainerConfig(
+      payload,
+      {
+        image: SANDBOX_IMAGE,
+        securityOpts: SANDBOX_SECURITY_OPTS,
+        memoryLimitBytes: SANDBOX_MEMORY_LIMIT_BYTES,
+        nanoCpus: SANDBOX_NANO_CPUS,
+      },
+      extraHosts,
+    );
     const result = await runInSandbox(containerConfig);
     response.json(result);
   } catch (error) {
@@ -78,6 +88,40 @@ app.post('/execute', async (request: Request, response: Response) => {
     response.status(500).json({ message });
   }
 });
+
+/**
+ * Резолвит allowlist в IPv4 для `HostConfig.ExtraHosts`.
+ *
+ * Ошибка отдельного домена не фатальна: домен пропускается с логом, остальные
+ * продолжают работать. IPv6 в ExtraHosts не поддерживается — такие домены
+ * логируются и пропускаются (iptables-часть entrypoint-а всё равно разрешает
+ * их IPv6-адреса, если стек присутствует).
+ */
+async function resolveSandboxExtraHosts(
+  payload: SandboxExecutePayload,
+): Promise<string[]> {
+  if (payload.network !== 'bridge' || payload.egressAllowlist.length === 0) {
+    return [];
+  }
+
+  const { resolved, unresolved, ipv6Only } = await resolveEgressHosts(
+    payload.egressAllowlist,
+  );
+
+  if (unresolved.length > 0) {
+    console.warn(
+      `sandbox-worker: egress-домены не разрешились в IPv4, ExtraHosts не добавлены: ${unresolved.join(', ')}`,
+    );
+  }
+
+  if (ipv6Only.length > 0) {
+    console.warn(
+      `sandbox-worker: ExtraHosts не поддерживает IPv6, домены пропущены: ${ipv6Only.join(', ')}`,
+    );
+  }
+
+  return buildExtraHosts(resolved);
+}
 
 async function runInSandbox(
   config: SandboxContainerConfig,

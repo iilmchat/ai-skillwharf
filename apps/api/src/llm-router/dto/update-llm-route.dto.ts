@@ -3,6 +3,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -10,7 +11,9 @@ import {
 } from 'class-validator';
 import {
   LLM_PROVIDER_TYPES,
+  LLM_TASK_TYPES,
   type LlmProviderType,
+  type LlmTaskType,
 } from './create-llm-route.dto.js';
 
 export class UpdateLlmRouteDto {
@@ -55,4 +58,13 @@ export class UpdateLlmRouteDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsIn(LLM_TASK_TYPES)
+  taskType?: LlmTaskType;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dailyCostLimit?: number;
 }

@@ -583,6 +583,58 @@ describe('BillingService', () => {
       expect(createArgs.data.balanceAfter.toFixed(2)).toBe('150.00');
     });
 
+    it('пишет llmRouteName в Ledger для LLM-списаний (бюджет маршрута)', async () => {
+      const tx = createTx();
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-1',
+        balance: new Prisma.Decimal('150.00'),
+      });
+      tx.ledgerEntry.create.mockResolvedValue({ id: 'entry-debit-llm' });
+      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
+      useTx(tx);
+
+      await service.chargeForSkill(
+        USER_ID,
+        1,
+        'Использование LLM',
+        'charge-key-llm',
+        'primary-route',
+      );
+
+      expect(tx.ledgerEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          type: 'debit',
+          llmRouteName: 'primary-route',
+        }),
+      });
+    });
+
+    it('не пишет llmRouteName для списаний навыков', async () => {
+      const tx = createTx();
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-1',
+        balance: new Prisma.Decimal('150.00'),
+      });
+      tx.ledgerEntry.create.mockResolvedValue({ id: 'entry-debit-skill' });
+      prisma.ledgerEntry.findUnique.mockResolvedValue(null);
+      useTx(tx);
+
+      await service.chargeForSkill(
+        USER_ID,
+        1,
+        'Вызов навыка',
+        'charge-key-skill',
+      );
+
+      const [createArgs] = tx.ledgerEntry.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+
+      expect(createArgs.data).not.toHaveProperty('llmRouteName');
+    });
+
     it('выбрасывает Insufficient funds при нехватке средств', async () => {
       const tx = createTx();
       tx.wallet.updateMany.mockResolvedValue({ count: 0 });

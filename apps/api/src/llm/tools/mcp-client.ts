@@ -3,6 +3,8 @@
  * событий на `GET /sse`, первым событием присылает endpoint для POST, а
  * ответы на JSON-RPC возвращает сообщениями в том же потоке.
  */
+import { z } from 'zod';
+
 export interface McpClientOptions {
   baseUrl: string;
   authToken?: string;
@@ -10,6 +12,19 @@ export interface McpClientOptions {
   clientName?: string;
   clientVersion?: string;
 }
+
+const mcpToolDescriptorSchema = z.object({
+  name: z.string().min(1).max(128),
+  description: z.string().optional(),
+  inputSchema: z.unknown().optional(),
+});
+
+/** Описание MCP-инструмента из ответа `tools/list`. */
+export type McpToolDescriptor = z.infer<typeof mcpToolDescriptorSchema>;
+
+const mcpToolsListResponseSchema = z.object({
+  tools: z.array(mcpToolDescriptorSchema),
+});
 
 interface JsonRpcError {
   code: number;
@@ -91,8 +106,9 @@ export class McpTimeoutError extends Error {
  * Текст внешней ошибки уходит клиенту в `message`, поэтому вырезаем из него
  * похожие на секреты фрагменты (токены, `Authorization`) и ограничиваем
  * длину. Тела запросов и заголовки в сообщения не попадают вовсе.
+ * Экспортируется для безопасного логирования в MCP Gateway.
  */
-function safeDetail(message: string): string {
+export function safeDetail(message: string): string {
   return message
     .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
     .replace(
@@ -128,6 +144,9 @@ function asMcpError(
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 
+/** JSON-RPC Internal error: сервер нарушил протокол в ответе на `tools/list`. */
+const JSON_RPC_INTERNAL_ERROR = -32_603;
+
 export class McpClient {
   private readonly baseUrl: string;
   private readonly authToken?: string;
@@ -155,6 +174,25 @@ export class McpClient {
     });
 
     return formatToolResult(result);
+  }
+
+  /**
+   * Запрашивает список инструментов MCP-сервера (`tools/list`) в уже открытой
+   * SSE-сессии. Таймаут и типизированные ошибки те же, что у `callTool`;
+   * некорректный по схеме ответ считается ошибкой провайдера.
+   */
+  async listTools(): Promise<McpToolDescriptor[]> {
+    const session = await this.connect();
+    const result = await this.request(session, 'tools/list', {});
+    const parsed = mcpToolsListResponseSchema.safeParse(result);
+
+    if (!parsed.success) {
+      throw new McpProviderError('MCP tools/list: некорректный ответ сервера', {
+        rpcCode: JSON_RPC_INTERNAL_ERROR,
+      });
+    }
+
+    return parsed.data.tools;
   }
 
   /** Закрывает SSE-сессию (нужно для тестов и graceful shutdown). */

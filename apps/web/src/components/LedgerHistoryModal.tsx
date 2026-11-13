@@ -1,12 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getBillingErrorMessage } from '../lib/billing';
 import {
-  fetchLedger,
-  getBillingErrorMessage,
+  collectLedgerEntries,
+  fetchLedgerPage,
   ledgerQueryKey,
   type LedgerEntry,
-} from '../lib/billing';
+} from '../lib/ledger';
 import { CURRENCY_SYMBOL, formatMoney } from '../lib/money';
 
 interface LedgerHistoryModalProps {
@@ -87,9 +88,11 @@ export function LedgerHistoryModal({ open, onClose }: LedgerHistoryModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  const ledgerQuery = useQuery({
+  const ledgerQuery = useInfiniteQuery({
     queryKey: ledgerQueryKey,
-    queryFn: fetchLedger,
+    queryFn: ({ pageParam }) => fetchLedgerPage(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: open,
     staleTime: 0,
   });
@@ -131,7 +134,15 @@ export function LedgerHistoryModal({ open, onClose }: LedgerHistoryModalProps) {
     return () => dialog.removeEventListener('close', handleClose);
   }, [onClose]);
 
-  const entries = ledgerQuery.data?.items ?? [];
+  const entries =
+    ledgerQuery.data === undefined
+      ? []
+      : collectLedgerEntries(ledgerQuery.data.pages);
+  const total = ledgerQuery.data?.pages[0]?.total ?? 0;
+  // TanStack v5 типизирует `isFetchNextPageError` как литерал `false` во всех
+  // вариантах union, поэтому булево значение вычисляем без сужения объекта.
+  const fetchNextPage = ledgerQuery.fetchNextPage;
+  const isNextPageError = Boolean(ledgerQuery.isFetchNextPageError);
 
   return (
     <dialog
@@ -221,11 +232,66 @@ export function LedgerHistoryModal({ open, onClose }: LedgerHistoryModalProps) {
             </p>
           </div>
         ) : (
-          <ul className="mt-4 divide-y divide-outline-variant">
-            {entries.map((entry) => (
-              <LedgerRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
+          <>
+            <ul className="mt-4 divide-y divide-outline-variant">
+              {entries.map((entry) => (
+                <LedgerRow key={entry.id} entry={entry} />
+              ))}
+            </ul>
+
+            <div className="mt-4 space-y-3">
+              {isNextPageError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-error/30 bg-error-container p-3 text-sm text-on-error-container"
+                >
+                  <p className="font-semibold">
+                    {t('billing.history.nextPageError')}
+                  </p>
+                  <p className="mt-1 text-xs">
+                    {getBillingErrorMessage(
+                      ledgerQuery.error,
+                      'billing.errors.ledger',
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void fetchNextPage();
+                    }}
+                    className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    {t('billing.history.retry')}
+                  </button>
+                </div>
+              )}
+
+              {!isNextPageError &&
+                (ledgerQuery.hasNextPage ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void fetchNextPage();
+                    }}
+                    disabled={ledgerQuery.isFetchingNextPage}
+                    aria-busy={ledgerQuery.isFetchingNextPage}
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container px-3 py-2.5 text-sm font-medium text-on-surface transition hover:border-primary/40 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {ledgerQuery.isFetchingNextPage
+                      ? t('billing.history.loadingMore')
+                      : t('billing.history.loadMore')}
+                  </button>
+                ) : (
+                  <p className="text-center text-xs text-on-surface-variant">
+                    {t('billing.history.allLoaded')}
+                  </p>
+                ))}
+
+              <p className="text-center text-xs text-on-surface-variant">
+                {t('billing.history.total', { total })}
+              </p>
+            </div>
+          </>
         )}
       </div>
     </dialog>

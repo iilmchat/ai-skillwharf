@@ -18,6 +18,11 @@ export const ERROR_KEYS = {
   mcpTimeout: 'errors.mcp_timeout',
   /** MCP-сервер не сконфигурирован (нет `mcp_endpoint`). */
   mcpUnavailable: 'errors.mcp_unavailable',
+  /**
+   * LLM временно недоступен: все маршруты цепочки упали или исчерпали
+   * дневной бюджет (LLM Router v2).
+   */
+  llmUnavailable: 'errors.llm_unavailable',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];

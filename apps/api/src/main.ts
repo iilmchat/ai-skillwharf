@@ -1,13 +1,27 @@
+import './observability/instrument.js';
+
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { SentryGlobalFilter } from '@sentry/nestjs/setup';
 import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { MetricsService } from './metrics/metrics.service.js';
+import { isSentryEnabled } from './observability/sentry.js';
+import { shutdownTracing } from './observability/tracing.js';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Sentry перехватывает необработанные исключения, сохраняя JSON-формат
+  // Nest. Без DSN фильтр не регистрируется.
+  if (isSentryEnabled()) {
+    app.useGlobalFilters(
+      new SentryGlobalFilter(app.get(HttpAdapterHost).httpAdapter),
+    );
+  }
+
 
   // За Caddy реальный IP приходит в X-Forwarded-For; без этого throttler
   // считал бы все запросы с одного IP reverse-proxy.
@@ -41,6 +55,12 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Даём OTel SDK экспортировать буфер при штатном завершении контейнера.
+  process.once('SIGTERM', () => {
+    void shutdownTracing();
+  });
+
   await app.listen(process.env.PORT ?? 3000);
 }
 await bootstrap();

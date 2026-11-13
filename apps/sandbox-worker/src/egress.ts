@@ -1,3 +1,4 @@
+import { resolve4, resolve6 } from 'node:dns/promises';
 import { z } from 'zod';
 
 /**
@@ -31,6 +32,15 @@ export const SANDBOX_NETWORK_FLAG = 'ALLOW_NETWORK';
 
 /** Встроенный DNS-резолвер Docker в bridge-сети. */
 export const DNS_RESOLVER_IP = '127.0.0.11';
+
+/**
+ * UID, которому разрешён DNS. Только root-entrypoint резолвит allowlist до
+ * сброса привилегий; коду под 65534 DNS недоступен (anti DNS-tunneling).
+ */
+export const DNS_ALLOWED_UID = 0;
+
+/** Порт DNS; после настройки для не-root трафика явно DROP-ается. */
+export const DNS_PORT = 53;
 
 /** Порты, разрешённые для egress (только HTTP/HTTPS). */
 export const EGRESS_PORTS = [80, 443] as const;
@@ -142,6 +152,170 @@ export interface SandboxRuntimeConfig {
   readonly nanoCpus: number;
 }
 
+/** DNS-резолвер для ExtraHosts; в тестах подменяется. */
+export interface EgressDnsResolver {
+  readonly resolve4: (fqdn: string) => Promise<readonly string[]>;
+  readonly resolve6: (fqdn: string) => Promise<readonly string[]>;
+}
+
+/** Резолвнутый allowlist-домен: ExtraHosts использует только IPv4. */
+export interface ResolvedEgressHost {
+  readonly fqdn: string;
+  readonly addresses4: readonly string[];
+  readonly addresses6: readonly string[];
+}
+
+/** Результат резолва allowlist в worker-е. */
+export interface EgressHostsResolution {
+  /** Домены с IPv4-адресами: для них строятся ExtraHosts. */
+  readonly resolved: readonly ResolvedEgressHost[];
+  /** Домены без IPv4 (DNS-ошибка/нет A-записи): ExtraHosts не строятся. */
+  readonly unresolved: readonly string[];
+  /** Домены, у которых есть только AAAA: Docker ExtraHosts не умеет IPv6. */
+  readonly ipv6Only: readonly string[];
+}
+
+const defaultDnsResolver: EgressDnsResolver = {
+  resolve4: (fqdn) => resolve4(fqdn),
+  resolve6: (fqdn) => resolve6(fqdn),
+};
+
+/** Безопасный резолв: ошибка DNS не роняет запрос, домен просто пропускается. */
+async function resolveAddresses(
+  resolver: (fqdn: string) => Promise<readonly string[]>,
+  fqdn: string,
+  family: 4 | 6,
+): Promise<string[]> {
+  try {
+    const addresses = await resolver(fqdn);
+
+    return [
+      ...new Set(
+        addresses
+          .map((address) => address.trim())
+          .filter(
+            (address) =>
+              address.length > 0 &&
+              (family === 6 ? address.includes(':') : !address.includes(':')),
+          ),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Резолвит домены egress-allowlist в IPv4/IPv6 (обе записи).
+ *
+ * Вызывается worker-ом ПЕРЕД `createContainer`, чтобы передать
+ * `HostConfig.ExtraHosts`: Docker инжектит их в `/etc/hosts` даже при
+ * `ReadonlyRootfs: true`, где entrypoint не может дописать файл.
+ * Ошибка отдельного домена не фатальна — он пропускается (`unresolved`).
+ */
+export async function resolveEgressHosts(
+  allowlist: readonly string[],
+  resolver: EgressDnsResolver = defaultDnsResolver,
+): Promise<EgressHostsResolution> {
+  const domains = [
+    ...new Set(
+      allowlist.map((domain) => domain.trim().toLowerCase()).filter(Boolean),
+    ),
+  ];
+  const resolved: ResolvedEgressHost[] = [];
+  const unresolved: string[] = [];
+  const ipv6Only: string[] = [];
+
+  for (const fqdn of domains) {
+    const [addresses4, addresses6] = await Promise.all([
+      resolveAddresses(resolver.resolve4, fqdn, 4),
+      resolveAddresses(resolver.resolve6, fqdn, 6),
+    ]);
+
+    if (addresses4.length === 0) {
+      if (addresses6.length > 0) {
+        ipv6Only.push(fqdn);
+      } else {
+        unresolved.push(fqdn);
+      }
+      continue;
+    }
+
+    resolved.push({ fqdn, addresses4, addresses6 });
+  }
+
+  return { resolved, unresolved, ipv6Only };
+}
+
+/**
+ * Строит `HostConfig.ExtraHosts` (`<fqdn>:<ipv4>`) из резолвнутых доменов.
+ *
+ * Docker ExtraHosts поддерживает только IPv4; IPv6-адреса игнорируются.
+ * Дубликаты FQDN схлопываются (первое вхождение), повторы IP убираются.
+ */
+export function buildExtraHosts(
+  resolved: ReadonlyArray<Pick<ResolvedEgressHost, 'fqdn' | 'addresses4'>>,
+): string[] {
+  const entries: string[] = [];
+  const seenFqdn = new Set<string>();
+
+  for (const domain of resolved) {
+    const fqdn = domain.fqdn.trim().toLowerCase();
+
+    if (fqdn.length === 0 || seenFqdn.has(fqdn)) {
+      continue;
+    }
+
+    seenFqdn.add(fqdn);
+
+    for (const address of new Set(domain.addresses4)) {
+      if (address.length > 0 && !address.includes(':')) {
+        entries.push(`${fqdn}:${address}`);
+      }
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Оставляет только ExtraHosts для доменов из allowlist (защита от подмены
+ * hostname в конфиге) и только IPv4-формат `host:ip`.
+ */
+function filterExtraHosts(
+  extraHosts: readonly string[],
+  allowedDomains: readonly string[],
+): string[] {
+  const allowed = new Set(allowedDomains);
+  const entries: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of extraHosts) {
+    const separator = entry.indexOf(':');
+
+    if (separator <= 0) {
+      continue;
+    }
+
+    const host = entry.slice(0, separator);
+    const address = entry.slice(separator + 1);
+
+    if (
+      !allowed.has(host) ||
+      address.length === 0 ||
+      address.includes(':') ||
+      seen.has(entry)
+    ) {
+      continue;
+    }
+
+    seen.add(entry);
+    entries.push(entry);
+  }
+
+  return entries;
+}
+
 /**
  * Конфиг для `docker.createContainer`. Без allowlist — прежнее поведение:
  * `network: none`, User 65534, CapDrop ALL, seccomp из `securityOpts`.
@@ -163,6 +337,12 @@ export interface SandboxContainerConfig {
     readonly CapAdd?: string[];
     readonly SecurityOpt: string[];
     readonly Tmpfs: Record<string, string>;
+    /**
+     * `<fqdn>:<ipv4>` для allowlist-доменов. Docker инжектит записи в
+     * `/etc/hosts` даже при `ReadonlyRootfs: true` — это prod-путь резолва
+     * разрешённых доменов без DNS (entrypoint-запись best-effort).
+     */
+    readonly ExtraHosts?: string[];
     readonly Memory: number;
     readonly NanoCpus: number;
   };
@@ -185,15 +365,19 @@ function buildEnv(env: Readonly<Record<string, string>>): string[] {
 
 /**
  * Собирает конфиг контейнера: сеть из payload, egress-env для entrypoint-а,
- * seccomp/privileges из runtime-настроек worker-а.
+ * ExtraHosts (IPv4), seccomp/privileges из runtime-настроек worker-а.
  */
 export function buildContainerConfig(
   payload: SandboxExecutePayload,
   runtime: SandboxRuntimeConfig,
+  extraHosts: readonly string[] = [],
 ): SandboxContainerConfig {
   const { network, egressAllowlist } = resolveEffectiveNetwork(payload);
   const egressEnabled = network === 'bridge';
   const env = buildEnv(payload.env);
+  const safeExtraHosts = egressEnabled
+    ? filterExtraHosts(extraHosts, egressAllowlist)
+    : [];
 
   if (egressEnabled) {
     env.push(`${EGRESS_ALLOWLIST_ENV}=${JSON.stringify(egressAllowlist)}`);
@@ -212,6 +396,7 @@ export function buildContainerConfig(
       CapDrop: ['ALL'],
       ...(egressEnabled ? { CapAdd: [...EGRESS_CAPABILITIES] } : {}),
       SecurityOpt: [...runtime.securityOpts],
+      ...(safeExtraHosts.length > 0 ? { ExtraHosts: safeExtraHosts } : {}),
       // iptables пишет xtables-lock в /run; без tmpfs read-only rootfs ломает
       // настройку egress.
       Tmpfs: egressEnabled ? { '/tmp': '', '/run': '' } : { '/tmp': '' },
@@ -229,6 +414,11 @@ export interface EgressSetupPlan {
   readonly allowlist: readonly string[];
   readonly resolved: Readonly<Record<string, readonly string[]>>;
   readonly unresolved: readonly string[];
+  /**
+   * Строки для `/etc/hosts` вида `<ip> <fqdn>` (IPv4 и IPv6), чтобы
+   * разрешённые домены резолвились без DNS (коду под 65534 DNS запрещён).
+   */
+  readonly hosts: readonly string[];
   /** Упорядоченные команды iptables (ACCEPT, затем политики DROP). */
   readonly iptables: readonly string[];
   /** Упорядоченные команды ip6tables (ACCEPT, затем политики DROP). */
@@ -240,13 +430,41 @@ function isIpv6(ip: string): boolean {
 }
 
 /**
+ * Строит записи `/etc/hosts` для резолвнутых доменов: `<ip> <fqdn>` для
+ * каждого IPv4/IPv6-адреса. Порядок — как в `resolved` (домены и IP внутри
+ * домена).
+ */
+export function buildHostsEntries(
+  resolved: Readonly<Record<string, readonly string[]>>,
+): string[] {
+  const entries: string[] = [];
+
+  for (const [domain, ips] of Object.entries(resolved)) {
+    for (const ip of ips) {
+      entries.push(`${ip} ${domain}`);
+    }
+  }
+
+  return entries;
+}
+
+/**
  * Чистый план настройки egress, зеркалящий `sandbox/egress-setup.sh`:
- * loopback + DNS 127.0.0.11, ACCEPT tcp/80,443 только для IP, в которые
- * резолвятся домены allowlist, затем политика OUTPUT/INPUT/FORWARD DROP.
+ * loopback; DNS 127.0.0.11:53 только для root (`-m owner --uid-owner 0`),
+ * остальным — явный DROP на оригинальный dport 53 (anti DNS-tunneling);
+ * ACCEPT tcp/80,443 только для IP, в которые резолвятся домены allowlist;
+ * записи `/etc/hosts` для резолвнутых доменов; затем политика
+ * OUTPUT/INPUT/FORWARD DROP.
  *
- * Нерезолвнутый домен не получает ни одного ACCEPT-правила (fail closed).
- * IPv6-правила собираются для найденных AAAA-адресов; в entrypoint-е ошибки
- * ip6tables не фатальны (residual risk).
+ * DNS-правила используют `conntrack --ctorigdstport`, а не `--dport`: Docker
+ * DNAT-ит 127.0.0.11:53 на локальный порт resolver-а, поэтому после NAT
+ * `--dport 53` уже не совпадает. DROP DNS стоит до общего loopback-ACCEPT,
+ * иначе loopback-правило пропустило бы DNS для всех.
+ *
+ * Нерезолвнутый домен не получает ни одного ACCEPT-правила и hosts-записи
+ * (fail closed). IPv6-правила строятся всегда: entrypoint применяет их
+ * строго (fail closed), если IPv6-стек присутствует, и пропускает с логом,
+ * если IPv6 выключен.
  */
 export function buildEgressSetup(
   allowlist: readonly string[],
@@ -255,16 +473,8 @@ export function buildEgressSetup(
   const normalized = [...new Set(allowlist.map((d) => d.trim().toLowerCase()))];
   const resolved: Record<string, readonly string[]> = {};
   const unresolved: string[] = [];
-  const iptables: string[] = [
-    'iptables -A INPUT -i lo -j ACCEPT',
-    'iptables -A OUTPUT -o lo -j ACCEPT',
-    `iptables -A OUTPUT -p udp -d ${DNS_RESOLVER_IP} --dport 53 -j ACCEPT`,
-    `iptables -A OUTPUT -p tcp -d ${DNS_RESOLVER_IP} --dport 53 -j ACCEPT`,
-  ];
-  const ip6tables: string[] = [
-    'ip6tables -A INPUT -i lo -j ACCEPT',
-    'ip6tables -A OUTPUT -o lo -j ACCEPT',
-  ];
+  const iptables: string[] = ['iptables -A INPUT -i lo -j ACCEPT'];
+  const ip6tables: string[] = ['ip6tables -A INPUT -i lo -j ACCEPT'];
 
   for (const domain of normalized) {
     const ips = [...new Set(resolveHost(domain).map((ip) => ip.trim()))].filter(
@@ -291,6 +501,15 @@ export function buildEgressSetup(
   }
 
   iptables.push(
+    // DNS: ACCEPT только для root-entrypoint. `--ctorigdst`/`--ctorigdstport`
+    // смотрят на адрес до DNAT, которым Docker перенаправляет 127.0.0.11:53.
+    `iptables -A OUTPUT -p udp -m conntrack --ctorigdst ${DNS_RESOLVER_IP} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    `iptables -A OUTPUT -p tcp -m conntrack --ctorigdst ${DNS_RESOLVER_IP} --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    // Явный DROP DNS для всех остальных (в т.ч. к любым другим резолверам) —
+    // до общего loopback-ACCEPT, чтобы тот не обходил запрет.
+    `iptables -A OUTPUT -p udp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+    `iptables -A OUTPUT -p tcp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+    'iptables -A OUTPUT -o lo -j ACCEPT',
     'iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
     'iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
     'iptables -P INPUT DROP',
@@ -299,6 +518,11 @@ export function buildEgressSetup(
   );
 
   ip6tables.push(
+    `ip6tables -A OUTPUT -p udp -m conntrack --ctorigdst ::1 --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    `ip6tables -A OUTPUT -p tcp -m conntrack --ctorigdst ::1 --ctorigdstport ${DNS_PORT} -m owner --uid-owner ${DNS_ALLOWED_UID} -j ACCEPT`,
+    `ip6tables -A OUTPUT -p udp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+    `ip6tables -A OUTPUT -p tcp -m conntrack --ctorigdstport ${DNS_PORT} -j DROP`,
+    'ip6tables -A OUTPUT -o lo -j ACCEPT',
     'ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
     'ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
     'ip6tables -P INPUT DROP',
@@ -306,5 +530,12 @@ export function buildEgressSetup(
     'ip6tables -P OUTPUT DROP',
   );
 
-  return { allowlist: normalized, resolved, unresolved, iptables, ip6tables };
+  return {
+    allowlist: normalized,
+    resolved,
+    unresolved,
+    hosts: buildHostsEntries(resolved),
+    iptables,
+    ip6tables,
+  };
 }

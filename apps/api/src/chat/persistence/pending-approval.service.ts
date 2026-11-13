@@ -2,6 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { readPositiveEnvNumber } from './persistence-env.js';
+
+/** TTL ожидания решения по умолчанию: сутки. */
+export const DEFAULT_APPROVAL_TTL_HOURS = 24;
+
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 /** Причины ожидания пользовательского решения. */
 export const PENDING_APPROVAL_REASONS = ['approval', 'payment'] as const;
@@ -11,6 +17,7 @@ export const PENDING_APPROVAL_STATUSES = [
   'pending',
   'approved',
   'rejected',
+  'expired',
 ] as const;
 
 export type PendingApprovalReason = (typeof PENDING_APPROVAL_REASONS)[number];
@@ -39,6 +46,8 @@ export interface PendingApprovalRecord {
   status: PendingApprovalStatus;
   createdAt: Date;
   resolvedAt: Date | null;
+  /** Дедлайн решения; `null` — запись без TTL (старые строки). */
+  expiresAt: Date | null;
 }
 
 /** Вход `upsertPending`: данные действия, ждущего решения. */
@@ -83,7 +92,33 @@ export const PendingApprovalRecordSchema: z.ZodType<PendingApprovalRecord> =
     status: PendingApprovalStatusSchema,
     createdAt: z.date(),
     resolvedAt: z.date().nullable(),
+    expiresAt: z.date().nullable(),
   });
+
+/**
+ * TTL подтверждения (KI-033) из `HITL_APPROVAL_TTL_HOURS`, в миллисекундах.
+ * Пустое/невалидное/неположительное значение → сутки.
+ */
+export function resolveApprovalTtlMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return (
+    readPositiveEnvNumber(env.HITL_APPROVAL_TTL_HOURS, DEFAULT_APPROVAL_TTL_HOURS) *
+    MS_PER_HOUR
+  );
+}
+
+/** Момент истечения ожидания: `now + ttlMs`. */
+export function computeApprovalExpiresAt(now: Date, ttlMs: number): Date {
+  return new Date(now.getTime() + ttlMs);
+}
+
+/** Просрочено ли ожидание (запись без TTL не истекает). */
+function isExpired(record: PendingApprovalRecord, now: Date): boolean {
+  return (
+    record.expiresAt !== null && record.expiresAt.getTime() <= now.getTime()
+  );
+}
 
 /**
  * Persistence ожидающих одобрения действий агента.
@@ -101,7 +136,7 @@ export class PendingApprovalService {
   /**
    * Создаёт ожидание для диалога или обновляет существующее (одна запись на
    * диалог, unique `conversationId`). Прежний результат решения сбрасывается:
-   * запись снова `pending`.
+   * запись снова `pending`, а дедлайн считается заново от текущего момента.
    */
   async upsertPending(
     input: UpsertPendingApprovalInput,
@@ -110,6 +145,10 @@ export class PendingApprovalService {
     const tools = PendingApprovalToolsSchema.parse([...input.tools]);
     const holds = PendingApprovalHoldsSchema.parse(
       input.holds.map((hold) => ({ ...hold })),
+    );
+    const expiresAt = computeApprovalExpiresAt(
+      new Date(),
+      resolveApprovalTtlMs(),
     );
 
     const row = await this.prisma.pendingApproval.upsert({
@@ -121,6 +160,7 @@ export class PendingApprovalService {
         tools: toInputJson(tools),
         holds: toInputJson(holds),
         status: 'pending',
+        expiresAt,
       },
       update: {
         reason,
@@ -128,13 +168,17 @@ export class PendingApprovalService {
         holds: toInputJson(holds),
         status: 'pending',
         resolvedAt: null,
+        expiresAt,
       },
     });
 
     return this.requireRecord(row, input.conversationId);
   }
 
-  /** Ожидающее действие диалога или `null`, если ожидания нет. */
+  /**
+   * Ожидающее действие диалога или `null`, если ожидания нет либо дедлайн
+   * уже прошёл (просроченное ожидание не считается активным до тика job'а).
+   */
   async findPending(
     conversationId: string,
   ): Promise<PendingApprovalRecord | null> {
@@ -142,21 +186,35 @@ export class PendingApprovalService {
       where: { conversationId, status: 'pending' },
     });
 
-    return row === null ? null : this.parseRow(row);
+    if (row === null) {
+      return null;
+    }
+
+    const record = this.parseRow(row);
+
+    if (record === null || isExpired(record, new Date())) {
+      return null;
+    }
+
+    return record;
   }
 
-  /** Все ожидающие действия пользователя, от новых к старым. */
+  /**
+   * Все активные ожидающие действия пользователя, от новых к старым.
+   * Просроченные отбрасываются: их добьёт `ExpiredApprovalsService`.
+   */
   async listPending(userId: string): Promise<PendingApprovalRecord[]> {
     const rows = await this.prisma.pendingApproval.findMany({
       where: { userId, status: 'pending' },
       orderBy: { createdAt: 'desc' },
     });
+    const now = new Date();
     const records: PendingApprovalRecord[] = [];
 
     for (const row of rows) {
       const record = this.parseRow(row);
 
-      if (record !== null) {
+      if (record !== null && !isExpired(record, now)) {
         records.push(record);
       }
     }

@@ -12,12 +12,18 @@ import { z } from 'zod';
 export const ERROR_CODES = {
   insufficientFunds: 'errors.insufficient_funds',
   dailyTokenLimit: 'errors.daily_token_limit',
+  /** Аргументы вызова не прошли валидацию (400). */
+  invalidRequest: 'errors.invalid_request',
+  /** Вызов инструмента заблокирован политикой безопасности (403). */
+  policyBlocked: 'errors.policy_blocked',
   /** MCP-провайдер вернул ошибку (502). */
   mcpProvider: 'errors.mcp_provider',
   /** MCP-провайдер не ответил за отведённое время (504). */
   mcpTimeout: 'errors.mcp_timeout',
   /** MCP-сервер не сконфигурирован (503). */
   mcpUnavailable: 'errors.mcp_unavailable',
+  /** Все LLM-маршруты исчерпали бюджет/недоступны (502/503). */
+  llmUnavailable: 'errors.llm_unavailable',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -110,24 +116,33 @@ export function getErrorMetaFromError(error: unknown): ApiErrorMeta {
 export type ChatErrorKind =
   | 'marketplace'
   | 'dailyTokenLimit'
+  | 'invalidRequest'
+  | 'policyBlocked'
   | 'mcpProvider'
   | 'mcpTimeout'
-  | 'mcpUnavailable';
+  | 'mcpUnavailable'
+  | 'llmUnavailable';
 
 /** Ошибка внешнего marketplace/MCP-сервиса (например, Ozon). */
 export function isMarketplaceError(message: string): boolean {
   return MARKETPLACE_ERROR_MARKERS.some((marker) => message.includes(marker));
 }
 
-/** MCP-коды из единого JSON API (`errors.mcp_*`) → категория для i18n. */
-function mcpErrorKind(code: string | undefined): ChatErrorKind | null {
+/** Известные коды из единого JSON API → категория для i18n. */
+function codeErrorKind(code: string | undefined): ChatErrorKind | null {
   switch (code) {
+    case ERROR_CODES.invalidRequest:
+      return 'invalidRequest';
+    case ERROR_CODES.policyBlocked:
+      return 'policyBlocked';
     case ERROR_CODES.mcpProvider:
       return 'mcpProvider';
     case ERROR_CODES.mcpTimeout:
       return 'mcpTimeout';
     case ERROR_CODES.mcpUnavailable:
       return 'mcpUnavailable';
+    case ERROR_CODES.llmUnavailable:
+      return 'llmUnavailable';
     default:
       return null;
   }
@@ -164,10 +179,10 @@ export function classifyChatError(
     return 'dailyTokenLimit';
   }
 
-  const mcpKind = mcpErrorKind(meta.code);
+  const codeKind = codeErrorKind(meta.code);
 
-  if (mcpKind !== null) {
-    return mcpKind;
+  if (codeKind !== null) {
+    return codeKind;
   }
 
   // Fallback для старого API без `code`.
