@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### Sprint 19: Integration keys (Ozon/WB/Midjourney)
+
+- Новые маршруты `POST/DELETE /api/v1/integrations/{ozon|wildberries|midjourney}`
+  (KI-063 закрыт): Ozon — `{clientId, apiKey}`, Wildberries — `{apiToken}`,
+  Midjourney — `{apiKey}` (TT-API-KEY). `GET /api/v1/integrations` теперь
+  отдаёт `ozon` (со `clientId`), `wildberries` (с `tokenExpiresAt`, +180 дней
+  от подключения) и `midjourney` со статусами `active`/`disconnected`/`error`
+  и полем `source` (`user`/`env`).
+- Ключи хранятся per-user в `ProviderCredential` (миграция
+  `20261113203000_add_provider_credentials`). Секреты шифруются
+  `TokenCipherService` (AES-256-GCM, `TOKEN_ENCRYPTION_KEY`) в envelope
+  `v1:<iv>:<tag>:<ciphertext>`; в БД нет ни Client ID, ни токенов открытым
+  текстом. `metadata` — только неконфиденциальный срок действия токена WB.
+- Тела запросов валидируются Zod (`.strict()`), без JWT — `401`, на неверное
+  тело — `400 errors.invalid_request`, без `TOKEN_ENCRYPTION_KEY` — `503
+  errors.provider_not_configured`. Просроченный токен WB даёт статус `error`
+  с причиной, битый envelope — `error` и запись в лог, а не падение GET.
+- Инструменты читают ключи по `userId`: `MarketplaceMcpService` (Ozon/WB) и
+  `MidjourneyService` (TTAPI) берут подключение пользователя, env остаётся
+  fallback для системных ботов. `generate_image` и `ozon_mcp_call`/
+  `wb_mcp_call` передают `userId` вниз. Без ключей — `503
+  errors.marketplace_unavailable`/`errors.provider_not_configured` с
+  подсказкой про раздел «Интеграции».
+- Ограничение: MCP-контейнеры Ozon/WB по-прежнему аутентифицируются своими
+  env-ключами, поэтому личные ключи не влияют на фактические запросы к
+  Seller API — KI-064.
+- Тесты: `provider-keys.service.spec.ts` (15), `integrations.controller.spec.ts`
+  (11), `marketplace-mcp.service.spec.ts` (6), `midjourney.service.spec.ts`
+  (+3 про ключ пользователя), `agent-tools.service.spec.ts` (+2 про `userId`).
+
 ### Sprint 19: Finance REST API (`/finance/*`)
 
 - Добавлен `FinanceController` (`apps/api/src/finance/`), закрывающий KI-060:

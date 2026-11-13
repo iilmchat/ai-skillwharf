@@ -15,6 +15,19 @@ import { z } from 'zod';
 import { invalidRequestError } from '../common/api-error.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { GoogleOAuthService } from './google/google-oauth.service.js';
+import {
+  KEY_PROVIDERS,
+  midjourneyKeysSchema,
+  ozonKeysSchema,
+  wildberriesKeysSchema,
+  type KeyProvider,
+} from './keys/provider-keys.schemas.js';
+import {
+  ProviderKeysService,
+  type MidjourneyIntegrationState,
+  type OzonIntegrationState,
+  type WildberriesIntegrationState,
+} from './keys/provider-keys.service.js';
 import { TelegramBotService } from './telegram/telegram-bot.service.js';
 import { TelegramLinkService } from './telegram/telegram-link.service.js';
 
@@ -26,7 +39,13 @@ const telegramConnectSchema = z
   .object({ botToken: z.string().min(1).max(256) })
   .strict();
 
-/** Состояние интеграции для UI (контракт `GET /integrations`). */
+/**
+ * Состояние интеграции для UI (контракт `GET /integrations`).
+ *
+ * Поля `ozon`/`wildberries`/`midjourney` совпадают с
+ * `apps/web/src/lib/integrations.ts`; лишнее поле `source` показывает,
+ * работают ли ключи пользователя или системные (env).
+ */
 export interface IntegrationsState {
   readonly telegram: {
     status: 'active' | 'disconnected' | 'error';
@@ -39,13 +58,16 @@ export interface IntegrationsState {
     email?: string;
     error?: string;
   };
+  readonly ozon: OzonIntegrationState;
+  readonly wildberries: WildberriesIntegrationState;
+  readonly midjourney: MidjourneyIntegrationState;
 }
 
 /**
- * Раздел «Интеграции»: сводный статус Telegram/Google и управление ботом.
+ * Раздел «Интеграции»: сводный статус провайдеров и управление ими.
  *
  * Контракт совпадает с `apps/web/src/lib/integrations.ts`:
- * `GET /integrations`, `POST/DELETE /integrations/telegram`.
+ * `GET /integrations`, `POST/DELETE /integrations/{telegram|ozon|wildberries|midjourney}`.
  */
 @Controller('integrations')
 export class IntegrationsController {
@@ -55,16 +77,18 @@ export class IntegrationsController {
     private readonly telegramBots: TelegramBotService,
     private readonly telegramLinks: TelegramLinkService,
     private readonly google: GoogleOAuthService,
+    private readonly providerKeys: ProviderKeysService,
   ) {}
 
-  /** Сводное состояние обоих провайдеров. */
+  /** Сводное состояние всех провайдеров. */
   @Get()
   @UseGuards(JwtAuthGuard)
   async status(@Req() request: AuthenticatedRequest): Promise<IntegrationsState> {
     const userId = requireUserId(request);
-    const [telegram, google] = await Promise.all([
+    const [telegram, google, providers] = await Promise.all([
       this.telegramBots.describe(userId),
       this.google.status(userId),
+      this.providerKeys.describe(userId),
     ]);
 
     return {
@@ -82,6 +106,9 @@ export class IntegrationsController {
         status: google.connected ? 'active' : 'disconnected',
         ...(google.email === undefined ? {} : { email: google.email }),
       },
+      ozon: providers.ozon,
+      wildberries: providers.wildberries,
+      midjourney: providers.midjourney,
     };
   }
 
@@ -142,7 +169,106 @@ export class IntegrationsController {
 
     return { disconnected: await this.telegramBots.disconnect(userId) };
   }
+
+  /** Подключает ключи Ozon: `{ clientId, apiKey }` (секреты шифруются). */
+  @Post('ozon')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async connectOzon(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<OzonIntegrationState> {
+    const userId = requireUserId(request);
+    const parsed = ozonKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { clientId, apiKey }');
+    }
+
+    return this.providerKeys.connectOzon(userId, parsed.data);
+  }
+
+  /** Удаляет ключи Ozon пользователя. */
+  @Delete('ozon')
+  @UseGuards(JwtAuthGuard)
+  async disconnectOzon(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'ozon',
+      ),
+    };
+  }
+
+  /** Подключает токен Wildberries: `{ apiToken }`. */
+  @Post('wildberries')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async connectWildberries(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<WildberriesIntegrationState> {
+    const userId = requireUserId(request);
+    const parsed = wildberriesKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { apiToken }');
+    }
+
+    return this.providerKeys.connectWildberries(userId, parsed.data);
+  }
+
+  /** Удаляет токен Wildberries пользователя. */
+  @Delete('wildberries')
+  @UseGuards(JwtAuthGuard)
+  async disconnectWildberries(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'wildberries',
+      ),
+    };
+  }
+
+  /** Подключает ключ TTAPI для Midjourney: `{ apiKey }`. */
+  @Post('midjourney')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async connectMidjourney(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<MidjourneyIntegrationState> {
+    const userId = requireUserId(request);
+    const parsed = midjourneyKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { apiKey }');
+    }
+
+    return this.providerKeys.connectMidjourney(userId, parsed.data);
+  }
+
+  /** Удаляет ключ Midjourney пользователя. */
+  @Delete('midjourney')
+  @UseGuards(JwtAuthGuard)
+  async disconnectMidjourney(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'midjourney',
+      ),
+    };
+  }
 }
+
+/** Провайдеры с ключами: используются для типизации и проверок. */
+export const KEY_INTEGRATION_PROVIDERS: readonly KeyProvider[] = KEY_PROVIDERS;
 
 function requireUserId(request: AuthenticatedRequest): string {
   const userId = request.user?.userId;

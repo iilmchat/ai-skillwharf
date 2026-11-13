@@ -1673,3 +1673,46 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 последний расчёт пользователя; после `FINANCE_SNAPSHOT_TTL_SECONDS` записи
 истекают и дашборд снова показывает `dataAvailable: false`. Подключение
 ключей из UI пока не реализовано (KI-063).
+
+### 19.5. Подключение ключей из UI (`/integrations/*`)
+
+Ключи Ozon/Wildberries/Midjourney подключаются пользователем в разделе
+«Интеграции» и хранятся per-user:
+
+| Маршрут | Тело | Что сохраняется |
+| --- | --- | --- |
+| `POST /api/v1/integrations/ozon` | `{ clientId, apiKey }` | оба поля зашифрованы |
+| `POST /api/v1/integrations/wildberries` | `{ apiToken }` | токен + `tokenExpiresAt` (+180 дней) |
+| `POST /api/v1/integrations/midjourney` | `{ apiKey }` | ключ TTAPI |
+| `DELETE /api/v1/integrations/{provider}` | — | удаляет ключи провайдера |
+
+`GET /api/v1/integrations` дополнительно отдаёт `ozon` (`status`,
+`clientId`), `wildberries` (`status`, `tokenExpiresAt`) и `midjourney`
+(`status`) со статусами `active`/`disconnected`/`error` и полем `source`
+(`user` — личные ключи, `env` — системные).
+
+Требования:
+
+1. `TOKEN_ENCRYPTION_KEY` — base64 из 32 байт (см. раздел про Google).
+   Без него подключение отвечает `503 errors.provider_not_configured`.
+2. Секреты пишутся только в `ProviderCredential.secret` в виде
+   `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM). Проверить, что в БД нет
+   открытых значений:
+
+   ```sql
+   SELECT "provider", left("secret", 3) AS prefix, length("secret") AS len
+   FROM "ProviderCredential";
+   ```
+
+   `prefix` всегда `v1:`; поиск по известному ключу
+   (`SELECT ... WHERE "secret" LIKE '%<часть ключа>%'`) не должен ничего
+   находить.
+3. Инструменты берут ключи по `userId` (БД приоритетнее env). Env-ключи
+   (`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`, `MIDJOURNEY_API_KEY`)
+   остаются fallback для системных вызовов и ботов.
+
+Ограничение (KI-064): MCP-серверы Ozon/WB читают креды из окружения
+контейнера при старте, поэтому личные ключи Ozon/WB влияют на статус
+подключения и гейт, но не на сам запрос к Seller API — контейнер
+аутентифицируется своими env-ключами. Полностью личный ключ работает для
+Midjourney (TTAPI вызывается напрямую из API).

@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { marketplaceUnavailableError } from '../../common/api-error.js';
+import { ProviderKeysService } from '../../integrations/keys/provider-keys.service.js';
 import { McpClient } from './mcp-client.js';
 import {
   McpGateway,
@@ -25,6 +26,16 @@ export interface MarketplaceCallOptions {
   authToken?: string;
   /** Навыки пользователя: из манифеста берём `mcp_endpoint`. */
   skills?: readonly MarketplaceSkillSnapshot[];
+  /** Владелец вызова: из БД берутся его ключи Ozon/WB (fallback — env). */
+  userId?: string;
+}
+
+/** Найденные ключи провайдера и их источник. */
+export interface MarketplaceCredentials {
+  readonly source: 'user' | 'env';
+  readonly clientId?: string;
+  readonly apiKey?: string;
+  readonly token?: string;
 }
 
 /** MCP-инструмент, которым пользуется навык провайдера. */
@@ -118,9 +129,49 @@ export class MarketplaceMcpService {
   private readonly clients = new Map<string, McpClient>();
   private readonly gateways = new WeakMap<McpClient, McpGateway>();
 
+  constructor(
+    @Optional() private readonly providerKeys?: ProviderKeysService,
+  ) {}
+
   /** Доступен ли провайдер по ключам окружения. */
   isConfigured(platform: McpProvider): boolean {
     return hasProviderKeys(platform);
+  }
+
+  /**
+   * Ключи провайдера: сначала подключение пользователя, затем env.
+   *
+   * MCP-серверы Ozon/WB аутентифицируются своими env-ключами (один набор на
+   * контейнер), поэтому пользовательские ключи здесь — источник истины для
+   * гейта и аудита, а не заголовок запроса (см. KI-064).
+   */
+  async credentialsFor(
+    platform: McpProvider,
+    userId?: string,
+  ): Promise<MarketplaceCredentials | null> {
+    if (this.providerKeys !== undefined) {
+      if (platform === 'ozon') {
+        const resolved = await this.providerKeys.ozonKeys(userId);
+
+        if (resolved !== null) {
+          return {
+            source: resolved.source,
+            clientId: resolved.clientId,
+            apiKey: resolved.apiKey,
+          };
+        }
+      } else {
+        const resolved = await this.providerKeys.wildberriesToken(userId);
+
+        if (resolved !== null) {
+          return { source: resolved.source, token: resolved.token };
+        }
+      }
+    }
+
+    return hasProviderKeys(platform)
+      ? { source: 'env' }
+      : null;
   }
 
   /** Адрес MCP-сервера провайдера (null — не сконфигурирован). */
@@ -145,13 +196,33 @@ export class MarketplaceMcpService {
     params: Record<string, unknown>,
     options: MarketplaceCallOptions = {},
   ): Promise<string> {
-    if (!hasProviderKeys(platform)) {
+    const credentials = await this.credentialsFor(platform, options.userId);
+
+    if (credentials === null) {
       throw marketplaceUnavailableError(
         platform === 'ozon'
-          ? 'Ozon API keys not configured'
-          : 'WB API token not configured',
+          ? 'Ozon не подключён: добавьте Client ID и API Key в разделе «Интеграции» или задайте OZON_CLIENT_ID/OZON_API_KEY'
+          : 'Wildberries не подключён: добавьте API Token в разделе «Интеграции» или задайте WB_API_TOKEN',
       );
     }
+
+    if (!hasProviderKeys(platform)) {
+      // Ключи пользователя не могут аутентифицировать MCP-контейнер: он читает
+      // Ozon/WB-ключи из своего окружения (один набор на сервер).
+      throw marketplaceUnavailableError(
+        platform === 'ozon'
+          ? 'Ключи Ozon сохранены, но MCP-сервер не сконфигурирован: задайте OZON_CLIENT_ID/OZON_API_KEY в окружении MCP-контейнера (KI-064)'
+          : 'Токен WB сохранён, но MCP-сервер не сконфигурирован: задайте WB_API_TOKEN в окружении MCP-контейнера (KI-064)',
+      );
+    }
+
+    this.logger.debug(
+      JSON.stringify({
+        event: 'mcp.credentials',
+        provider: platform,
+        source: credentials.source,
+      }),
+    );
 
     const gateway = this.gateway(platform, options);
 

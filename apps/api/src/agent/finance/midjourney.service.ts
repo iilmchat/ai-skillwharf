@@ -4,6 +4,7 @@ import {
   providerNotConfiguredError,
   providerUnavailableError,
 } from '../../common/api-error.js';
+import { ProviderKeysService } from '../../integrations/keys/provider-keys.service.js';
 import {
   providerRequest,
   type ProviderRetryPolicy,
@@ -105,6 +106,7 @@ export class MidjourneyService {
     @Optional() retry?: ProviderRetryPolicy,
     @Optional() sleep?: (ms: number) => Promise<void>,
     @Optional() now?: () => Date,
+    @Optional() private readonly providerKeys?: ProviderKeysService,
   ) {
     this.config = config ?? MidjourneyConfig.fromEnv();
     this.retry = retry;
@@ -121,10 +123,17 @@ export class MidjourneyService {
     return this.config.isConfigured();
   }
 
-  /** Генерирует изображение и возвращает URL готовой картинки. */
-  async generate(prompt: string): Promise<MidjourneyImage> {
-    this.assertConfigured();
-
+  /**
+   * Генерирует изображение и возвращает URL готовой картинки.
+   *
+   * Ключ берётся из подключения пользователя (`MIDJOURNEY_API_KEY` в
+   * `ProviderCredential`), fallback — env для системных вызовов.
+   */
+  async generate(
+    prompt: string,
+    options: { readonly userId?: string } = {},
+  ): Promise<MidjourneyImage> {
+    const apiKey = await this.resolveApiKey(options.userId);
     const baseUrl = this.config.baseUrl ?? '';
     const trimmed = prompt.trim();
 
@@ -132,13 +141,13 @@ export class MidjourneyService {
       throw providerUnavailableError('Midjourney: пустой промпт');
     }
 
-    const taskId = await this.submit(baseUrl, trimmed);
+    const taskId = await this.submit(baseUrl, trimmed, apiKey);
     const deadline = this.now().getTime() + this.config.timeoutMs;
     let polls = 0;
 
     while (this.now().getTime() <= deadline) {
       polls += 1;
-      const task = await this.fetchTask(taskId);
+      const task = await this.fetchTask(taskId, apiKey);
       const status = readString(task, STATUS_KEYS)?.toLowerCase() ?? '';
       const imageUrl = findImageUrl(task);
 
@@ -191,13 +200,17 @@ export class MidjourneyService {
    * только TTAPI; заголовок авторизации — `TT-API-KEY`, режим `fast`.
    * GoAPI/UseAPI и Discord-токены не используются.
    */
-  private async submit(baseUrl: string, prompt: string): Promise<string> {
+  private async submit(
+    baseUrl: string,
+    prompt: string,
+    apiKey: string,
+  ): Promise<string> {
     const payload = await providerRequest({
       provider: 'midjourney',
       method: 'POST',
       url: `${baseUrl}${this.config.imaginePath}`,
       headers: {
-        'TT-API-KEY': this.config.apiKey ?? '',
+        'TT-API-KEY': apiKey,
         'content-type': 'application/json',
       },
       data: { prompt, mode: 'fast' },
@@ -224,6 +237,7 @@ export class MidjourneyService {
    */
   private async fetchTask(
     taskId: string,
+    apiKey: string,
   ): Promise<Record<string, unknown>> {
     return providerRequest({
       provider: 'midjourney',
@@ -233,7 +247,7 @@ export class MidjourneyService {
         encodeURIComponent(taskId),
       )}`,
       headers: {
-        'TT-API-KEY': this.config.apiKey ?? '',
+        'TT-API-KEY': apiKey,
       },
       schema: midjourneyTaskSchema,
       ...(this.retry === undefined ? {} : { retry: this.retry }),
@@ -241,12 +255,23 @@ export class MidjourneyService {
     });
   }
 
-  private assertConfigured(): void {
-    if (!this.config.isConfigured()) {
+  /** Ключ TTAPI: подключение пользователя → env (системный ключ). */
+  private async resolveApiKey(userId?: string): Promise<string> {
+    if (this.providerKeys !== undefined) {
+      const resolved = await this.providerKeys.midjourneyKey(userId);
+
+      if (resolved !== null) {
+        return resolved.apiKey;
+      }
+    }
+
+    if (this.config.apiKey === null) {
       throw providerNotConfiguredError(
-        'Midjourney (TTAPI) не настроен: задайте MIDJOURNEY_API_KEY',
+        'Midjourney (TTAPI) не подключён: добавьте ключ в разделе «Интеграции» или задайте MIDJOURNEY_API_KEY',
       );
     }
+
+    return this.config.apiKey;
   }
 }
 

@@ -1,5 +1,5 @@
 import nock from 'nock';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiException } from '../../common/api-error.js';
 import { ERROR_KEYS } from '../../i18n/error-keys.js';
 import type { ProviderRetryPolicy } from '../../integrations/provider-http.js';
@@ -272,5 +272,100 @@ describe('MidjourneyService (TTAPI: imagine → fetch → image)', () => {
       code: ERROR_KEYS.providerUnavailable,
     });
     expect((error as Error).message).toContain('jobId');
+  });
+});
+
+describe('MidjourneyService: ключ пользователя из БД', () => {
+  beforeEach(() => {
+    nock.disableNetConnect();
+    process.env.OUTBOUND_ALLOWLIST = 'api.ttapi.io';
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+    nock.enableNetConnect();
+    delete process.env.OUTBOUND_ALLOWLIST;
+    delete process.env.MIDJOURNEY_API_KEY;
+  });
+
+  /** Сервис с подменённым резолвером ключей пользователя. */
+  function withUserKey(
+    resolve: () => Promise<{ apiKey: string; source: 'user' | 'env' } | null>,
+    apiKey: string | null = 'env-key',
+  ): { service: MidjourneyService; resolve: ReturnType<typeof vi.fn> } {
+    const resolveMock = vi.fn(resolve);
+    const config = new MidjourneyConfig(
+      apiKey,
+      BASE,
+      '/midjourney/v1/imagine',
+      '/midjourney/v1/fetch?jobId={id}',
+      1,
+      5_000,
+    );
+    const service = new MidjourneyService(
+      config,
+      RETRY,
+      async () => undefined,
+      () => new Date(0),
+      {
+        midjourneyKey: resolveMock,
+      } as unknown as ConstructorParameters<typeof MidjourneyService>[4],
+    );
+
+    return { service, resolve: resolveMock };
+  }
+
+  it('ключ пользователя важнее env и уходит в TT-API-KEY', async () => {
+    const submit = nock(BASE)
+      .post('/midjourney/v1/imagine', { prompt: 'промпт', mode: 'fast' })
+      .matchHeader('TT-API-KEY', 'user-key')
+      .reply(200, { jobId: 'job-1' });
+    nock(BASE)
+      .get('/midjourney/v1/fetch')
+      .query({ jobId: 'job-1' })
+      .matchHeader('TT-API-KEY', 'user-key')
+      .reply(200, { status: 'completed', imageUrl: 'https://cdn.example.com/1.png' });
+
+    const { service, resolve } = withUserKey(async () => ({
+      apiKey: 'user-key',
+      source: 'user',
+    }));
+
+    await expect(
+      service.generate('промпт', { userId: 'user-1' }),
+    ).resolves.toMatchObject({ taskId: 'job-1' });
+    expect(resolve).toHaveBeenCalledWith('user-1');
+    expect(submit.isDone()).toBe(true);
+  });
+
+  it('без ключа в БД использует env', async () => {
+    nock(BASE)
+      .post('/midjourney/v1/imagine')
+      .matchHeader('TT-API-KEY', 'env-key')
+      .reply(200, { jobId: 'job-2' });
+    nock(BASE)
+      .get('/midjourney/v1/fetch')
+      .query({ jobId: 'job-2' })
+      .reply(200, { status: 'completed', imageUrl: 'https://cdn.example.com/2.png' });
+
+    const { service } = withUserKey(async () => null);
+
+    await expect(
+      service.generate('промпт', { userId: 'user-1' }),
+    ).resolves.toMatchObject({ taskId: 'job-2' });
+  });
+
+  it('нет ни ключа пользователя, ни env — 503 provider_not_configured', async () => {
+    const { service } = withUserKey(async () => null, null);
+
+    const error: unknown = await service
+      .generate('промпт', { userId: 'user-1' })
+      .catch((caught: unknown) => caught);
+
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 503,
+      code: ERROR_KEYS.providerNotConfigured,
+    });
+    expect((error as Error).message).toContain('Интеграции');
   });
 });

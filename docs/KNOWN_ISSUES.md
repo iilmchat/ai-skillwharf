@@ -64,9 +64,10 @@
 | KI-058 | E2E | Низкая | Открыто | `scripts/test-integrations.sh` использует версионно-зависимые endpoint'ы Ozon (`/v1/product/import/prices`), WB Pricing (`/ping`) и TTAPI (`/midjourney/v1/fetch`); при смене API возможны ложные FAIL, путь настраивается через env |
 | KI-059 | Marketplace | Средняя | Открыто | Midjourney подключается только через TTAPI (`api.ttapi.io`): официального API нет, GoAPI/UseAPI закрыты, SLA/контракт прокси не гарантированы; альтернативный APIFRAME требует отдельного allowlist |
 | KI-060 | Finance | Низкая | Исправлено | Финансовый дашборд получил REST-контракт: `GET /finance/overview` и fallback `/finance/unit-economics`, `/finance/profit-leaks`, `/finance/fraud-shield` отдают последние результаты реальных MCP-вызовов, совместимы с Zod-схемой UI и возвращают `dataAvailable:false`, если расчётов ещё не было |
-| KI-063 | Integrations | Средняя | Открыто | UI Sprint 19 ждёт `POST/DELETE /integrations/{ozon,wildberries,midjourney}` и поля `ozon`/`wildberries`/`midjourney` в `GET /integrations`; в API этих маршрутов нет — ключи задаются только через env |
+| KI-063 | Integrations | Средняя | Исправлено | Ключи Ozon/WB/Midjourney сохраняются per-user в `ProviderCredential` (AES-256-GCM), маршруты `POST/DELETE /integrations/{ozon,wildberries,midjourney}` и статусы в `GET /integrations` реализованы; инструменты берут ключи из БД с fallback на env |
 | KI-061 | Finance | Низкая | Открыто | Ozon не привязывает комиссию/логистику к SKU в начислениях: `unit-economics` распределяет расходы по доле выручки SKU и не заменяет детализацию отчёта Ozon |
 | KI-062 | Finance | Средняя | Открыто | MCP-серверы Ozon/WB не отдают ERID/UTM отдельными полями: `fraud-shield-audit` проверяет их наличие в сырых данных кампании и сообщает об отсутствии, но не заменяет юридическую проверку маркировки |
+| KI-064 | Integrations | Средняя | Открыто | Личные ключи Ozon/WB сохраняются и видны в UI, но MCP-контейнеры аутентифицируются своими env-ключами (один набор на сервер), поэтому мульти-тенантные запросы идут под ключами контейнера |
 
 ## Детали
 
@@ -1285,7 +1286,7 @@ Redis (`REDIS_URL`, TTL `FINANCE_SNAPSHOT_TTL_SECONDS`, по умолчанию 
 `errors.invalid_request`; `userId` берётся только из JWT, данные разных
 пользователей не смешиваются.
 
-**Остаток:** подключение ключей из UI — отдельная задача, см. KI-063.
+**Остаток:** подключение ключей из UI закрыто в KI-063.
 
 ### KI-061 — Ozon: комиссия и логистика распределяются по выручке SKU
 
@@ -1323,21 +1324,62 @@ MCP-серверы Ozon/WB не возвращают эти поля отдел�
 
 ### KI-063 — UI Sprint 19 без контроллеров подключения ключей
 
-**Влияние:** Карточки интеграций ждут
+**Влияние:** Карточки интеграций ждали
 `POST/DELETE /integrations/{ozon,wildberries,midjourney}` с телами
 `{ clientId, apiKey }` (Ozon), `{ apiToken }` (WB), `{ apiKey }`
 (Midjourney TT-API-KEY) и поля `ozon`/`wildberries`/`midjourney` в
-`GET /integrations`. В API этих маршрутов нет: Sprint 19 работает с ключами
-из env (`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`,
-`MIDJOURNEY_API_KEY`), поэтому UI показывает `disconnected`, а подключение
-из интерфейса возвращает 404.
+`GET /integrations`. В API этих маршрутов не было: ключи задавались только
+через env (`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`,
+`MIDJOURNEY_API_KEY`), UI показывал `disconnected`, а подключение из
+интерфейса возвращало 404.
 
-**Обход:** Задавать ключи через env и проверять их
-`scripts/test-integrations.sh`; финансовый дашборд при этом работает
-(`/finance/*`, KI-060 закрыт).
+**Исправлено (Sprint 19):** Ключи хранятся per-user в
+`ProviderCredential` (`apps/api/prisma/schema.prisma`, миграция
+`20261113203000_add_provider_credentials`):
 
-**План:** Реализовать хранение ключей per-user (шифрование как у
-Telegram/Google), маршруты `POST/DELETE /integrations/{provider}`,
-дополнить `GET /integrations` статусами `active`/`disconnected`/`error` и
-прокинуть ключи в `MarketplaceMcpService`/`MidjourneyService` вместо env.
-Требует решения по хранению секретов и миграции — отдельная задача.
+- `secret` — envelope `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM,
+  `TokenCipherService`/`TOKEN_ENCRYPTION_KEY`); в БД нет ни Client ID, ни
+  токенов/ключей открытым текстом. `metadata` — только неконфиденциальные
+  поля (срок действия токена WB);
+- `POST/DELETE /api/v1/integrations/{ozon|wildberries|midjourney}`,
+  `GET /api/v1/integrations` отдаёт `ozon`/`wildberries`/`midjourney` со
+  статусами `active`/`disconnected`/`error`, `clientId` (Ozon),
+  `tokenExpiresAt` (WB, +180 дней от подключения) и `source`
+  (`user`/`env` — работают личные ключи или системные);
+- Zod-валидация тел (`.strict()`), `401` без JWT, `400`
+  `errors.invalid_request` на неверное тело, `503`
+  `errors.provider_not_configured` без `TOKEN_ENCRYPTION_KEY`;
+- инструменты читают ключи по `userId`: `MarketplaceMcpService` (Ozon/WB) и
+  `MidjourneyService` (TTAPI) — БД приоритетнее env, env остаётся fallback
+  для системных ботов; при битом/нерасшифровываемом envelope инструмент
+  логирует `integration.provider_decrypt_failed` и падает обратно на env;
+- тесты: `provider-keys.service.spec.ts` (15), `integrations.controller.spec.ts`
+  (11), `midjourney.service.spec.ts` (+3 про ключ пользователя),
+  `marketplace-mcp.service.spec.ts` (6), `agent-tools.service.spec.ts`
+  (+2 про передачу `userId`).
+
+**Остаток:** сами MCP-контейнеры Ozon/WB по-прежнему аутентифицируются
+своими env-ключами — см. KI-064.
+
+### KI-064 — Личные ключи Ozon/WB не доходят до MCP-серверов
+
+**Влияние:** Ключи Ozon/WB, сохранённые пользователем, используются как
+источник истины для подключения/статуса и аудита, но MCP-серверы
+(`ozon-mcp-server`, `wb-mcp-server`) читают `OZON_CLIENT_ID`/
+`OZON_API_KEY`/`WB_API_TOKEN` из своего окружения при старте (один набор на
+контейнер) и не принимают креды в аргументах инструмента. Поэтому при
+мульти-тенантном сценарии запросы разных продавцов будут выполняться под
+ключами контейнера: без env-ключей вызов вернёт
+`errors.marketplace_unavailable` с пояснением (KI-064), а с ними — пойдёт
+под системными ключами. Midjourney (TTAPI) вызываетcя напрямую из API,
+поэтому там личный ключ пользователя используется полностью.
+
+**Обход:** Для одного продавца — задавать ключи и в UI (для статуса), и в
+env MCP-контейнера (для фактических запросов); ключи пользователя
+использовать как индикатор подключения.
+
+**План:** Передавать креды в MCP-сервер per-request (расширение
+`ozon-mcp-server`/`wb-mcp-server` заголовками `X-Ozon-Client-Id`/
+`X-Ozon-Api-Key` или запуск отдельного MCP-инстанса на арендатора), затем
+`McpClient` пробросит ключи из `ProviderCredential`. Требует изменений вне
+этого репозитория (PyPI-пакеты MCP-серверов).

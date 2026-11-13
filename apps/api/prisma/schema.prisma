@@ -35,6 +35,7 @@ model User {
   telegramChatLinks TelegramChatLink[]
   telegramBot      TelegramBot?
   googleCredential GoogleCredential?
+  providerCredentials ProviderCredential[]
 }
 
 model Session {
@@ -287,6 +288,27 @@ model TelegramChatLink {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+/// Ключи Ozon/Wildberries/Midjourney, подключённые пользователем.
+///
+/// `secret` — envelope `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM,
+/// `TOKEN_ENCRYPTION_KEY`) с JSON полезной нагрузки:
+/// Ozon — `{clientId, apiKey}`, WB — `{apiToken}`, Midjourney — `{apiKey}`.
+/// Открытых секретов в БД нет. `metadata` — только неконфиденциальные поля
+/// для UI (например, срок действия токена WB).
+model ProviderCredential {
+  userId    String
+  /// `ozon` | `wildberries` | `midjourney` (валидируется Zod в сервисе).
+  provider  String
+  secret    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, provider])
+  @@index([provider])
 }
 
 /// Аудит изменений Control Plane: кто, что и когда изменил.

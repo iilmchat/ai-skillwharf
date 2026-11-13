@@ -336,7 +336,10 @@ export class AgentToolsService {
 
       case GENERATE_IMAGE_TOOL_NAME: {
         const input = GenerateImageToolSchema.parse(args);
-        const image = await this.midjourney.generate(input.prompt);
+        const image = await this.midjourney.generate(
+          input.prompt,
+          options.userId === undefined ? {} : { userId: options.userId },
+        );
 
         // Списание Pay-per-Call — после успешной генерации.
         await options.beforeExecute?.();
@@ -511,6 +514,7 @@ export class AgentToolsService {
         ? {}
         : { authToken: options.authToken }),
       ...(options.skills === undefined ? {} : { skills: options.skills }),
+      ...(options.userId === undefined ? {} : { userId: options.userId }),
     });
   }
 

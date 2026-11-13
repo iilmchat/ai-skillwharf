@@ -362,7 +362,7 @@ describe('AgentToolsService', () => {
       { beforeExecute },
     );
 
-    expect(generateImage).toHaveBeenLastCalledWith('кот в космосе');
+    expect(generateImage).toHaveBeenLastCalledWith('кот в космосе', {});
     expect(order).toEqual(['midjourney', 'charge']);
     expect(JSON.parse(result)).toMatchObject({
       taskId: 'task-1',
@@ -475,5 +475,54 @@ describe('AgentToolsService: снапшоты финансового дашбо�
 
     expect(JSON.parse(result)).toMatchObject({ tool: 'unit-economics' });
     expect(failing.record).toHaveBeenCalled();
+  });
+});
+
+describe('AgentToolsService: ключи провайдеров из БД', () => {
+  it('generate_image передаёт userId в Midjourney (ключ пользователя)', async () => {
+    await service.execute(
+      'generate_image',
+      { prompt: 'промпт' },
+      { userId: 'user-1' },
+    );
+
+    expect(generateImage).toHaveBeenLastCalledWith('промпт', {
+      userId: 'user-1',
+    });
+  });
+
+  it('ozon/wb MCP передают userId в MarketplaceMcpService', async () => {
+    const call = vi.fn(async () => '{"result":[]}');
+    const tools = new AgentToolsService(
+      { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
+      { sendMessage } as unknown as ConstructorParameters<typeof AgentToolsService>[1],
+      {
+        appendSheetRows,
+        createDocument,
+        createCalendarEvent,
+      } as unknown as ConstructorParameters<typeof AgentToolsService>[2],
+      { getBotToken } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
+      { call } as unknown as ConstructorParameters<typeof AgentToolsService>[4],
+      {
+        unitEconomics,
+        profitLeaks,
+        priceMonitor,
+        fraudAudit,
+      } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
+      { generate: generateImage } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
+    );
+
+    await tools.execute(
+      'ozon_mcp_call',
+      { action: 'ozon_cards_list', params: {} },
+      { userId: 'user-1' },
+    );
+
+    expect(call).toHaveBeenCalledWith(
+      'ozon',
+      'ozon_cards_list',
+      {},
+      expect.objectContaining({ userId: 'user-1' }),
+    );
   });
 });
