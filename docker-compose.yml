@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector: расширение `vector` нужно для долговременной памяти (RAG).
+    # Тег pg16 — тот же мажор, данные из прежнего postgres:16-alpine совместимы.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

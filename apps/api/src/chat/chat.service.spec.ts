@@ -37,6 +37,7 @@ import {
   type ChatStreamChunk,
 } from '../llm/llm.service.js';
 import { LlmRouterService } from '../llm-router/llm-router.service.js';
+import { MemoryService } from '../memory/memory.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import {
@@ -76,6 +77,11 @@ interface SkillsMock {
 
 interface RouterMock {
   selectRoute: MockFn;
+}
+
+interface MemoryMock {
+  buildContext: MockFn;
+  remember: MockFn;
 }
 
 interface TestPricing {
@@ -141,6 +147,7 @@ describe('ChatService', () => {
   let billing: BillingMock;
   let skills: SkillsMock;
   let router: RouterMock;
+  let memory: MemoryMock;
   let llm: LlmService;
   let chatWithToolsStream: ReturnType<typeof vi.spyOn>;
 
@@ -163,6 +170,10 @@ describe('ChatService', () => {
     };
     skills = { getEnabledSkills: vi.fn().mockResolvedValue([]) };
     router = { selectRoute: vi.fn().mockResolvedValue(null) };
+    memory = {
+      buildContext: vi.fn().mockResolvedValue(''),
+      remember: vi.fn().mockResolvedValue(undefined),
+    };
 
     // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
     // сам вызов модели подменяем.
@@ -178,6 +189,7 @@ describe('ChatService', () => {
         { provide: SkillsService, useValue: skills },
         { provide: LlmRouterService, useValue: router },
         AgentGatewayService,
+        { provide: MemoryService, useValue: memory },
       ],
     }).compile();
 
@@ -300,6 +312,51 @@ describe('ChatService', () => {
       expect(billing.getBalance).toHaveBeenCalledWith(USER_ID);
       expect(skills.getEnabledSkills).toHaveBeenCalledTimes(1);
       expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
+    });
+
+    it('подмешивает найденные чанки памяти в промпт LLM', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'привет' },
+      ]);
+      memory.buildContext.mockResolvedValue(
+        '1. Клиент предпочитает самовывоз\n2. Скидка 10% для постоянных клиентов',
+      );
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('ответ ассистента')),
+      );
+
+      await service.handleMessage(USER_ID, CONVERSATION_ID, 'привет');
+
+      // Память ищется по последнему сообщению пользователя.
+      expect(memory.buildContext).toHaveBeenCalledWith(USER_ID, 'привет');
+
+      const [, , , options] = chatWithToolsStream.mock.calls[0] as [
+        BaseMessage[],
+        unknown[],
+        unknown,
+        { userId?: string; memoryContext?: string },
+      ];
+
+      expect(options.memoryContext).toContain('Клиент предпочитает самовывоз');
+      expect(options.memoryContext).toContain('Скидка 10%');
+    });
+
+    it('сохраняет новые сообщения диалога в долговременную память', async () => {
+      prisma.message.findMany.mockResolvedValue([
+        { role: 'user', content: 'привет' },
+      ]);
+      chatWithToolsStream.mockReturnValueOnce(
+        streamOf(new AIMessage('ответ ассистента')),
+      );
+
+      await service.handleMessage(USER_ID, CONVERSATION_ID, 'привет');
+
+      expect(memory.remember).toHaveBeenNthCalledWith(1, USER_ID, 'привет');
+      expect(memory.remember).toHaveBeenNthCalledWith(
+        2,
+        USER_ID,
+        'ответ ассистента',
+      );
     });
 
     it('подключает marketplace-инструменты из манифестов', async () => {

@@ -73,7 +73,12 @@ export function calculateLlmCost(
 /** Контекст вызова LLM: чей баланс списывать за токены. */
 export interface LlmCallOptions {
   userId?: string;
+  /** Блок «Долговременная память» из pgvector, добавляется в системный промпт. */
+  memoryContext?: string;
 }
+
+/** Заголовок блока долговременной памяти в системном промпте. */
+export const MEMORY_PROMPT_HEADER = '## Долговременная память';
 
 /**
  * Элемент стрима ответа модели: `delta` — очередной фрагмент текста,
@@ -833,7 +838,7 @@ export class LlmService {
     await this.assertCanAffordLlm(options.userId);
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
-    const systemPrompt = await this.getSystemPrompt();
+    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
     const response = await model.invoke(
       withLanguageInstruction(messages, systemPrompt),
     );
@@ -892,7 +897,7 @@ export class LlmService {
     await this.assertCanAffordLlm(options.userId);
 
     const model = tools.length > 0 ? client.bindTools(tools) : client;
-    const systemPrompt = await this.getSystemPrompt();
+    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
     let accumulated: AIMessageChunk | undefined;
 
     for await (const chunk of await model.stream(
@@ -1008,7 +1013,7 @@ export class LlmService {
   ): Promise<AIMessage> {
     await this.assertCanAffordLlm(options.userId);
 
-    const systemPrompt = await this.getSystemPrompt();
+    const systemPrompt = await this.getSystemPrompt(options.memoryContext);
     const response = await adapter.chat({ messages, tools, systemPrompt });
 
     this.logGenAiUsage(route, response.usage_metadata);
@@ -1078,16 +1083,18 @@ export class LlmService {
   }
 
   /** Активный системный промпт из БД; при сбое — дефолтная инструкция. */
-  private async getSystemPrompt(): Promise<string> {
-    if (!this.promptsService) {
-      return DEFAULT_SYSTEM_PROMPT;
+  private async getSystemPrompt(memoryContext?: string): Promise<string> {
+    let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+
+    if (this.promptsService) {
+      try {
+        systemPrompt = await this.promptsService.getActiveSystemPrompt();
+      } catch {
+        systemPrompt = DEFAULT_SYSTEM_PROMPT;
+      }
     }
 
-    try {
-      return await this.promptsService.getActiveSystemPrompt();
-    } catch {
-      return DEFAULT_SYSTEM_PROMPT;
-    }
+    return withMemoryContext(systemPrompt, memoryContext);
   }
 }
 
@@ -1097,6 +1104,23 @@ export function withLanguageInstruction(
   systemPrompt: string = DEFAULT_SYSTEM_PROMPT,
 ): BaseMessage[] {
   return [new SystemMessage(systemPrompt), ...messages];
+}
+
+/**
+ * Добавляет к системному промпту блок «Долговременная память». Пустой
+ * контекст (память не настроена или ничего не найдено) промпт не меняет.
+ */
+export function withMemoryContext(
+  systemPrompt: string,
+  memoryContext?: string,
+): string {
+  const memory = memoryContext?.trim() ?? '';
+
+  if (memory === '') {
+    return systemPrompt;
+  }
+
+  return `${systemPrompt}\n\n${MEMORY_PROMPT_HEADER}\n${memory}`;
 }
 
 /** Проверяет, что все перечисленные env-переменные заданы. */

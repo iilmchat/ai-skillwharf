@@ -49,6 +49,7 @@ import {
   type SandboxToolOptions,
 } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { MemoryService } from '../memory/memory.service.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import { SkillsService } from '../skills/skills.service.js';
 import {
@@ -107,6 +108,11 @@ const ChatStateAnnotation = Annotation.Root({
   llmRoute: Annotation<LlmRouteSelection | null>({
     reducer: (_previous, next) => next,
     default: () => null,
+  }),
+  /** Блок «Долговременная память», подобранный под последний вопрос. */
+  memoryContext: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
   }),
   /** Цены Pay-per-Outcome по именам инструментов. */
   outcomePrices: Annotation<Record<string, OutcomePrice>>({
@@ -372,7 +378,7 @@ function buildChatGraph(
         state.messages,
         state.availableTools,
         state.llmRoute ?? undefined,
-        { userId: state.userId },
+        { userId: state.userId, memoryContext: state.memoryContext },
       )) {
         if (chunk.type === 'delta') {
           text += chunk.text;
@@ -533,6 +539,7 @@ export class ChatService {
     private readonly skillsService: SkillsService,
     private readonly llmRouterService: LlmRouterService,
     private readonly agentGateway: AgentGatewayService,
+    private readonly memoryService: MemoryService,
   ) {
     this.graph = buildChatGraph(
       this.llmService,
@@ -580,8 +587,13 @@ export class ChatService {
   ): Promise<ChatReply> {
     this.logAgentContext(userId, conversationId);
 
-    const { messages, tools, approvalRequiredTools, outcomePrices } =
-      await this.prepareMessage(userId, conversationId, content);
+    const {
+      messages,
+      tools,
+      approvalRequiredTools,
+      outcomePrices,
+      memoryContext,
+    } = await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply: string;
@@ -595,6 +607,7 @@ export class ChatService {
         approvalRequiredTools,
         outcomePrices,
         llmRoute,
+        memoryContext,
       });
       reply = state.reply;
     } catch (error) {
@@ -610,6 +623,7 @@ export class ChatService {
     }
 
     await this.persistReply(conversationId, reply);
+    await this.rememberExchange(userId, content, reply);
 
     return { conversationId, reply };
   }
@@ -628,8 +642,13 @@ export class ChatService {
   ): Promise<ChatReply> {
     this.logAgentContext(userId, conversationId);
 
-    const { messages, tools, approvalRequiredTools, outcomePrices } =
-      await this.prepareMessage(userId, conversationId, content);
+    const {
+      messages,
+      tools,
+      approvalRequiredTools,
+      outcomePrices,
+      memoryContext,
+    } = await this.prepareMessage(userId, conversationId, content);
     const llmRoute = await this.llmRouterService.selectRoute();
 
     let reply = '';
@@ -644,6 +663,7 @@ export class ChatService {
           approvalRequiredTools,
           outcomePrices,
           llmRoute,
+          memoryContext,
         },
         { streamMode: ['custom', 'values'] },
       );
@@ -696,6 +716,7 @@ export class ChatService {
     }
 
     await this.persistReply(conversationId, reply);
+    await this.rememberExchange(userId, content, reply);
 
     return { conversationId, reply };
   }
@@ -710,6 +731,7 @@ export class ChatService {
     tools: StructuredToolInterface[];
     approvalRequiredTools: string[];
     outcomePrices: Record<string, OutcomePrice>;
+    memoryContext: string;
   }> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -747,7 +769,20 @@ export class ChatService {
     const approvalRequiredTools = resolveApprovalTools(skills);
     const outcomePrices = resolveOutcomePrices(skills);
 
-    return { messages, tools, approvalRequiredTools, outcomePrices };
+    // Долговременная память: top-K фрагментов под последний вопрос.
+    // Ошибки внутри MemoryService не прерывают диалог.
+    const memoryContext = await this.memoryService.buildContext(
+      userId,
+      content,
+    );
+
+    return {
+      messages,
+      tools,
+      approvalRequiredTools,
+      outcomePrices,
+      memoryContext,
+    };
   }
 
   /** Сохраняет ответ ассистента и обновляет время диалога. */
@@ -762,6 +797,30 @@ export class ChatService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
+  }
+
+  /**
+   * Сохраняет новые сообщения диалога в долговременную память. Сбой памяти
+   * логируется, но не ломает уже сгенерированный ответ.
+   */
+  private async rememberExchange(
+    userId: string,
+    userContent: string,
+    reply: string,
+  ): Promise<void> {
+    try {
+      await this.memoryService.remember(userId, userContent);
+
+      if (reply.trim() !== '') {
+        await this.memoryService.remember(userId, reply);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось обновить долговременную память: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /** Проверяет минимальный баланс перед запуском графа. */

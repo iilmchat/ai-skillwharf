@@ -22,6 +22,7 @@ import {
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   LlmService,
+  MEMORY_PROMPT_HEADER,
   MIN_LLM_BALANCE,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
@@ -32,6 +33,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
   calculateLlmCost,
   withLanguageInstruction,
+  withMemoryContext,
 } from './llm.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 
@@ -232,6 +234,36 @@ describe('LlmService', () => {
           where: { name: 'default_system_prompt', isActive: true },
         }),
       );
+    });
+
+    it('подмешивает чанки долговременной памяти в системный промпт', async () => {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+
+      const service = createService();
+      let sent: BaseMessage[] = [];
+
+      Object.assign(service, {
+        client: {
+          stream: async function* (messages: BaseMessage[]) {
+            sent = messages;
+            yield new AIMessageChunk({ content: 'ok' });
+          },
+        },
+      });
+
+      for await (const _chunk of service.chatWithToolsStream(
+        [new HumanMessage('где мой заказ?')],
+        [],
+        undefined,
+        { memoryContext: '1. Клиент предпочитает самовывоз' },
+      )) {
+        // Итератор нужен только для побочного эффекта — запроса к модели.
+      }
+
+      expect(sent[0]).toBeInstanceOf(SystemMessage);
+      expect(sent[0]?.content).toContain(MEMORY_PROMPT_HEADER);
+      expect(sent[0]?.content).toContain('Клиент предпочитает самовывоз');
     });
   });
 
@@ -747,6 +779,21 @@ describe('LlmService', () => {
       expect(messages[0]).toBeInstanceOf(SystemMessage);
       expect(messages[0]?.content).toBe(DEFAULT_SYSTEM_PROMPT);
       expect(messages[1]).toBe(human);
+    });
+  });
+
+  describe('withMemoryContext', () => {
+    it('добавляет блок «Долговременная память» в конец промпта', () => {
+      expect(
+        withMemoryContext('База', '1. Клиент предпочитает самовывоз'),
+      ).toBe(
+        'База\n\n## Долговременная память\n1. Клиент предпочитает самовывоз',
+      );
+    });
+
+    it('не меняет промпт без памяти', () => {
+      expect(withMemoryContext('База', '  ')).toBe('База');
+      expect(withMemoryContext('База')).toBe('База');
     });
   });
 });

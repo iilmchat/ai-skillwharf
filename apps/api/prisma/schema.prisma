@@ -2,14 +2,18 @@
 // Документация: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider      = "prisma-client-js"
+  provider        = "prisma-client-js"
   // native — локальная разработка (Windows/Linux), linux-musl-openssl-3.0.x — runtime в alpine.
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+  // Нужен для `datasource.extensions` (pgvector) в migration SQL.
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // Долговременная память агента: косинусный поиск по эмбеддингам.
+  extensions = [vector]
 }
 
 model User {
@@ -66,15 +70,28 @@ model Message {
   @@index([conversationId])
 }
 
+/// Фрагмент долговременной памяти пользователя (RAG).
+/// `embedding` — pgvector; размерность должна совпадать с моделью эмбеддингов
+/// (см. EMBEDDINGS_MODEL и MEMORY_EMBEDDING_DIMENSIONS в API).
+model MemoryChunk {
+  id        String                       @id @default(uuid())
+  userId    String
+  content   String
+  embedding Unsupported("vector(1536)")?
+  createdAt DateTime                     @default(now())
+
+  @@index([userId])
+}
+
 model Wallet {
-  id           String        @id @default(uuid())
-  userId       String        @unique
-  balance      Decimal       @default(0) @db.Decimal(18, 2)
+  id          String        @id @default(uuid())
+  userId      String        @unique
+  balance     Decimal       @default(0) @db.Decimal(18, 2)
   /// Средства, зарезервированные под PENDING-задачи (Pay-per-Outcome).
-  heldBalance  Decimal       @default(0) @db.Decimal(18, 2)
-  updatedAt    DateTime      @updatedAt
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entries      LedgerEntry[]
+  heldBalance Decimal       @default(0) @db.Decimal(18, 2)
+  updatedAt   DateTime      @updatedAt
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries     LedgerEntry[]
 }
 
 /// Append-only ledger: записи только создаются, не обновляются и не удаляются.
