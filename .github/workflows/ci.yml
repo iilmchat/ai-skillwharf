@@ -57,6 +57,9 @@ jobs:
       - name: Test Sandbox Worker Build
         run: docker compose build sandbox-worker
 
+      - name: Build MCP Docker Images
+        run: docker compose -f docker-compose.mcp.yml build
+
       - name: Test Sandbox Isolation
         run: bash scripts/test-sandbox.sh
 

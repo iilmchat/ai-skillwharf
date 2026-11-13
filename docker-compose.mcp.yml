@@ -8,6 +8,10 @@
 #   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
 services:
   api:
+    # image нужен, чтобы файл был валидным и при запуске отдельно от базового
+    # compose (например, `docker compose -f docker-compose.mcp.yml build` в CI).
+    # При совместном запуске с docker-compose.yml образ собирается из build.
+    image: ai-skillwharf-api:latest
     environment:
       OZON_MCP_URL: http://ozon-mcp:5001
       WB_MCP_URL: http://wb-mcp:5002
@@ -28,7 +32,8 @@ services:
       # 0 отключает фоновые проверки, чтобы не тратить лимиты API.
       HEALTH_CHECK_INTERVAL_MIN: ${OZON_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
-      - '5001:5001'
+      # Только localhost: панель MCP не должна быть доступна из сети.
+      - '127.0.0.1:5001:5001'
     volumes:
       - ozon_mcp_data:/data
     restart: unless-stopped
@@ -53,7 +58,8 @@ services:
       WB_API_TOKEN: ${WB_API_TOKEN:-}
       HEALTH_CHECK_INTERVAL_MIN: ${WB_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
-      - '5002:5002'
+      # Только localhost: панель MCP не должна быть доступна из сети.
+      - '127.0.0.1:5002:5002'
     volumes:
       - wb_mcp_data:/data
     restart: unless-stopped

@@ -206,11 +206,19 @@ function writeSseChunk(
 }
 
 /**
- * Детерминированная OpenAI-совместимая LLM для E2E: на первый запрос просит
- * `execute_sandbox_code`, после результата инструмента отдаёт финальный текст.
- * Так escrow-сценарий не зависит от внешней модели и работает в CI.
+ * Детерминированная OpenAI-совместимая LLM для E2E: по умолчанию отвечает
+ * обычным текстом, а с `toolCall: true` на первый запрос просит
+ * `execute_sandbox_code` (сценарий escrow). Так тесты не зависят от внешней
+ * модели и от локального LM Studio/Ollama.
  */
-async function startMockLlmServer(): Promise<MockLlmServer> {
+interface MockLlmOptions {
+  toolCall?: boolean;
+}
+
+async function startMockLlmServer(
+  options: MockLlmOptions = {},
+): Promise<MockLlmServer> {
+  const useToolCall = options.toolCall ?? false;
   const server = createServer((request, response) => {
     if (
       request.method !== 'POST' ||
@@ -238,7 +246,14 @@ async function startMockLlmServer(): Promise<MockLlmServer> {
         Connection: 'keep-alive',
       });
 
-      if (hasToolResult) {
+      if (!useToolCall) {
+        writeSseChunk(
+          response,
+          { role: 'assistant', content: 'E2E mock: ответ получен' },
+          null,
+        );
+        writeSseChunk(response, {}, 'stop');
+      } else if (hasToolResult) {
         writeSseChunk(
           response,
           { role: 'assistant', content: 'Готово: e2e-escrow' },
@@ -374,9 +389,28 @@ async function createMockRoute(
   };
 }
 
+let suiteMockLlm: MockLlmServer | null = null;
+let suiteMockRoute: Awaited<ReturnType<typeof createMockRoute>> | null = null;
+
 test.beforeAll(async ({ request }) => {
   await ensureTestUser(request);
   resetStoreSkill();
+
+  // Все LLM-зависимые сценарии работают с детерминированным мок-провайдером,
+  // а не с локальным LM Studio/Ollama. Реальные маршруты отключаются на время
+  // прогона и восстанавливаются в afterAll.
+  const accessToken = await loginViaApi(request);
+  suiteMockLlm = await startMockLlmServer();
+  suiteMockRoute = await createMockRoute(
+    request,
+    accessToken,
+    suiteMockLlm.baseUrl,
+  );
+});
+
+test.afterAll(async () => {
+  await suiteMockRoute?.restore();
+  await suiteMockLlm?.close();
 });
 
 test.describe('Дымовые сценарии UI', () => {
@@ -673,7 +707,7 @@ test.describe('Дымовые сценарии UI', () => {
     expect(topup.ok(), `topup failed: ${topup.status()}`).toBeTruthy();
 
     const balanceBefore = await getBalance(request, accessToken);
-    const mockLlm = await startMockLlmServer();
+    const mockLlm = await startMockLlmServer({ toolCall: true });
     let mockRoute: Awaited<ReturnType<typeof createMockRoute>> | null = null;
 
     try {
