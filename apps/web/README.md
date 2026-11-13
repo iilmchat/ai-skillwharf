@@ -164,7 +164,7 @@ docker build -f apps/web/Dockerfile \
   `DELETE /api/v1/integrations/telegram`. Токен хранится на сервере и после
   подключения в UI не возвращается.
 - **Google Workspace.** Кнопка «Войти через Google» получает
-  `GET /api/v1/integrations/google/authorize` (`{ url }` или
+  `GET /api/v1/integrations/google/authorization-url` (`{ url }` или
   `{ authorizationUrl }`), проверяет, что это абсолютный `https`-URL, и
   выполняет редирект. После возврата с OAuth статус и email подтягиваются из
   `GET /api/v1/integrations`; при заданном `GOOGLE_OAUTH_SUCCESS_REDIRECT`

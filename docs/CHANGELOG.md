@@ -86,9 +86,14 @@
 - Добавлены строки RU/EN, обновлён `apps/web/README.md`.
 - Контракт UI закрыт бэкендом: `GET /api/v1/integrations`,
   `POST/DELETE /api/v1/integrations/telegram`,
-  `GET /api/v1/integrations/google/authorize` и
+  `GET /api/v1/integrations/google/authorization-url` и
   `DELETE /api/v1/integrations/google`; Google callback возвращает браузер в
   настройки при заданном `GOOGLE_OAUTH_SUCCESS_REDIRECT` (KI-050).
+- Исправление контрактов после аудита Sprint 18: UI использует точный путь
+  `GET /api/v1/integrations/google/authorization-url`; ответ Telegram `401`
+  (и `errors.provider_auth_required`, в том числе при 502) маппится в
+  `invalidToken` с сообщением «Telegram отклонил токен. Проверьте его
+  правильность»; `400` сохранён как fallback.
 - UI проверен unit-тестами и Playwright с mock API; реальные Telegram/Google
   требуют ключей окружения.
 

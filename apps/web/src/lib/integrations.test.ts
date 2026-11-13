@@ -142,6 +142,18 @@ describe('integration API', () => {
     );
   });
 
+  it('запрашивает OAuth URL по пути /authorization-url', async () => {
+    getMock.mockResolvedValueOnce({
+      data: { url: 'https://accounts.google.com/o/oauth2/v2/auth?x=3' },
+    });
+
+    await fetchGoogleAuthorizationUrl();
+
+    expect(getMock).toHaveBeenCalledWith(
+      '/integrations/google/authorization-url',
+    );
+  });
+
   it('отклоняет не-https OAuth URL', async () => {
     getMock.mockResolvedValueOnce({
       data: { url: 'http://accounts.google.com/o/oauth2/v2/auth' },
@@ -239,6 +251,37 @@ describe('getIntegrationErrorDetails', () => {
       kind: 'oauthUnavailable',
       serverMessage: 'errors.provider_not_configured',
     });
+  });
+
+  it('маппит 401 Telegram в invalidToken, а 400 оставляет fallback', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith(
+          { code: 'errors.provider_auth_required', message: 'Unauthorized' },
+          401,
+        ),
+        'telegramConnect',
+      ),
+    ).toEqual({
+      kind: 'invalidToken',
+      serverMessage: 'errors.provider_auth_required',
+    });
+
+    // Статус 401 сам по себе достаточен: код ошибки может отсутствовать.
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Unauthorized' }, 401),
+        'telegramConnect',
+      ).kind,
+    ).toBe('invalidToken');
+
+    // 400 остаётся fallback-веткой для неверного токена.
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Invalid bot token' }, 400),
+        'telegramConnect',
+      ).kind,
+    ).toBe('invalidToken');
   });
 
   it('маппит сеть, 401, 403, 404 и 5xx', () => {

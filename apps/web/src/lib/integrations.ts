@@ -20,7 +20,7 @@ import { api } from './api';
  * - `POST /api/v1/integrations/telegram` `{ botToken }` — проверка через
  *   Telegram `getMe`;
  * - `DELETE /api/v1/integrations/telegram` — отключение бота;
- * - `GET /api/v1/integrations/google/authorize` — `{ url }` (или
+ * - `GET /api/v1/integrations/google/authorization-url` — `{ url }` (или
  *   `{ authorizationUrl }`) для редиректа на Google OAuth;
  * - `DELETE /api/v1/integrations/google` — отзыв доступа.
  *
@@ -121,7 +121,9 @@ export async function disconnectTelegram(): Promise<void> {
 }
 
 export async function fetchGoogleAuthorizationUrl(): Promise<string> {
-  const { data } = await api.get<unknown>('/integrations/google/authorize');
+  const { data } = await api.get<unknown>(
+    '/integrations/google/authorization-url',
+  );
   const rawUrl = googleAuthorizationResponseSchema.parse(data);
 
   return googleAuthorizationUrlSchema.parse(rawUrl);
@@ -260,12 +262,12 @@ export function getIntegrationErrorDetails(
   const code = readServerCode(error.response.data);
   const { status } = error.response;
 
-  // Telegram отвечает 401/403 на неверный токен; provider-http отдаёт 502
-  // errors.provider_auth_required, поэтому без этой ветки UI показал бы
-  // «провайдер недоступен» вместо «проверьте токен».
+  // Telegram отвечает 401/403 на неверный токен; provider-http может отдать
+  // 502 errors.provider_auth_required. Оба варианта — проблема токена, а не
+  // истёкшая сессия пользователя.
   if (
     operation === 'telegramConnect' &&
-    code === 'errors.provider_auth_required'
+    (status === 401 || code === 'errors.provider_auth_required')
   ) {
     return { kind: 'invalidToken', serverMessage };
   }
