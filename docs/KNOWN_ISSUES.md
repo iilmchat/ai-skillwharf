@@ -63,7 +63,8 @@
 | KI-057 | Marketplace | Низкая | Открыто | MCP-healthcheck проверяет наличие env-ключей Ozon/WB и `/api/health`, но не scope/срок действия и не реальный доступ к Seller API; ключи, заданные через web-панель, не учитываются |
 | KI-058 | E2E | Низкая | Открыто | `scripts/test-integrations.sh` использует версионно-зависимые endpoint'ы Ozon (`/v1/product/import/prices`), WB Pricing (`/ping`) и TTAPI (`/midjourney/v1/fetch`); при смене API возможны ложные FAIL, путь настраивается через env |
 | KI-059 | Marketplace | Средняя | Открыто | Midjourney подключается только через TTAPI (`api.ttapi.io`): официального API нет, GoAPI/UseAPI закрыты, SLA/контракт прокси не гарантированы; альтернативный APIFRAME требует отдельного allowlist |
-| KI-060 | Integrations/Finance | Низкая | Открыто | UI Sprint 19 (Ozon Client ID/API Key, WB API Token 180 дней, Midjourney TT-API-KEY, финансовый дашборд) проверен на mock API; эндпоинты `/integrations/ozon`, `/integrations/wildberries`, `/integrations/midjourney` и `/finance/*` в текущей ветке API отсутствуют |
+| KI-060 | Finance | Низкая | Исправлено | Финансовый дашборд получил REST-контракт: `GET /finance/overview` и fallback `/finance/unit-economics`, `/finance/profit-leaks`, `/finance/fraud-shield` отдают последние результаты реальных MCP-вызовов, совместимы с Zod-схемой UI и возвращают `dataAvailable:false`, если расчётов ещё не было |
+| KI-063 | Integrations | Средняя | Открыто | UI Sprint 19 ждёт `POST/DELETE /integrations/{ozon,wildberries,midjourney}` и поля `ozon`/`wildberries`/`midjourney` в `GET /integrations`; в API этих маршрутов нет — ключи задаются только через env |
 | KI-061 | Finance | Низкая | Открыто | Ozon не привязывает комиссию/логистику к SKU в начислениях: `unit-economics` распределяет расходы по доле выручки SKU и не заменяет детализацию отчёта Ozon |
 | KI-062 | Finance | Средняя | Открыто | MCP-серверы Ozon/WB не отдают ERID/UTM отдельными полями: `fraud-shield-audit` проверяет их наличие в сырых данных кампании и сообщает об отсутствии, но не заменяет юридическую проверку маркировки |
 
@@ -1243,32 +1244,48 @@ UseAPI закрылись в июне 2026, APIFRAME — возможный fall
 **План:** Абстракция Midjourney-клиента с адаптерами TTAPI/APIFRAME,
 polling задач и обработкой `202/queued`, лимиты расходов и метрики ошибок.
 
-### KI-060 — UI Sprint 19 без контрактов API
+### KI-060 — UI Sprint 19 без контроллеров финансового дашборда
 
-**Влияние:** Настройка ключей Ozon/Wildberries/Midjourney и финансовый
-дашборд реализованы по контракту Sprint 19:
-`GET /integrations` (поля `ozon`, `wildberries`, `midjourney`),
-`POST/DELETE /integrations/{ozon|wildberries|midjourney}` и
-`GET /finance/overview` с fallback на `/finance/unit-economics`,
-`/finance/profit-leaks`, `/finance/fraud-shield`. В текущей ветке API этих
-маршрутов нет: бэкенд Sprint 19 работает с ключами из env
-(`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`, `MIDJOURNEY_API_KEY` —
-TT-API-KEY) и отдаёт финансовые результаты только через инструменты агента.
-Поэтому UI показывает статусы `disconnected` и ошибку `notFound`, а реальные
-подключения проверяются на mock API. Поля дашборда взяты из фактических
-`UnitEconomicsResult`, `ProfitLeakResult` и `FraudAuditResult`
-(`FinanceToolsService`), а не выдуманы.
+**Влияние:** Страница `/app/finance` ожидала `GET /finance/overview` с
+fallback на `/finance/unit-economics`, `/finance/profit-leaks`,
+`/finance/fraud-shield`, но в API этих маршрутов не было: дашборд показывал
+`errors.notFound`, а финансовые результаты существовали только в ответах
+tool call'ов агента.
 
-**Обход:** До появления REST-контракта проверять сценарии Playwright с
-`page.route`; ключи Ozon/WB/Midjourney задавать через env
-(`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`, `MIDJOURNEY_API_KEY`).
-Дашборд без `/finance/*` показывает локализованную ошибку, а не вымышленные
-данные.
+**Исправлено (Sprint 19):** Добавлен `FinanceController`
+(`apps/api/src/finance/`):
 
-**План:** Реализовать контроллеры интеграций и финансового дашборда,
-возвращающие контракт из `apps/web/src/lib/integrations.ts` и
-`apps/web/src/lib/finance.ts`; после этого закрыть KI-060 и проверить
-реальные Ozon/WB/Midjourney-ключи в staging.
+- `GET /api/v1/finance/overview` — агрегат последних `unit-economics`,
+  `profit-leak-detector` и `fraud-shield-audit` текущего пользователя
+  (`currency`, `period`, `unitEconomics[]`, `profitLeaks[]`, `fraudShield`,
+  `dataAvailable`, `reason`, `updatedAt`);
+- `GET /api/v1/finance/unit-economics` — `{ items[] }` +
+  фильтры `sku`, `marketplace`;
+- `GET /api/v1/finance/profit-leaks` — `{ items[] }` + фильтр `marketplace`;
+- `GET /api/v1/finance/fraud-shield` — последний аудит (форма
+  `FraudAuditResult`) + фильтр `campaignId`.
+
+Контракт — `apps/api/src/finance/finance-contracts.ts`: Zod-схемы повторяют
+`apps/web/src/lib/finance.ts` (это проверяет
+`finance.controller.spec.ts`, где лежит зеркало UI-схемы: при расхождении
+тест падает). Лишние поля инструментов (`spend`, `adSpend`, `deductions`,
+`antifraudRecords`) сохраняются через `.passthrough()` — UI их игнорирует.
+
+Данные берутся из `FinanceSnapshotStore`, куда `AgentToolsService` пишет
+**только успешные** результаты `FinanceToolsService` (реальные MCP-вызовы
+Ozon/WB) после списания BAL. REST ничего не пересчитывает: иначе GET обходил
+бы Pay-per-Call/Pay-per-Outcome и создавал бы побочные эффекты. Хранилище —
+Redis (`REDIS_URL`, TTL `FINANCE_SNAPSHOT_TTL_SECONDS`, по умолчанию 7
+суток), резерв — память процесса (без Redis/после рестарта дашборд честно
+отдаёт `dataAvailable:false`).
+
+Если расчётов ещё не было, ответ — `200` с `dataAvailable:false` и причиной
+(«запустите инструмент в чате»), а не `404`, пустой массив без признака или
+вымышленные суммы. Некорректные query-параметры — `400`
+`errors.invalid_request`; `userId` берётся только из JWT, данные разных
+пользователей не смешиваются.
+
+**Остаток:** подключение ключей из UI — отдельная задача, см. KI-063.
 
 ### KI-061 — Ozon: комиссия и логистика распределяются по выручке SKU
 
@@ -1303,3 +1320,24 @@ MCP-серверы Ozon/WB не возвращают эти поля отдел�
 **План:** Добавить коннектор к рекламным API с полями маркировки/UTM либо
 импорт доказательного пакета; тогда `eridPresent`/`utmPresent` станут
 достоверными.
+
+### KI-063 — UI Sprint 19 без контроллеров подключения ключей
+
+**Влияние:** Карточки интеграций ждут
+`POST/DELETE /integrations/{ozon,wildberries,midjourney}` с телами
+`{ clientId, apiKey }` (Ozon), `{ apiToken }` (WB), `{ apiKey }`
+(Midjourney TT-API-KEY) и поля `ozon`/`wildberries`/`midjourney` в
+`GET /integrations`. В API этих маршрутов нет: Sprint 19 работает с ключами
+из env (`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`,
+`MIDJOURNEY_API_KEY`), поэтому UI показывает `disconnected`, а подключение
+из интерфейса возвращает 404.
+
+**Обход:** Задавать ключи через env и проверять их
+`scripts/test-integrations.sh`; финансовый дашборд при этом работает
+(`/finance/*`, KI-060 закрыт).
+
+**План:** Реализовать хранение ключей per-user (шифрование как у
+Telegram/Google), маршруты `POST/DELETE /integrations/{provider}`,
+дополнить `GET /integrations` статусами `active`/`disconnected`/`error` и
+прокинуть ключи в `MarketplaceMcpService`/`MidjourneyService` вместо env.
+Требует решения по хранению секретов и миграции — отдельная задача.

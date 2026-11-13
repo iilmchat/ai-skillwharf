@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -11,6 +11,10 @@ import { TelegramBotService } from '../integrations/telegram/telegram-bot.servic
 import { TelegramService } from '../integrations/telegram/telegram.service.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
 import { FinanceToolsService } from './finance/finance-tools.service.js';
+import {
+  FinanceSnapshotStore,
+  type FinanceSnapshotKind,
+} from './finance/finance-snapshot.store.js';
 import { MidjourneyService } from './finance/midjourney.service.js';
 import type { McpProvider } from './tools/mcp-gateway.js';
 import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
@@ -127,6 +131,7 @@ export class AgentToolsService {
     private readonly marketplace: MarketplaceMcpService,
     private readonly finance: FinanceToolsService,
     private readonly midjourney: MidjourneyService,
+    @Optional() private readonly snapshots?: FinanceSnapshotStore,
   ) {}
 
   /** Есть ли инструмент в реестре (модель могла вызвать несуществующий). */
@@ -358,6 +363,10 @@ export class AgentToolsService {
         );
 
         await options.beforeExecute?.();
+        await this.recordFinanceSnapshot(options, 'unitEconomics', result, [
+          result.marketplace,
+          result.sku,
+        ]);
 
         return JSON.stringify(result);
       }
@@ -370,6 +379,7 @@ export class AgentToolsService {
         );
 
         await options.beforeExecute?.();
+        await this.recordFinanceSnapshot(options, 'profitLeaks', result, null);
 
         return JSON.stringify(result);
       }
@@ -394,6 +404,7 @@ export class AgentToolsService {
         );
 
         await options.beforeExecute?.();
+        await this.recordFinanceSnapshot(options, 'fraudShield', result, null);
 
         return JSON.stringify(result);
       }
@@ -426,6 +437,41 @@ export class AgentToolsService {
     options: SandboxToolOptions,
   ): { skills?: readonly AgentSkillSnapshot[] } {
     return options.skills === undefined ? {} : { skills: options.skills };
+  }
+
+  /**
+   * Кладёт успешный финансовый результат в снапшоты дашборда.
+   *
+   * Пишем только то, что уже посчитано на реальных данных MCP, и не ломаем
+   * tool call, если хранилище недоступно: дашборд тогда честно покажет
+   * `dataAvailable: false`, а ответ агенту не пострадает.
+   */
+  private async recordFinanceSnapshot(
+    options: SandboxToolOptions,
+    kind: FinanceSnapshotKind,
+    value: unknown,
+    keyParts: readonly string[] | null,
+  ): Promise<void> {
+    if (this.snapshots === undefined || options.userId === undefined) {
+      return;
+    }
+
+    try {
+      await this.snapshots.record(
+        options.userId,
+        kind,
+        value,
+        keyParts === null ? null : keyParts.join('|'),
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'finance.snapshot.write_failed',
+          kind,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   /**

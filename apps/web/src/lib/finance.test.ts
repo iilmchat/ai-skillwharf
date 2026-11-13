@@ -113,6 +113,38 @@ describe('financeOverviewSchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('принимает расширенный ответ backend (`dataAvailable`, `reason`, лишние поля)', () => {
+    const parsed = financeOverviewSchema.parse({
+      ...OVERVIEW,
+      dataAvailable: false,
+      reason: 'Ozon не вернул начислений за период',
+      updatedAt: '2026-11-14T00:00:00.000Z',
+      unitEconomics: [
+        {
+          ...UNIT_ECONOMICS,
+          // API не отбрасывает служебные поля инструментов (passthrough).
+          marketplace: 'wb',
+          spend: 1000,
+          adSpend: 500,
+        },
+      ],
+      profitLeaks: [
+        {
+          ...PROFIT_LEAKS,
+          findings: [
+            {
+              ...PROFIT_LEAKS.findings[0],
+              antifraudRecords: 3,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.unitEconomics[0]?.marketplace).toBe('wb');
+    expect(parsed.profitLeaks[0]?.findings[0]?.code).toBe('penalty');
+  });
 });
 
 describe('суммы unit-economics', () => {

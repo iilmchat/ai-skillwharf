@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { AgentToolsService } from './agent-tools.service.js';
+import { FinanceSnapshotStore } from './finance/finance-snapshot.store.js';
 import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 
 const runCommand = vi.fn(async () => 'ok');
@@ -384,5 +385,95 @@ describe('AgentToolsService', () => {
       service.execute('generate_image', { prompt: 'x' }, { beforeExecute }),
     ).rejects.toBe(providerError);
     expect(beforeExecute).not.toHaveBeenCalled();
+  });
+});
+
+/** Сервис с хранилищем снапшотов: проверяем связку «tool call → дашборд». */
+function serviceWithSnapshots(snapshots: unknown): AgentToolsService {
+  return new AgentToolsService(
+    { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
+    { sendMessage } as unknown as ConstructorParameters<typeof AgentToolsService>[1],
+    {
+      appendSheetRows,
+      createDocument,
+      createCalendarEvent,
+    } as unknown as ConstructorParameters<typeof AgentToolsService>[2],
+    { getBotToken } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
+    new MarketplaceMcpService(),
+    {
+      unitEconomics,
+      profitLeaks,
+      priceMonitor,
+      fraudAudit,
+    } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
+    { generate: generateImage } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
+    snapshots as ConstructorParameters<typeof AgentToolsService>[7],
+  );
+}
+
+describe('AgentToolsService: снапшоты финансового дашборда', () => {
+  it('unit-economics сохраняется с ключом marketplace|sku', async () => {
+    const store = new FinanceSnapshotStore('');
+
+    await serviceWithSnapshots(store).execute(
+      'calculate_unit_economics',
+      { sku: 'SKU-1', marketplace: 'ozon' },
+      { userId: 'user-1' },
+    );
+
+    const snapshots = await store.read('user-1');
+
+    expect(snapshots.unitEconomics).toHaveLength(1);
+    expect(snapshots.unitEconomics[0]?.key).toBe('ozon|SKU-1');
+    expect(snapshots.unitEconomics[0]?.value).toMatchObject({
+      tool: 'unit-economics',
+      dataAvailable: true,
+    });
+  });
+
+  it('profit-leaks и fraud-shield тоже попадают в дашборд', async () => {
+    const store = new FinanceSnapshotStore('');
+    const tools = serviceWithSnapshots(store);
+
+    await tools.execute(
+      'detect_profit_leaks',
+      { sellerId: 'shop-1', marketplace: 'wb' },
+      { userId: 'user-1' },
+    );
+    await tools.execute(
+      'audit_fraud_risk',
+      { campaignId: '555', marketplace: 'ozon' },
+      { userId: 'user-1' },
+    );
+
+    const snapshots = await store.read('user-1');
+
+    expect(snapshots.profitLeaks).toHaveLength(1);
+    expect(snapshots.fraudShield).toHaveLength(1);
+  });
+
+  it('без userId снапшоты не пишутся', async () => {
+    const store = new FinanceSnapshotStore('');
+
+    await serviceWithSnapshots(store).execute('detect_profit_leaks', {
+      sellerId: 'shop-1',
+    });
+
+    await expect(store.read('user-1')).resolves.toMatchObject({
+      profitLeaks: [],
+    });
+  });
+
+  it('ошибка хранилища не ломает ответ инструмента', async () => {
+    const failing = { record: vi.fn(async () => { throw new Error('redis down'); }) };
+
+    const result = await serviceWithSnapshots(failing).execute(
+      'calculate_unit_economics',
+      { sku: 'SKU-1' },
+      { userId: 'user-1' },
+    );
+
+    expect(JSON.parse(result)).toMatchObject({ tool: 'unit-economics' });
+    expect(failing.record).toHaveBeenCalled();
   });
 });

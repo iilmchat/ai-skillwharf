@@ -1620,3 +1620,56 @@ Ozon проверяется `POST /v1/product/import/prices` с пустым `pr
 `errors.provider_rate_limited`/`provider_unavailable`; Pay-per-Call
 0.50 ₽ списывается после успешной генерации; при ошибке/таймауте списания
 нет. TTAPI не даёт официального SLA (KI-059).
+
+### 19.4. Финансовый дашборд: REST `/finance/*`
+
+Дашборд `/app/finance` читает сохранённые результаты инструментов агента, а
+не пересчитывает финансы сам. Поэтому GET не тратит квоты маркетплейсов и
+не обходит оплату навыков.
+
+| Маршрут | Назначение |
+| --- | --- |
+| `GET /api/v1/finance/overview` | агрегат `unit-economics`, `profit-leak-detector`, `fraud-shield-audit` |
+| `GET /api/v1/finance/unit-economics?sku=&marketplace=` | таблица SKU |
+| `GET /api/v1/finance/profit-leaks?marketplace=` | алерты утечек |
+| `GET /api/v1/finance/fraud-shield?campaignId=` | последний аудит кампании |
+
+Все маршруты требуют JWT (`Authorization: Bearer <access token>`);
+`userId` берётся только из токена. Ответы валидируются Zod
+(`apps/api/src/finance/finance-contracts.ts`), схема совпадает с
+`apps/web/src/lib/finance.ts`. Некорректные query-параметры → `400`
+`errors.invalid_request`.
+
+Как появляются данные:
+
+1. Пользователь запускает `unit-economics`/`profit-leak-detector`/
+   `fraud-shield-audit` в чате — инструменты делают реальные MCP-вызовы
+   Ozon/WB и списывают BAL (Pay-per-Call/Pay-per-Outcome).
+2. `AgentToolsService` после успешного вызова пишет ответ в
+   `FinanceSnapshotStore`.
+3. Дашборд читает снапшоты: Redis (`REDIS_URL`,
+   `FINANCE_SNAPSHOT_TTL_SECONDS`, по умолчанию 604800 — 7 суток); если
+   Redis не задан/недоступен — память процесса API.
+
+Проверка:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:3000/api/v1/finance/overview | jq
+```
+
+Ожидаемые состояния:
+
+* расчётов не было — `200`, `dataAvailable: false`, `reason` с просьбой
+  запустить инструмент в чате, `unitEconomics: []`;
+* есть снапшоты — `dataAvailable: true`, `currency: "RUB"`, `period`,
+  `updatedAt`, массивы результатов;
+* Redis недоступен — в логах `finance.snapshots.redis_unavailable` /
+  `finance.snapshots.redis_fallback`, дашборд продолжает работать на памяти
+  процесса (в multi-replica окружении данные могут быть не видны на другой
+  реплике).
+
+Ограничения: снапшоты не пересчитываются и не обновляются фоном — это
+последний расчёт пользователя; после `FINANCE_SNAPSHOT_TTL_SECONDS` записи
+истекают и дашборд снова показывает `dataAvailable: false`. Подключение
+ключей из UI пока не реализовано (KI-063).

@@ -8,6 +8,10 @@ import { AgentInternalController } from './agent-internal.controller.js';
 import { AgentRuntimeService } from './agent-runtime.service.js';
 import { AgentToolsService } from './agent-tools.service.js';
 import { FinanceDataService } from './finance/finance-data.service.js';
+import {
+  FINANCE_SNAPSHOT_REDIS_URL,
+  FinanceSnapshotStore,
+} from './finance/finance-snapshot.store.js';
 import { FinanceToolsService } from './finance/finance-tools.service.js';
 import { MidjourneyService } from './finance/midjourney.service.js';
 import { LlmBudgetService } from './llm-budget.service.js';
@@ -36,12 +40,19 @@ import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
     FinanceDataService,
     FinanceToolsService,
     MidjourneyService,
+    {
+      // Redis общий для реплик API; без него снапшоты живут в памяти.
+      provide: FINANCE_SNAPSHOT_REDIS_URL,
+      useFactory: (): string => process.env.REDIS_URL ?? '',
+    },
+    FinanceSnapshotStore,
   ],
   exports: [
     AgentToolsService,
     AgentRuntimeService,
     LlmBudgetService,
     LlmWorkerClient,
+    FinanceSnapshotStore,
   ],
 })
 export class AgentModule {}

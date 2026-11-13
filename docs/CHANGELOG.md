@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### Sprint 19: Finance REST API (`/finance/*`)
+
+- Добавлен `FinanceController` (`apps/api/src/finance/`), закрывающий KI-060:
+  `GET /api/v1/finance/overview` — агрегат последних `unit-economics`,
+  `profit-leak-detector` и `fraud-shield-audit` текущего пользователя;
+  fallback-маршруты `GET /finance/unit-economics`, `/finance/profit-leaks`,
+  `/finance/fraud-shield` отдают те же данные по частям и поддерживают
+  фильтры `sku`, `marketplace`, `campaignId`.
+- Контракт ответа — `apps/api/src/finance/finance-contracts.ts`: Zod-схемы
+  повторяют `apps/web/src/lib/finance.ts`, дополнительные поля инструментов
+  (`spend`, `adSpend`, `deductions`, `antifraudRecords`) сохраняются через
+  `.passthrough()`. Совместимость закреплена тестом с зеркалом UI-схемы.
+- Данные — реальные результаты MCP-вызовов Ozon/WB: `AgentToolsService`
+  после успешного tool call'а (и списания BAL) пишет ответ в
+  `FinanceSnapshotStore`. REST ничего не пересчитывает, не делает MCP-запросов
+  на GET и не обходит Pay-per-Call/Pay-per-Outcome.
+- Хранилище: Redis (`REDIS_URL`, TTL `FINANCE_SNAPSHOT_TTL_SECONDS`, по
+  умолчанию 7 суток), резерв — память процесса. Дедупликация
+  `unit-economics` по `marketplace|sku` (до 10 записей), по 3 последних
+  результата для leaks/audit.
+- Если расчётов не было: `200` с `dataAvailable:false` и причиной, а не
+  `404`, пустой массив без признака или вымышленные суммы. `userId` — только
+  из JWT, данные пользователей не смешиваются; некорректные query — `400`
+  `errors.invalid_request`.
+- Тесты: `finance.controller.spec.ts` (10), `finance-snapshot.store.spec.ts`
+  (7), в `agent-tools.service.spec.ts` — запись снапшотов после вызова
+  (включая «без userId не пишем» и «ошибка хранилища не ломает tool call»).
+- Новый остаток: KI-063 — подключение ключей из UI
+  (`POST/DELETE /integrations/{ozon,wildberries,midjourney}`) остаётся за
+  бэкендом; финансовый дашборд от него не зависит.
+
 ### Sprint 19: Finance & Creative Integrations UI
 
 - В разделе «Интеграции» появились карточки Ozon, Wildberries и Midjourney:
@@ -23,9 +54,9 @@
   `/finance/unit-economics`, `/finance/profit-leaks` и
   `/finance/fraud-shield`; ответы валидируются Zod,
   `errors.provider_unavailable` локализуется.
-- Новый остаток: KI-060 — UI Sprint 19 проверен на mock API; реальные
-  endpoints Ozon/WB/Midjourney и финансового дашборда требуют backend-реализации
-  (KI-057–062 уже заняты бэкенд-задачами).
+- Остатки: KI-060 (финансовый REST-контракт) закрыт в разделе «Finance REST
+  API» выше; KI-063 — подключение ключей Ozon/WB/Midjourney из UI пока не
+  реализовано (`KI-057`–`KI-062` заняты бэкенд-задачами).
 
 ### Sprint 19: Real Finance Data & Midjourney (backend)
 

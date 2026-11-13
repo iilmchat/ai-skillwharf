@@ -114,6 +114,8 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-dev-internal-token}
       # BullMQ: HITL TTL, retention и уведомления.
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Снапшоты финансового дашборда (GET /finance/*): TTL записей.
+      FINANCE_SNAPSHOT_TTL_SECONDS: ${FINANCE_SNAPSHOT_TTL_SECONDS:-604800}
       # Telegram: бот, секрет webhook и лимит запросов на IP.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}

@@ -411,6 +411,18 @@ describe('getIntegrationErrorDetails', () => {
     });
   });
 
+  it('404 от ещё не готового endpoint не ломает карточку', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Cannot POST /integrations/ozon' }, 404),
+        'ozonConnect',
+      ),
+    ).toEqual({
+      kind: 'notFound',
+      serverMessage: 'Cannot POST /integrations/ozon',
+    });
+  });
+
   it('маппит сеть, 401, 403, 404 и 5xx', () => {
     expect(
       getIntegrationErrorDetails(new AxiosError('Network'), 'load').kind,

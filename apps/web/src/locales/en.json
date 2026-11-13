@@ -729,7 +729,7 @@
         "network": "The server is unreachable. Check your connection.",
         "sessionExpired": "Your session has expired. Please sign in again.",
         "forbidden": "You do not have permission to manage integrations.",
-        "notFound": "The integrations API is not available on the server yet.",
+        "notFound": "The integration is not available yet. Please try again later.",
         "invalidToken": "Telegram rejected the token. Check that it is correct.",
         "invalidCredentials": "The provider rejected the keys. Check the access credentials.",
         "oauthUnavailable": "Google OAuth is not configured on the server.",
