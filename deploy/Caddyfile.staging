@@ -49,6 +49,11 @@
 		reverse_proxy prometheus:9090
 	}
 
+	# Telegram webhook: напрямую в API, секрет проверяет приложение.
+	handle /api/v1/webhooks/telegram* {
+		reverse_proxy api:3000
+	}
+
 	# API, web и healthcheck работают как раньше, без Basic Auth.
 	handle {
 		reverse_proxy web:80

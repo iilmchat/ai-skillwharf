@@ -9,5 +9,13 @@
 
 {$DOMAIN} {
 	encode zstd gzip
+
+	# Telegram webhook идёт напрямую в API, минуя web-контейнер.
+	# Секрет X-Telegram-Bot-Api-Secret-Token проверяет API; Caddy только
+	# терминирует TLS и не публикует внутренний порт API.
+	handle /api/v1/webhooks/telegram* {
+		reverse_proxy api:3000
+	}
+
 	reverse_proxy web:80
 }
