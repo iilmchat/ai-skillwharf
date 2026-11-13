@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { AgentToolsService } from './agent-tools.service.js';
+import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 
 const runCommand = vi.fn(async () => 'ok');
 const sendMessage = vi.fn(async () => ({ messageId: 11, chatId: '42' }));
@@ -19,6 +20,38 @@ const createCalendarEvent = vi.fn(async () => ({
   htmlLink: 'https://calendar.google.com/event-1',
 }));
 const getBotToken = vi.fn(async () => 'user-bot-token');
+const unitEconomics = vi.fn(async () => ({
+  tool: 'unit-economics' as const,
+  marketplace: 'ozon' as const,
+  sku: 'SKU-1',
+  period: { from: '2026-11-01', to: '2026-11-13' },
+  dataAvailable: true,
+  revenueCurrency: 'RUB' as const,
+  margin: 100,
+  assumptions: [],
+  sources: ['ozon_finance_totals'],
+}));
+const profitLeaks = vi.fn(async () => ({
+  tool: 'profit-leak-detector',
+  dataAvailable: true,
+  findings: [],
+}));
+const priceMonitor = vi.fn(async () => ({
+  tool: 'price-monitor',
+  dataAvailable: true,
+  ownPrice: 100,
+}));
+const fraudAudit = vi.fn(async () => ({
+  tool: 'fraud-shield-audit',
+  dataAvailable: true,
+  eridPresent: false,
+  findings: [],
+}));
+const generateImage = vi.fn(async () => ({
+  taskId: 'task-1',
+  imageUrl: 'https://cdn.example.com/image.png',
+  status: 'completed',
+}));
 
 const service = new AgentToolsService(
   { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
@@ -33,6 +66,16 @@ const service = new AgentToolsService(
   {
     getBotToken,
   } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
+  new MarketplaceMcpService(),
+  {
+    unitEconomics,
+    profitLeaks,
+    priceMonitor,
+    fraudAudit,
+  } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
+  {
+    generate: generateImage,
+  } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
 );
 
 describe('AgentToolsService', () => {
@@ -203,5 +246,143 @@ describe('AgentToolsService', () => {
       chatId: '42',
       text: 'x',
     });
+  });
+
+  it('unit-economics: реальный расчёт, списание после вызова, JSON в ответ', async () => {
+    const order: string[] = [];
+    const beforeExecute = vi.fn(async () => {
+      order.push('charge');
+    });
+
+    unitEconomics.mockImplementationOnce(async () => {
+      order.push('finance');
+
+      return {
+        tool: 'unit-economics' as const,
+        marketplace: 'ozon' as const,
+        sku: 'SKU-1',
+        period: { from: '2026-11-01', to: '2026-11-13' },
+        dataAvailable: true,
+        revenueCurrency: 'RUB' as const,
+        margin: 100,
+        assumptions: [],
+        sources: ['ozon_finance_totals'],
+      };
+    });
+
+    const skills = [
+      { id: 's1', name: 'unit-economics', manifest: {}, isEnabled: true },
+    ];
+    const result = await service.execute(
+      'calculate_unit_economics',
+      { sku: 'SKU-1', marketplace: 'ozon', cost: 500 },
+      { beforeExecute, skills },
+    );
+
+    expect(unitEconomics).toHaveBeenLastCalledWith(
+      { sku: 'SKU-1', marketplace: 'ozon', cost: 500 },
+      { skills },
+    );
+    expect(order).toEqual(['finance', 'charge']);
+    expect(JSON.parse(result)).toMatchObject({
+      tool: 'unit-economics',
+      margin: 100,
+    });
+  });
+
+  it('unit-economics: ошибка MCP не списывает средства', async () => {
+    const beforeExecute = vi.fn(async () => undefined);
+    const mcpError = new ApiException({
+      statusCode: 502,
+      error: 'Bad Gateway',
+      code: ERROR_KEYS.mcpProvider,
+      message: 'MCP down',
+    });
+
+    unitEconomics.mockRejectedValueOnce(mcpError);
+
+    await expect(
+      service.execute(
+        'calculate_unit_economics',
+        { sku: 'SKU-1' },
+        { beforeExecute },
+      ),
+    ).rejects.toBe(mcpError);
+    expect(beforeExecute).not.toHaveBeenCalled();
+  });
+
+  it('profit/price/fraud вызывают finance-сервис и возвращают JSON', async () => {
+    await service.execute('detect_profit_leaks', {
+      sellerId: 'shop-1',
+      marketplace: 'wb',
+    });
+    await service.execute('monitor_competitor_prices', {
+      sku: 'SKU-1',
+      productId: 123,
+    });
+    await service.execute('audit_fraud_risk', {
+      campaignId: '555',
+      marketplace: 'ozon',
+    });
+
+    expect(profitLeaks).toHaveBeenCalledWith(
+      { sellerId: 'shop-1', marketplace: 'wb' },
+      {},
+    );
+    expect(priceMonitor).toHaveBeenCalledWith(
+      { sku: 'SKU-1', productId: 123 },
+      {},
+    );
+    expect(fraudAudit).toHaveBeenCalledWith(
+      { campaignId: '555', marketplace: 'ozon' },
+      {},
+    );
+  });
+
+  it('generate_image зовёт Midjourney и списывает Pay-per-Call после URL', async () => {
+    const order: string[] = [];
+    const beforeExecute = vi.fn(async () => {
+      order.push('charge');
+    });
+
+    generateImage.mockImplementationOnce(async () => {
+      order.push('midjourney');
+
+      return {
+        taskId: 'task-1',
+        imageUrl: 'https://cdn.example.com/image.png',
+        status: 'completed',
+      };
+    });
+
+    const result = await service.execute(
+      'generate_image',
+      { prompt: 'кот в космосе' },
+      { beforeExecute },
+    );
+
+    expect(generateImage).toHaveBeenLastCalledWith('кот в космосе');
+    expect(order).toEqual(['midjourney', 'charge']);
+    expect(JSON.parse(result)).toMatchObject({
+      taskId: 'task-1',
+      imageUrl: 'https://cdn.example.com/image.png',
+    });
+  });
+
+  it('generate_image: ошибка провайдера не списывает средства', async () => {
+    const beforeExecute = vi.fn(async () => undefined);
+    const providerError = new ApiException({
+      statusCode: 502,
+      error: 'Bad Gateway',
+      code: ERROR_KEYS.providerUnavailable,
+      message: 'Midjourney down',
+    });
+
+    generateImage.mockRejectedValueOnce(providerError);
+
+    await expect(
+      service.execute('generate_image', { prompt: 'x' }, { beforeExecute }),
+    ).rejects.toBe(providerError);
+    expect(beforeExecute).not.toHaveBeenCalled();
   });
 });

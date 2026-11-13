@@ -5,16 +5,15 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { EgressPolicy } from '../sandbox/egress.js';
-import {
-  invalidRequestError,
-  marketplaceUnavailableError,
-} from '../common/api-error.js';
+import { invalidRequestError } from '../common/api-error.js';
 import { GoogleApiService } from '../integrations/google/google-api.service.js';
 import { TelegramBotService } from '../integrations/telegram/telegram-bot.service.js';
 import { TelegramService } from '../integrations/telegram/telegram.service.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
-import { McpClient } from './tools/mcp-client.js';
-import { McpGateway, mcpUnavailableError, type McpProvider } from './tools/mcp-gateway.js';
+import { FinanceToolsService } from './finance/finance-tools.service.js';
+import { MidjourneyService } from './finance/midjourney.service.js';
+import type { McpProvider } from './tools/mcp-gateway.js';
+import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 import {
   AUDIT_FRAUD_RISK_TOOL_NAME,
   CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
@@ -84,6 +83,8 @@ export interface SandboxToolOptions {
    * (Google Workspace — OAuth-токен конкретного пользователя).
    */
   userId?: string;
+  /** Навыки пользователя: из манифестов берутся MCP-endpoint и цены. */
+  skills?: readonly AgentSkillSnapshot[];
 }
 
 export interface McpToolOptions extends SandboxToolOptions {
@@ -93,23 +94,6 @@ export interface McpToolOptions extends SandboxToolOptions {
 
 export interface DzenPublishOptions extends SandboxToolOptions {
   outputDir?: string;
-}
-
-/** Адрес MCP-сервера: манифест навыка в приоритете, env — fallback. */
-export function resolveMcpEndpoint(
-  platform: McpProvider,
-  manifestEndpoint?: string,
-): string | null {
-  const fromManifest = manifestEndpoint?.trim() ?? '';
-
-  if (fromManifest !== '') {
-    return fromManifest;
-  }
-
-  const fromEnv =
-    platform === 'ozon' ? process.env.OZON_MCP_URL : process.env.WB_MCP_URL;
-
-  return fromEnv === undefined || fromEnv.trim() === '' ? null : fromEnv.trim();
 }
 
 /** Объявлен ли инструмент хотя бы одним включённым навыком. */
@@ -134,14 +118,15 @@ function skillDeclaresTool(
 @Injectable()
 export class AgentToolsService {
   private readonly logger = new Logger(AgentToolsService.name);
-  private readonly mcpClients = new Map<string, McpClient>();
-  private readonly mcpGateways = new WeakMap<McpClient, McpGateway>();
 
   constructor(
     private readonly sandboxService: SandboxService,
     private readonly telegram: TelegramService,
     private readonly google: GoogleApiService,
     private readonly telegramBots: TelegramBotService,
+    private readonly marketplace: MarketplaceMcpService,
+    private readonly finance: FinanceToolsService,
+    private readonly midjourney: MidjourneyService,
   ) {}
 
   /** Есть ли инструмент в реестре (модель могла вызвать несуществующий). */
@@ -344,11 +329,15 @@ export class AgentToolsService {
         return JSON.stringify(event);
       }
 
-      case GENERATE_IMAGE_TOOL_NAME:
-        GenerateImageToolSchema.parse(args);
+      case GENERATE_IMAGE_TOOL_NAME: {
+        const input = GenerateImageToolSchema.parse(args);
+        const image = await this.midjourney.generate(input.prompt);
+
+        // Списание Pay-per-Call — после успешной генерации.
         await options.beforeExecute?.();
 
-        return 'https://placehold.co/600x400?text=Generated';
+        return JSON.stringify(image);
+      }
 
       case RUN_WORKFLOW_TOOL_NAME: {
         const input = RunWorkflowToolSchema.parse(args);
@@ -363,31 +352,51 @@ export class AgentToolsService {
 
       case CALCULATE_UNIT_ECONOMICS_TOOL_NAME: {
         const input = CalculateUnitEconomicsToolSchema.parse(args);
+        const result = await this.finance.unitEconomics(
+          input,
+          this.financeContext(options),
+        );
 
         await options.beforeExecute?.();
 
-        return `Маржа для ${input.sku} составляет 25%.`;
+        return JSON.stringify(result);
       }
 
-      case DETECT_PROFIT_LEAKS_TOOL_NAME:
-        DetectProfitLeaksToolSchema.parse(args);
+      case DETECT_PROFIT_LEAKS_TOOL_NAME: {
+        const input = DetectProfitLeaksToolSchema.parse(args);
+        const result = await this.finance.profitLeaks(
+          input,
+          this.financeContext(options),
+        );
+
         await options.beforeExecute?.();
 
-        return 'Найдена утечка на 120 000 ₽ из-за штрафа за габариты.';
+        return JSON.stringify(result);
+      }
 
       case MONITOR_COMPETITOR_PRICES_TOOL_NAME: {
         const input = MonitorCompetitorPricesToolSchema.parse(args);
+        const result = await this.finance.priceMonitor(
+          input,
+          this.financeContext(options),
+        );
 
         await options.beforeExecute?.();
 
-        return `Конкурент снизил цену на ${input.sku} до 990 ₽.`;
+        return JSON.stringify(result);
       }
 
-      case AUDIT_FRAUD_RISK_TOOL_NAME:
-        AuditFraudRiskToolSchema.parse(args);
+      case AUDIT_FRAUD_RISK_TOOL_NAME: {
+        const input = AuditFraudRiskToolSchema.parse(args);
+        const result = await this.finance.fraudAudit(
+          input,
+          this.financeContext(options),
+        );
+
         await options.beforeExecute?.();
 
-        return 'Доказательный пакет неполный. Риск санкции высокий.';
+        return JSON.stringify(result);
+      }
 
       case CHECK_FACTS_TOOL_NAME:
         CheckFactsToolSchema.parse(args);
@@ -410,6 +419,13 @@ export class AgentToolsService {
       default:
         throw new Error(`Инструмент «${name}» не найден`);
     }
+  }
+
+  /** Контекст финансового инструмента: навыки нужны для MCP-endpoint. */
+  private financeContext(
+    options: SandboxToolOptions,
+  ): { skills?: readonly AgentSkillSnapshot[] } {
+    return options.skills === undefined ? {} : { skills: options.skills };
   }
 
   /**
@@ -440,87 +456,16 @@ export class AgentToolsService {
     options: McpToolOptions,
   ): Promise<string> {
     const input = McpToolSchema.parse(args);
-    const keyVars =
-      platform === 'ozon'
-        ? ['OZON_CLIENT_ID', 'OZON_API_KEY']
-        : ['WB_API_TOKEN'];
-
-    if (!hasEnv(...keyVars)) {
-      throw marketplaceUnavailableError(
-        platform === 'ozon'
-          ? 'Ozon API keys not configured'
-          : 'WB API token not configured',
-      );
-    }
-
-    const gateway = this.getMcpGateway(platform, options);
-
-    if (gateway === null) {
-      throw mcpUnavailableError();
-    }
 
     await options.beforeExecute?.();
 
-    return gateway.call({ action: input.action, params: input.params });
-  }
-
-  private getMcpGateway(
-    platform: McpProvider,
-    options: McpToolOptions,
-  ): McpGateway | null {
-    const client = this.getMcpClient(
-      platform,
-      options.endpoint,
-      options.authToken,
-    );
-
-    if (client === null) {
-      return null;
-    }
-
-    const cached = this.mcpGateways.get(client);
-
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const gateway = new McpGateway({
-      provider: platform,
-      client,
-      listTools: () => client.listTools(),
+    return this.marketplace.call(platform, input.action, input.params, {
+      ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
+      ...(options.authToken === undefined
+        ? {}
+        : { authToken: options.authToken }),
+      ...(options.skills === undefined ? {} : { skills: options.skills }),
     });
-
-    this.mcpGateways.set(client, gateway);
-
-    return gateway;
-  }
-
-  private getMcpClient(
-    platform: McpProvider,
-    manifestEndpoint?: string,
-    authToken?: string,
-  ): McpClient | null {
-    const url = resolveMcpEndpoint(platform, manifestEndpoint);
-
-    if (url === null) {
-      return null;
-    }
-
-    const cached = this.mcpClients.get(url);
-
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const token = authToken ?? process.env.MCP_AUTH_TOKEN;
-    const client = new McpClient({
-      baseUrl: url,
-      ...(token === undefined || token === '' ? {} : { authToken: token }),
-    });
-
-    this.mcpClients.set(url, client);
-
-    return client;
   }
 
   private async publishToDzen(
@@ -608,10 +553,5 @@ function sandboxEnv(): Record<string, string> {
   return env;
 }
 
-function hasEnv(...names: string[]): boolean {
-  return names.every((name) => {
-    const value = process.env[name];
-
-    return value !== undefined && value !== '';
-  });
-}
+/** Реэкспорт для совместимости: endpoint MCP теперь живёт в сервисе. */
+export { resolveMcpEndpoint } from './tools/marketplace-mcp.service.js';

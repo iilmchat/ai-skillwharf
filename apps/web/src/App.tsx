@@ -49,6 +49,12 @@ const SettingsPage = lazy(() =>
   })),
 );
 
+const FinancePage = lazy(() =>
+  import('./pages/FinancePage').then((module) => ({
+    default: module.FinancePage,
+  })),
+);
+
 const AdminPage = lazy(() =>
   import('./pages/AdminPage').then((module) => ({
     default: module.AdminPage,
@@ -126,6 +132,14 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/app/finance"
+            element={
+              <ProtectedRoute>
+                <FinancePage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/app/office" element={<OfficePage />} />
           <Route
             path="/admin"
@@ -144,6 +158,10 @@ function App() {
             element={<Navigate to="/app/skills" replace />}
           />
           <Route path="/store" element={<Navigate to="/app/store" replace />} />
+          <Route
+            path="/finance"
+            element={<Navigate to="/app/finance" replace />}
+          />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -29,6 +29,8 @@ services:
       OZON_API_KEY: ${OZON_API_KEY:-}
       OZON_PERF_CLIENT_ID: ${OZON_PERF_CLIENT_ID:-}
       OZON_PERF_CLIENT_SECRET: ${OZON_PERF_CLIENT_SECRET:-}
+      # 0 — healthcheck падает без ключей; 1 — только для локального UI.
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
       # 0 отключает фоновые проверки, чтобы не тратить лимиты API.
       HEALTH_CHECK_INTERVAL_MIN: ${OZON_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
@@ -41,11 +43,12 @@ services:
       test:
         [
           'CMD-SHELL',
-          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:5001/api/health'')"',
+          'python /usr/local/bin/mcp-healthcheck.py ozon http://127.0.0.1:5001/api/health',
         ]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   wb-mcp:
     build:
@@ -56,6 +59,7 @@ services:
       DATA_DIR: /data
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       WB_API_TOKEN: ${WB_API_TOKEN:-}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
       HEALTH_CHECK_INTERVAL_MIN: ${WB_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
       # Только localhost: панель MCP не должна быть доступна из сети.
@@ -67,11 +71,12 @@ services:
       test:
         [
           'CMD-SHELL',
-          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:5002/api/health'')"',
+          'python /usr/local/bin/mcp-healthcheck.py wb http://127.0.0.1:5002/api/health',
         ]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
 volumes:
   ozon_mcp_data:

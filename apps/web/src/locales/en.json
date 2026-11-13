@@ -81,6 +81,7 @@
     "skills": "Skills",
     "store": "Store",
     "office": "AI office",
+    "finance": "Finance",
     "settings": "Settings",
     "admin": "Control plane"
   },
@@ -589,6 +590,7 @@
     "messagesLabel": "Chat messages",
     "you": "You:",
     "assistant": "Assistant:",
+    "imageAlt": "Image from the agent",
     "typing": "Assistant is typing…",
     "messageLabel": "Message",
     "inputPlaceholder": "Write a message…",
@@ -667,15 +669,73 @@
         "disconnected": "Google Workspace access revoked.",
         "oauthHint": "A Google page will open. You can revoke access at any time."
       },
+      "providers": {
+        "title": "Marketplaces & creative",
+        "description": "Ozon, Wildberries, and Midjourney keys are stored on the server.",
+        "keySaved": "Stored on the server"
+      },
+      "ozon": {
+        "title": "Ozon",
+        "description": "Ozon Seller API: prices v1, products v3.",
+        "clientId": "Client ID",
+        "clientIdPlaceholder": "Seller identifier",
+        "apiKey": "API Key",
+        "apiKeyPlaceholder": "Ozon Seller key",
+        "apiKeyHint": "Keys are stored on the server and are not shown after connecting.",
+        "connect": "Connect",
+        "connecting": "Checking the keys…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "Client ID",
+        "invalidFields": "Fill in the Client ID and API Key.",
+        "connected": "Ozon connected.",
+        "disconnected": "Ozon disconnected."
+      },
+      "wildberries": {
+        "title": "Wildberries",
+        "description": "Wildberries Seller API (discounts-prices-api): products, prices, and reports.",
+        "apiToken": "API Token",
+        "apiTokenPlaceholder": "Wildberries Seller token",
+        "apiTokenHint": "The token is valid for 180 days. It is stored on the server and is not shown after connecting.",
+        "expiryWarning": "The token is valid for 180 days; reconnect after it expires.",
+        "expiresAt": "Valid until {{date}}.",
+        "connect": "Connect",
+        "connecting": "Checking the token…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "API Token",
+        "keySaved": "Stored on the server",
+        "invalidFields": "Enter the API Token.",
+        "connected": "Wildberries connected.",
+        "disconnected": "Wildberries disconnected."
+      },
+      "midjourney": {
+        "title": "Midjourney (TTAPI)",
+        "description": "Image generation through TTAPI — not the official Midjourney API.",
+        "ttApiKey": "TT-API-KEY",
+        "ttApiKeyPlaceholder": "TTAPI key",
+        "ttApiKeyHint": "Not the official Midjourney API. The key is stored on the server and is not shown after connecting.",
+        "connect": "Connect",
+        "connecting": "Checking the key…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "TT-API-KEY",
+        "keySaved": "Stored on the server",
+        "invalidFields": "Enter the TT-API-KEY.",
+        "connected": "Midjourney connected.",
+        "disconnected": "Midjourney disconnected."
+      },
       "errors": {
         "network": "The server is unreachable. Check your connection.",
         "sessionExpired": "Your session has expired. Please sign in again.",
         "forbidden": "You do not have permission to manage integrations.",
         "notFound": "The integrations API is not available on the server yet.",
         "invalidToken": "Telegram rejected the token. Check that it is correct.",
+        "invalidCredentials": "The provider rejected the keys. Check the access credentials.",
         "oauthUnavailable": "Google OAuth is not configured on the server.",
         "unavailable": "The integrations service is temporarily unavailable. Please try again later.",
         "invalidResponse": "The server returned an invalid integration response.",
+        "providerError": "The provider reported an error. Check the keys and try again.",
         "requestFailed": "Could not complete the action. Please try again.",
         "unknown": "Could not complete the action. Please try again later."
       }
@@ -711,6 +771,55 @@
         "invalid": "The server returned invalid memory data.",
         "unknown": "Could not load memory. Please try again."
       }
+    }
+  },
+  "finance": {
+    "title": "Finance",
+    "subtitle": "Unit economics and risk audit based on Ozon and Wildberries data.",
+    "backToChat": "Back to chat",
+    "period": "Period: {{period}}",
+    "loading": "Loading financial data…",
+    "retry": "Try again",
+    "metrics": {
+      "revenue": "Revenue",
+      "profit": "Profit",
+      "margin": "Margin"
+    },
+    "unit": {
+      "title": "Unit economics",
+      "description": "Margin and profit by SKU.",
+      "emptyTitle": "No SKU data",
+      "emptyBody": "Run unit-economics in the chat to get a calculation.",
+      "sku": "SKU",
+      "titleColumn": "Product",
+      "marketplace": "Marketplace",
+      "revenue": "Revenue",
+      "profit": "Profit",
+      "margin": "Margin"
+    },
+    "leaks": {
+      "title": "profit-leak-detector alerts",
+      "description": "Penalties, deductions, and returns that reduce profit.",
+      "noLeaks": "No leaks found.",
+      "unavailable": "Some data is unavailable — check the Ozon/WB connection."
+    },
+    "fraud": {
+      "title": "Fraud Shield Audit",
+      "description": "Evidence package status for advertising campaigns.",
+      "complete": "Evidence package is complete",
+      "risks": "Risks found",
+      "unknown": "Status is unknown",
+      "risksLabel": "Found risks",
+      "checkedAt": "Checked: {{date}}"
+    },
+    "errors": {
+      "network": "The server is unreachable. Check your connection.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "forbidden": "You do not have permission to view finance.",
+      "notFound": "The finance API is not available on the server yet.",
+      "unavailable": "Financial data is temporarily unavailable. Please try again later.",
+      "invalidResponse": "The server returned invalid financial data.",
+      "unknown": "Could not load financial data. Please try again later."
     }
   }
 }

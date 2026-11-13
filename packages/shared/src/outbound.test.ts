@@ -62,4 +62,31 @@ describe("outbound allowlist", () => {
       assertOutboundUrlAllowed("http://host.docker.internal:8034/v1", []),
     ).not.toThrow();
   });
+
+  it("разрешает TTAPI и финансовые API из default allowlist", () => {
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://api.ttapi.io/midjourney/v1/fetch?jobId=test",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://api-performance.ozon.ru/api/client/campaign",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://discounts-prices-api.wildberries.ru/ping",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://api.goapi.ai/mj/v2/imagine",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).toThrow(/OUTBOUND_ALLOWLIST/);
+  });
 });

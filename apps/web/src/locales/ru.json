@@ -81,6 +81,7 @@
     "skills": "Навыки",
     "store": "Магазин",
     "office": "AI-офис",
+    "finance": "Финансы",
     "settings": "Настройки",
     "admin": "Пульт управления"
   },
@@ -589,6 +590,7 @@
     "messagesLabel": "Сообщения чата",
     "you": "Вы:",
     "assistant": "Ассистент:",
+    "imageAlt": "Изображение от агента",
     "typing": "Ассистент печатает…",
     "messageLabel": "Сообщение",
     "inputPlaceholder": "Напишите сообщение…",
@@ -667,15 +669,73 @@
         "disconnected": "Доступ к Google Workspace отозван.",
         "oauthHint": "Откроется страница Google. Права можно отозвать в любой момент."
       },
+      "providers": {
+        "title": "Маркетплейсы и креатив",
+        "description": "Ключи Ozon, Wildberries и Midjourney хранятся на сервере.",
+        "keySaved": "Сохранён на сервере"
+      },
+      "ozon": {
+        "title": "Ozon",
+        "description": "Ozon Seller API: цены — v1, товары — v3.",
+        "clientId": "Client ID",
+        "clientIdPlaceholder": "Идентификатор продавца",
+        "apiKey": "API Key",
+        "apiKeyPlaceholder": "Ключ Ozon Seller",
+        "apiKeyHint": "Ключи хранятся на сервере и не показываются после подключения.",
+        "connect": "Подключить",
+        "connecting": "Проверяем ключи…",
+        "disconnect": "Отключить",
+        "disconnecting": "Отключаем…",
+        "connectedAs": "Client ID",
+        "invalidFields": "Заполните Client ID и API Key.",
+        "connected": "Ozon подключён.",
+        "disconnected": "Ozon отключён."
+      },
+      "wildberries": {
+        "title": "Wildberries",
+        "description": "Wildberries Seller API (discounts-prices-api): товары, цены и отчёты.",
+        "apiToken": "API Token",
+        "apiTokenPlaceholder": "Токен Wildberries Seller",
+        "apiTokenHint": "Токен действует 180 дней. Хранится на сервере и не показывается после подключения.",
+        "expiryWarning": "Срок действия токена — 180 дней; после истечения подключите его заново.",
+        "expiresAt": "Действует до {{date}}.",
+        "connect": "Подключить",
+        "connecting": "Проверяем токен…",
+        "disconnect": "Отключить",
+        "disconnecting": "Отключаем…",
+        "connectedAs": "API Token",
+        "keySaved": "Сохранён на сервере",
+        "invalidFields": "Введите API Token.",
+        "connected": "Wildberries подключён.",
+        "disconnected": "Wildberries отключён."
+      },
+      "midjourney": {
+        "title": "Midjourney (TTAPI)",
+        "description": "Генерация изображений через TTAPI — не официальный API Midjourney.",
+        "ttApiKey": "TT-API-KEY",
+        "ttApiKeyPlaceholder": "Ключ TTAPI",
+        "ttApiKeyHint": "Не официальный API Midjourney. Ключ хранится на сервере и не показывается после подключения.",
+        "connect": "Подключить",
+        "connecting": "Проверяем ключ…",
+        "disconnect": "Отключить",
+        "disconnecting": "Отключаем…",
+        "connectedAs": "TT-API-KEY",
+        "keySaved": "Сохранён на сервере",
+        "invalidFields": "Введите TT-API-KEY.",
+        "connected": "Midjourney подключён.",
+        "disconnected": "Midjourney отключён."
+      },
       "errors": {
         "network": "Сервер недоступен. Проверьте соединение.",
         "sessionExpired": "Сессия истекла. Войдите заново.",
         "forbidden": "Недостаточно прав для управления интеграциями.",
         "notFound": "API интеграций пока недоступен на сервере.",
         "invalidToken": "Telegram отклонил токен. Проверьте его правильность.",
+        "invalidCredentials": "Провайдер отклонил ключи. Проверьте данные доступа.",
         "oauthUnavailable": "Google OAuth не настроен на сервере.",
         "unavailable": "Сервис интеграций временно недоступен. Попробуйте позже.",
         "invalidResponse": "Сервер вернул некорректный ответ интеграции.",
+        "providerError": "Провайдер сообщил об ошибке. Проверьте ключи и попробуйте снова.",
         "requestFailed": "Не удалось выполнить действие. Попробуйте ещё раз.",
         "unknown": "Не удалось выполнить действие. Попробуйте позже."
       }
@@ -711,6 +771,55 @@
         "invalid": "Сервер вернул некорректные данные памяти.",
         "unknown": "Не удалось загрузить память. Попробуйте ещё раз."
       }
+    }
+  },
+  "finance": {
+    "title": "Финансы",
+    "subtitle": "Юнит-экономика и аудит рисков по данным Ozon и Wildberries.",
+    "backToChat": "Вернуться в чат",
+    "period": "Период: {{period}}",
+    "loading": "Загружаем финансовые данные…",
+    "retry": "Повторить",
+    "metrics": {
+      "revenue": "Выручка",
+      "profit": "Прибыль",
+      "margin": "Маржа"
+    },
+    "unit": {
+      "title": "Юнит-экономика",
+      "description": "Маржа и прибыль по SKU.",
+      "emptyTitle": "Нет данных по SKU",
+      "emptyBody": "Запустите unit-economics в чате, чтобы получить расчёт.",
+      "sku": "SKU",
+      "titleColumn": "Товар",
+      "marketplace": "Маркетплейс",
+      "revenue": "Выручка",
+      "profit": "Прибыль",
+      "margin": "Маржа"
+    },
+    "leaks": {
+      "title": "Алерты profit-leak-detector",
+      "description": "Штрафы, удержания и возвраты, которые уменьшают прибыль.",
+      "noLeaks": "Утечек не найдено.",
+      "unavailable": "Часть данных недоступна — проверьте подключение Ozon/WB."
+    },
+    "fraud": {
+      "title": "Fraud Shield Audit",
+      "description": "Статус доказательного пакета для рекламных кампаний.",
+      "complete": "Доказательный пакет полный",
+      "risks": "Есть риски",
+      "unknown": "Статус не определён",
+      "risksLabel": "Найденные риски",
+      "checkedAt": "Проверено: {{date}}"
+    },
+    "errors": {
+      "network": "Сервер недоступен. Проверьте соединение.",
+      "sessionExpired": "Сессия истекла. Войдите заново.",
+      "forbidden": "Недостаточно прав для просмотра финансов.",
+      "notFound": "Финансовый API пока недоступен на сервере.",
+      "unavailable": "Финансовые данные временно недоступны. Попробуйте позже.",
+      "invalidResponse": "Сервер вернул некорректные финансовые данные.",
+      "unknown": "Не удалось загрузить финансовые данные. Попробуйте позже."
     }
   }
 }

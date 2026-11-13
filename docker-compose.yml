@@ -72,8 +72,8 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       YANDEX_IAM_TOKEN: ${YANDEX_IAM_TOKEN:-}
       YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
-      # Egress worker'а: внешние LLM, Telegram и Google — только эти домены.
-      OUTBOUND_ALLOWLIST: ${LLM_WORKER_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,sheets.googleapis.com,docs.googleapis.com,oauth2.googleapis.com,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru}
+      # Egress worker'а: внешние LLM, Telegram, Google и Midjourney — только эти домены.
+      OUTBOUND_ALLOWLIST: ${LLM_WORKER_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,sheets.googleapis.com,docs.googleapis.com,oauth2.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru}
     extra_hosts:
       # LLM на хосте (LM Studio/Ollama) доступна так же, как из API.
       - "host.docker.internal:host-gateway"
@@ -124,6 +124,13 @@ services:
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_OAUTH_SCOPES: ${GOOGLE_OAUTH_SCOPES:-}
       GOOGLE_OAUTH_STATE_SECRET: ${GOOGLE_OAUTH_STATE_SECRET:-}
+      # Midjourney: TTAPI, эндпоинты зафиксированы в коде (домен в allowlist).
+      MIDJOURNEY_API_KEY: ${MIDJOURNEY_API_KEY:-}
+      MIDJOURNEY_POLL_INTERVAL_MS: ${MIDJOURNEY_POLL_INTERVAL_MS:-2000}
+      MIDJOURNEY_TIMEOUT_MS: ${MIDJOURNEY_TIMEOUT_MS:-120000}
+      # Отдельные хосты финансовых API (не Seller/Marketplace).
+      OZON_PERFORMANCE_API_BASE_URL: ${OZON_PERFORMANCE_API_BASE_URL:-https://api-performance.ozon.ru}
+      WB_PRICING_API_BASE_URL: ${WB_PRICING_API_BASE_URL:-https://discounts-prices-api.wildberries.ru}
       # Календарь по умолчанию для google_calendar_create.
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
       # Полный URL веб-приложения для возврата после OAuth (пусто — JSON).
@@ -132,7 +139,7 @@ services:
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       TOKEN_ENCRYPTION_KEY_ID: ${TOKEN_ENCRYPTION_KEY_ID:-local-v1}
       # Egress API: Telegram и Google — только эти домены.
-      OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com}
+      OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru}
       # Повторы 429/5xx внешних провайдеров (экспоненциальный backoff).
       PROVIDER_RETRY_MAX_ATTEMPTS: ${PROVIDER_RETRY_MAX_ATTEMPTS:-3}
       PROVIDER_RETRY_BASE_DELAY_MS: ${PROVIDER_RETRY_BASE_DELAY_MS:-500}

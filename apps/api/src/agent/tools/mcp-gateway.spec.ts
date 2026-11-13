@@ -549,3 +549,103 @@ describe('McpGateway', () => {
     });
   });
 });
+
+describe('финансовые MCP-действия (Sprint 19)', () => {
+  it('принимает ozon_finance_totals и передаёт параметры', async () => {
+    const callTool = vi.fn<CallTool>().mockResolvedValue('{"total":1}');
+    const gateway = createGateway('ozon', callTool);
+
+    await expect(
+      gateway.call({
+        action: 'ozon_finance_totals',
+        params: {
+          date_from: '2026-11-01T00:00:00Z',
+          date_to: '2026-11-13T23:59:59Z',
+        },
+      }),
+    ).resolves.toBe('{"total":1}');
+    expect(callTool).toHaveBeenCalledWith('ozon_finance_totals', {
+      date_from: '2026-11-01T00:00:00Z',
+      date_to: '2026-11-13T23:59:59Z',
+    });
+  });
+
+  it('требует обе даты у ozon_finance_totals', async () => {
+    const callTool = vi.fn<CallTool>();
+    const gateway = createGateway('ozon', callTool);
+    const body = await expectApiError(
+      gateway.call({
+        action: 'ozon_finance_totals',
+        params: { date_from: '2026-11-01T00:00:00Z' },
+      }),
+    );
+
+    expect(body).toMatchObject({ statusCode: 400 });
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('принимает wb_deductions и wb_prices_list с nmId', async () => {
+    const callTool = vi.fn<CallTool>().mockResolvedValue('{}');
+    const gateway = createGateway('wb', callTool);
+
+    await gateway.call({
+      action: 'wb_deductions',
+      params: {
+        date_from: '2026-11-01',
+        date_to: '2026-11-13',
+        limit: 50,
+      },
+    });
+    await gateway.call({
+      action: 'wb_prices_list',
+      params: { filter_nm_id: 111 },
+    });
+
+    expect(callTool).toHaveBeenNthCalledWith(1, 'wb_deductions', {
+      date_from: '2026-11-01',
+      date_to: '2026-11-13',
+      limit: 50,
+    });
+    expect(callTool).toHaveBeenNthCalledWith(2, 'wb_prices_list', {
+      filter_nm_id: 111,
+    });
+  });
+
+  it('отклоняет лишние поля финансовых действий', async () => {
+    const callTool = vi.fn<CallTool>();
+    const gateway = createGateway('wb', callTool);
+    const body = await expectApiError(
+      gateway.call({
+        action: 'wb_prices_list',
+        params: { filter_nm_id: 111, period: { from: '2026-11-01' } },
+      }),
+    );
+
+    expect(body).toMatchObject({ statusCode: 400 });
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('принимает ozon_analytics с metrics/dimensions', async () => {
+    const callTool = vi.fn<CallTool>().mockResolvedValue('{}');
+    const gateway = createGateway('ozon', callTool);
+
+    await gateway.call({
+      action: 'ozon_analytics',
+      params: {
+        date_from: '2026-11-01',
+        date_to: '2026-11-13',
+        metrics: ['revenue', 'ordered_units', 'returns'],
+        dimensions: ['sku'],
+        limit: 1000,
+      },
+    });
+
+    expect(callTool).toHaveBeenCalledWith('ozon_analytics', {
+      date_from: '2026-11-01',
+      date_to: '2026-11-13',
+      metrics: ['revenue', 'ordered_units', 'returns'],
+      dimensions: ['sku'],
+      limit: 1000,
+    });
+  });
+});

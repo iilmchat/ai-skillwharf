@@ -105,12 +105,12 @@ export const GoogleCalendarCreateToolSchema = z.object({
   timeZone: z.string().optional().describe('Часовой пояс IANA'),
 });
 
-/** Mock-инструмент генерации изображений. */
+/** Инструмент генерации изображений Midjourney. */
 export const GENERATE_IMAGE_TOOL_NAME = 'generate_image';
 export const GENERATE_IMAGE_TOOL_DESCRIPTION =
-  'Генерирует изображение по текстовому промпту (заглушка)';
+  'Генерирует изображение в Midjourney по промпту: отправляет задачу, дожидается готовности и возвращает URL картинки';
 export const GenerateImageToolSchema = z.object({
-  prompt: z.string().describe('Текстовый промпт изображения'),
+  prompt: z.string().min(1).describe('Подробный промпт изображения'),
 });
 
 /** Mock-инструмент запуска цепочек задач. */
@@ -131,36 +131,77 @@ export const PublishToDzenToolSchema = z.object({
   imageUrl: z.string().optional().describe('URL обложки статьи'),
 });
 
-/** Mock-инструмент юнит-экономики. */
+/** Инструмент юнит-экономики на реальных данных Ozon/WB. */
 export const CALCULATE_UNIT_ECONOMICS_TOOL_NAME = 'calculate_unit_economics';
 export const CALCULATE_UNIT_ECONOMICS_TOOL_DESCRIPTION =
-  'Считает маржу по SKU (заглушка)';
+  'Считает реальную юнит-экономику SKU по данным Ozon/WB MCP: выручка, комиссия, логистика, возвраты, штрафы и маржа за период';
 export const CalculateUnitEconomicsToolSchema = z.object({
-  sku: z.string().describe('Идентификатор товара'),
+  sku: z.string().min(1).describe('SKU: offer_id (Ozon), nmId/vendorCode (WB)'),
+  marketplace: z
+    .enum(['ozon', 'wb'])
+    .optional()
+    .describe('Маркетплейс, по умолчанию ozon'),
+  cost: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Себестоимость единицы, ₽ (если её нет в MCP)'),
+  price: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Цена продажи, ₽ (переопределяет цену из MCP)'),
+  dateFrom: z.string().optional().describe('Начало периода, YYYY-MM-DD'),
+  dateTo: z.string().optional().describe('Конец периода, YYYY-MM-DD'),
+  sellerId: z.string().optional().describe('shop_id продавца (мульти-магазин)'),
 });
 
-/** Mock-инструмент поиска утечек прибыли. */
+/** Инструмент поиска утечек прибыли на реальных данных MCP. */
 export const DETECT_PROFIT_LEAKS_TOOL_NAME = 'detect_profit_leaks';
 export const DETECT_PROFIT_LEAKS_TOOL_DESCRIPTION =
-  'Ищет утечки прибыли по продавцу (заглушка)';
+  'Ищет реальные утечки прибыли по данным Ozon/WB MCP: штрафы, удержания, возвраты, логистика, платное хранение и ценовой карантин';
 export const DetectProfitLeaksToolSchema = z.object({
-  sellerId: z.string().describe('Идентификатор продавца'),
+  sellerId: z.string().min(1).describe('Идентификатор продавца/shop_id'),
+  marketplace: z
+    .enum(['ozon', 'wb'])
+    .optional()
+    .describe('Маркетплейс, по умолчанию wb'),
+  dateFrom: z.string().optional().describe('Начало периода, YYYY-MM-DD'),
+  dateTo: z.string().optional().describe('Конец периода, YYYY-MM-DD'),
 });
 
-/** Mock-инструмент мониторинга цен конкурентов. */
+/** Инструмент мониторинга цен на реальных данных MCP. */
 export const MONITOR_COMPETITOR_PRICES_TOOL_NAME = 'monitor_competitor_prices';
 export const MONITOR_COMPETITOR_PRICES_TOOL_DESCRIPTION =
-  'Проверяет цены конкурентов по SKU (заглушка)';
+  'Сравнивает собственную цену SKU с ценой конкурента через Ozon Pricing API (для WB конкурентные цены MCP не отдаёт)';
 export const MonitorCompetitorPricesToolSchema = z.object({
-  sku: z.string().describe('Идентификатор товара'),
+  sku: z.string().min(1).describe('SKU: offer_id/product_id (Ozon) или nmId (WB)'),
+  marketplace: z
+    .enum(['ozon', 'wb'])
+    .optional()
+    .describe('Маркетплейс, по умолчанию ozon'),
+  productId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Ozon product_id для competitor pricing'),
+  sellerId: z.string().optional().describe('shop_id продавца'),
 });
 
-/** Mock-инструмент аудита рисков. */
+/** Инструмент аудита рисков рекламной кампании на реальных данных MCP. */
 export const AUDIT_FRAUD_RISK_TOOL_NAME = 'audit_fraud_risk';
 export const AUDIT_FRAUD_RISK_TOOL_DESCRIPTION =
-  'Проверяет доказательный пакет рекламной кампании (заглушка)';
+  'Проверяет рекламную кампанию по данным Ozon/WB MCP: наличие ERID/UTM, расход, удержания и антифрод-начисления';
 export const AuditFraudRiskToolSchema = z.object({
-  campaignId: z.string().describe('Идентификатор рекламной кампании'),
+  campaignId: z.string().min(1).describe('Идентификатор рекламной кампании'),
+  marketplace: z
+    .enum(['ozon', 'wb'])
+    .optional()
+    .describe('Маркетплейс, по умолчанию ozon'),
+  dateFrom: z.string().optional().describe('Начало периода, YYYY-MM-DD'),
+  dateTo: z.string().optional().describe('Конец периода, YYYY-MM-DD'),
+  sellerId: z.string().optional().describe('shop_id продавца'),
 });
 
 /** Mock-инструмент проверки фактов. */

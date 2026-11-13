@@ -205,6 +205,7 @@ export class AgentRuntimeService {
         try {
           result = await this.toolsService.execute(call.name, decision.args, {
             userId: request.userId,
+            skills: request.skills,
             ...(beforeExecute === undefined ? {} : { beforeExecute }),
             ...(egress === undefined ? {} : { egress }),
             ...(endpoint === undefined ? {} : { endpoint }),

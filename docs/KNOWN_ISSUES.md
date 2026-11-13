@@ -18,7 +18,7 @@
 | KI-012 | Marketplace | Средняя | Исправлено | Telegram (Bot API, webhook) и Google Workspace (OAuth, Sheets/Docs/Calendar) работают реально; оставшиеся внешние API (Midjourney, Ozon, WB) — отдельные задачи Sprint 19+ |
 | KI-013 | Security | Средняя | Исправлено | `AgentGateway` заменён декларативным policy engine: Zod-схемы, allowlist команд, taint tracking, роли/контекст, аудит блокировок |
 | KI-014 | Content/HR/Legal | Средняя | Открыто | `dzen-article` экспортирует только локальный Markdown-черновик; `fact-checker`, `resume-screener` и `document-analyzer` работают в режиме Mock |
-| KI-015 | Finance | Средняя | Открыто | Финансовые навыки `unit-economics`, `profit-leak-detector`, `price-monitor` и `fraud-shield-audit` работают в режиме Mock |
+| KI-015 | Finance | Средняя | Исправлено | Финансовые навыки считают по реальным данным Ozon/WB через MCP (аналитика, начисления, отчёт о реализации, удержания, цены); без данных — `dataAvailable:false` или ошибка провайдера |
 | KI-016 | Инфраструктура | Высокая | Исправлено | В staging Grafana использовала `admin/admin`, а Prometheus был без авторизации |
 | KI-017 | Инфраструктура | Средняя | Исправлено | Бэкапы БД накапливались без retention-политики и проверки свободного места |
 | KI-018 | Инфраструктура | Средняя | Открыто | Мониторинг использует общие статические Basic Auth-креды; нет SSO, per-user аудита и автоматической ротации |
@@ -58,8 +58,14 @@
 | KI-052 | Security | Средняя | Открыто | Egress api/worker — прикладной allowlist (`provider-http`, LLM-маршруты), а не NetworkPolicy/iptables; embeddings, MCP и YooKassa API не все проходят через единый guard |
 | KI-053 | Security | Средняя | Открыто | OAuth-токены шифруются локальным AES-256-GCM ключом из env; нет облачного KMS, keyId в envelope/БД и ротации без потери доступа |
 | KI-054 | Security | Низкая | Открыто | `DELETE /integrations/google` удаляет локальные токены, но не вызывает revoke в Google; refresh-token может оставаться действительным |
-| KI-055 | Marketplace | Средняя | Открыто | Внешние API `midjourney-api`, `ozon-seller`, `wb-seller` остаются Mock (историческая часть KI-012); закрываются интеграциями Sprint 19 |
+| KI-055 | Marketplace | Средняя | Исправлено | `generate_image` реально вызывает Midjourney API (async polling, retry); финансовые данные Ozon/WB идут через MCP — демонстрационных значений в этих инструментах нет |
 | KI-056 | Integrations | Низкая | Открыто | Telegram: webhook обслуживает один системный бот; боты, подключённые пользователями, используются только для исходящих `sendMessage`, входящие для них не принимаются |
+| KI-057 | Marketplace | Низкая | Открыто | MCP-healthcheck проверяет наличие env-ключей Ozon/WB и `/api/health`, но не scope/срок действия и не реальный доступ к Seller API; ключи, заданные через web-панель, не учитываются |
+| KI-058 | E2E | Низкая | Открыто | `scripts/test-integrations.sh` использует версионно-зависимые endpoint'ы Ozon (`/v1/product/import/prices`), WB Pricing (`/ping`) и TTAPI (`/midjourney/v1/fetch`); при смене API возможны ложные FAIL, путь настраивается через env |
+| KI-059 | Marketplace | Средняя | Открыто | Midjourney подключается только через TTAPI (`api.ttapi.io`): официального API нет, GoAPI/UseAPI закрыты, SLA/контракт прокси не гарантированы; альтернативный APIFRAME требует отдельного allowlist |
+| KI-060 | Integrations/Finance | Низкая | Открыто | UI Sprint 19 (Ozon Client ID/API Key, WB API Token 180 дней, Midjourney TT-API-KEY, финансовый дашборд) проверен на mock API; эндпоинты `/integrations/ozon`, `/integrations/wildberries`, `/integrations/midjourney` и `/finance/*` в текущей ветке API отсутствуют |
+| KI-061 | Finance | Низкая | Открыто | Ozon не привязывает комиссию/логистику к SKU в начислениях: `unit-economics` распределяет расходы по доле выручки SKU и не заменяет детализацию отчёта Ozon |
+| KI-062 | Finance | Средняя | Открыто | MCP-серверы Ozon/WB не отдают ERID/UTM отдельными полями: `fraud-shield-audit` проверяет их наличие в сырых данных кампании и сообщает об отсутствии, но не заменяет юридическую проверку маркировки |
 
 ## Детали
 
@@ -338,21 +344,48 @@ engine (`apps/api/src/security/policy/`):
 ### KI-015 — Финансовые навыки работают в режиме Mock
 
 **Влияние:** Навыки `unit-economics`, `profit-leak-detector`,
-`price-monitor` и `fraud-shield-audit` возвращают фиксированные
+`price-monitor` и `fraud-shield-audit` возвращали фиксированные
 демонстрационные значения вместо реальных расчётов и данных
-маркетплейсов. `profit-leak-detector` при этом списывает Pay-per-Call, а
+маркетплейсов. `profit-leak-detector` списывал Pay-per-Call, а
 `fraud-shield-audit` — Pay-per-Outcome с обязательным одобрением, поэтому
-пользователь может заплатить за демонстрационный результат.
+пользователь мог заплатить за демонстрационный результат.
 
-**Обход:** Использовать навыки только для демонстраций и тестирования
-сценариев. Не принимать на их основе решения о ценах, марже или санкциях;
-помечать результаты как демонстрационные.
+**Исправлено (Sprint 19):** Инструменты переписаны на реальные MCP-вызовы
+Ozon/WB (`FinanceDataService` + `FinanceToolsService`):
 
-**План:** Подключить реальные источники данных Ozon/WB, расчёт
-юнит-экономики по фактическим комиссиям и логистике, мониторинг цен и
-проверку доказательного пакета. Добавить валидацию входных данных, аудит
-вызовов и возвраты/отмены escrow при недостоверном результате. До этого
-считать финансовые навыки Mock-заглушками.
+- `calculate_unit_economics`: Ozon — `ozon_finance_totals`,
+  `ozon_analytics` (revenue/ordered_units/returns по SKU),
+  `ozon_get_prices`; WB — `wb_finance_report` (комиссия, логистика,
+  возвраты, штрафы, удержания, хранение, эквайринг, `ppvzForPay`).
+  Расходы Ozon распределяются по доле выручки SKU (KI-061), маржа без
+  `cost` не считается.
+- `detect_profit_leaks`: Ozon — `ozon_finance_totals` и
+  `ozon_finance_transactions` (реальные accruals: отрицательные начисления
+  группируются по категориям, топ-5 — `transaction_anomaly`); WB —
+  `wb_deductions`, штрафы/удержания из `wb_finance_report`,
+  `wb_prices_quarantine`. Возвращает `findings` с суммами и источниками.
+- `monitor_competitor_prices`: Ozon — своя цена (`ozon_get_prices`) и цена
+  конкурента (`ozon_pricing_competitor_prices` по `productId`); WB — своя
+  цена (`wb_prices_list`), конкурентные цены провайдер не отдаёт
+  (`competitorUnavailableReason`).
+- `audit_fraud_risk`: Ozon — `ozon_ad_campaigns` +
+  `ozon_ad_statistics_expenses`; WB — `wb_advert_list`, `wb_advert_costs`,
+  `wb_deductions`, `wb_analytics_antifraud`. Проверяется наличие ERID/UTM в
+  сырых данных кампании (KI-062).
+- Если MCP не вернул данные: непригодный ответ — 502 `errors.mcp_provider`;
+  валидный пустой ответ — `dataAvailable:false` с причиной. Фейковых
+  `sales/штрафов/цен` больше нет.
+- Оплата: Pay-per-Call списывается через BAL после успешного получения
+  данных, Pay-per-Outcome (`fraud-shield-audit`, `dzen-article`) — hold до
+  подтверждения и capture после успеха; при ошибке провайдера hold
+  отменяется.
+- Покрыто тестами: `finance-data.service.spec.ts` (парсинг/ошибки
+  провайдера), `finance-tools.service.spec.ts` (расчёты по фикстурам
+  реальных MCP-ответов), `agent-tools.service.spec.ts` (списание после
+  вызова и отсутствие списания при ошибке), `agent-runtime.service.spec.ts`
+  (PPC/PPO через BAL), `mcp-gateway.spec.ts` (strict-схемы действий).
+
+**Остаток:** детализация Ozon до SKU (KI-061) и ERID/UTM (KI-062).
 
 ### KI-016 — В staging Grafana использовала admin/admin, Prometheus был без авторизации
 
@@ -1120,18 +1153,30 @@ Security → Third-party access.
 ### KI-055 — Внешние API Midjourney, Ozon и Wildberries остаются Mock
 
 **Влияние:** Историческая часть KI-012: навыки `midjourney-api`,
-`ozon-seller` и `wb-seller` по-прежнему возвращают демонстрационные данные
-(`generate_image` — placeholder-URL, MCP-коннекторы — заглушки KI-011, либо
-реальный MCP только при заданных ключах). Sprint 18 закрыл Telegram и
-Google Workspace, эти интеграции — нет.
+`ozon-seller` и `wb-seller` по-прежнему возвращали демонстрационные данные
+(`generate_image` — placeholder-URL, финансовые инструменты — фиктивные
+суммы).
 
-**Обход:** Не использовать перечисленные навыки в продакшене; для Ozon/WB
-подключать реальный MCP-сервер через `mcp_endpoint` манифеста и ключи
-продавца (KI-011).
+**Исправлено (Sprint 19):**
 
-**План:** Sprint 19 — реальные Ozon Seller API/WB API и Midjourney API,
-ключи и таймауты, ретраи и маппинг ошибок провайдера; после этого закрыть
-KI-011 и KI-015.
+- `generate_image` реально вызывает TTAPI (единственный разрешённый
+  провайдер): `POST https://api.ttapi.io/midjourney/v1/imagine` с заголовком
+  `TT-API-KEY` и `{prompt, mode:"fast"}` → `jobId`; поллинг
+  `GET https://api.ttapi.io/midjourney/v1/fetch?jobId=...` до `completed` →
+  `imageUrl`. 429/5xx повторяются с экспоненциальным backoff через
+  `provider-http`, ошибки маппятся в
+  `errors.provider_rate_limited`/`provider_unavailable`, без ключа — 503
+  `errors.provider_not_configured`. Базовый URL/пути зафиксированы в коде;
+  GoAPI/UseAPI/Discord-обёртки не используются. Pay-per-Call списывается
+  после успешной генерации.
+- Ozon/WB финансовые данные идут через реальные MCP-серверы (см. KI-015);
+  `ozon_mcp_call`/`wb_mcp_call` продолжают работать как раньше.
+- Тесты: `midjourney.service.spec.ts` (nock: imagine → polling → URL,
+  429/5xx retry, failed/timeout, нет ключа),
+  `agent-tools.service.spec.ts` (списание после генерации).
+
+**Остаток:** сам Midjourney доступен только через сторонний прокси
+(KI-059); Ozon/WB MCP требуют ключей продавца (KI-011/057).
 
 ### KI-056 — Telegram webhook только для системного бота
 
@@ -1150,3 +1195,111 @@ webhook'ов не реализована).
 `/webhooks/telegram/:botId`, проверка секрета per-bot, регистрация
 `setWebhook` для каждого подключённого бота; хранить `webhookSecret` в
 `TelegramBot`.
+
+### KI-057 — MCP-healthcheck не проверяет scope и срок ключей
+
+**Влияние:** `infra/mcp/healthcheck.py` проверяет, что env-переменные
+`OZON_CLIENT_ID`/`OZON_API_KEY` или `WB_API_TOKEN` непустые, и что
+`/api/health` отвечает 200. Он не делает запрос к Seller API, поэтому
+просроченный токен, неверный scope или отозванный ключ могут оставить
+контейнер healthy. Ключи, добавленные через web-панель MCP, не видны
+healthcheck'у.
+
+**Обход:** Запускать `scripts/test-integrations.sh` после смены ключей и
+проверять `/diagnostics`/`/shops` соответствующего MCP-сервера.
+
+**План:** Добавить в healthcheck лёгкий authenticated-запрос к Ozon/WB
+(например, список складов/заказов) с кэшем и отдельным таймаутом; учитывать
+ключи, сохранённые web-панелью.
+
+### KI-058 — Тестовые endpoint'ы Ozon/WB версионно-зависимы
+
+**Влияние:** `scripts/test-integrations.sh` по умолчанию вызывает
+`POST /v1/product/import/prices` (Ozon Seller), `GET /ping` на
+`discounts-prices-api.wildberries.ru` (WB Pricing) и
+`GET /midjourney/v1/fetch?jobId=test` (TTAPI). При изменении версии/пути
+API скрипт даст ложный FAIL, хотя ключи валидны. Минимальные права токена
+WB могут не покрывать Pricing API.
+
+**Обход:** Переопределять `OZON_API_TEST_PATH`, `WB_API_TEST_PATH`,
+`MIDJOURNEY_TEST_PATH` и `*_API_BASE_URL`/`WB_PRICING_API_BASE_URL` в
+`.env`; сверять актуальный путь в кабинете провайдера.
+
+**План:** Поддержать несколько известных probe-путей с fallback и
+конфигурируемый read-only endpoint; добавить mock-режим для CI.
+
+### KI-059 — Midjourney только через сторонний прокси
+
+**Влияние:** У Midjourney нет официального публичного API. Инфраструктура
+использует TTAPI (`https://api.ttapi.io`) как выбранный прокси; GoAPI и
+UseAPI закрылись в июне 2026, APIFRAME — возможный fallback, но требует
+отдельного домена в allowlist. Контракт, лимиты и SLA зависят от
+провайдера; домен `api.ttapi.io` зафиксирован в `OUTBOUND_ALLOWLIST`.
+
+**Обход:** Использовать TTAPI, задавать `MIDJOURNEY_BASE_URL` и
+`MIDJOURNEY_TEST_PATH`, проверять `scripts/test-integrations.sh
+--midjourney`; хранить ключ только в `.env`/менеджере секретов.
+
+**План:** Абстракция Midjourney-клиента с адаптерами TTAPI/APIFRAME,
+polling задач и обработкой `202/queued`, лимиты расходов и метрики ошибок.
+
+### KI-060 — UI Sprint 19 без контрактов API
+
+**Влияние:** Настройка ключей Ozon/Wildberries/Midjourney и финансовый
+дашборд реализованы по контракту Sprint 19:
+`GET /integrations` (поля `ozon`, `wildberries`, `midjourney`),
+`POST/DELETE /integrations/{ozon|wildberries|midjourney}` и
+`GET /finance/overview` с fallback на `/finance/unit-economics`,
+`/finance/profit-leaks`, `/finance/fraud-shield`. В текущей ветке API этих
+маршрутов нет: бэкенд Sprint 19 работает с ключами из env
+(`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`, `MIDJOURNEY_API_KEY` —
+TT-API-KEY) и отдаёт финансовые результаты только через инструменты агента.
+Поэтому UI показывает статусы `disconnected` и ошибку `notFound`, а реальные
+подключения проверяются на mock API. Поля дашборда взяты из фактических
+`UnitEconomicsResult`, `ProfitLeakResult` и `FraudAuditResult`
+(`FinanceToolsService`), а не выдуманы.
+
+**Обход:** До появления REST-контракта проверять сценарии Playwright с
+`page.route`; ключи Ozon/WB/Midjourney задавать через env
+(`OZON_CLIENT_ID`/`OZON_API_KEY`, `WB_API_TOKEN`, `MIDJOURNEY_API_KEY`).
+Дашборд без `/finance/*` показывает локализованную ошибку, а не вымышленные
+данные.
+
+**План:** Реализовать контроллеры интеграций и финансового дашборда,
+возвращающие контракт из `apps/web/src/lib/integrations.ts` и
+`apps/web/src/lib/finance.ts`; после этого закрыть KI-060 и проверить
+реальные Ozon/WB/Midjourney-ключи в staging.
+
+### KI-061 — Ozon: комиссия и логистика распределяются по выручке SKU
+
+**Влияние:** Ozon в `/v1/finance/accrual/by-day` не привязывает комиссию,
+логистику и хранение к конкретному SKU: в начислениях есть категории и
+`type_id` услуг, но не `sku`. `unit-economics` распределяет расходы
+пропорционально выручке SKU из `ozon_analytics` за период и явно пишет это
+в `assumptions`. Для SKU с нетипичной структурой расходов (крупногабарит,
+много возвратов) оценка может отличаться от фактического отчёта Ozon.
+
+**Обход:** Для точной сверки использовать отчёт о реализации Ozon и
+передавать известную себестоимость (`cost`); не принимать решение по цене
+только на основе распределённых расходов.
+
+**План:** Использовать отчёт о реализации Ozon (когда доступен через MCP)
+или запрашивать у MCP сервер `ozon_finance_transactions` с детализацией до
+отправления и сопоставлять `posting_number` → SKU.
+
+### KI-062 — ERID/UTM не отдаются MCP-серверами Ozon/WB
+
+**Влияние:** `fraud-shield-audit` проверяет наличие ERID/UTM в сырых данных
+рекламной кампании (`ozon_ad_campaigns`, `wb_advert_list`) и расходах, но
+MCP-серверы Ozon/WB не возвращают эти поля отдельными атрибутами. Поэтому
+аудит по умолчанию показывает `missing_erid`/`missing_utm` и требует ручной
+проверки в рекламном кабинете; юридически значимой проверкой маркировки он
+не является.
+
+**Обход:** Проверять ERID/UTM в кабинетах Ozon/WB или через официальные
+административные API; результаты аудита использовать как сигнал, а не
+доказательство.
+
+**План:** Добавить коннектор к рекламным API с полями маркировки/UTM либо
+импорт доказательного пакета; тогда `eridPresent`/`utmPresent` станут
+достоверными.

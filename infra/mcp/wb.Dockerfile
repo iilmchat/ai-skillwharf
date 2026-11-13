@@ -7,6 +7,10 @@ ENV DATA_DIR=/data \
 # WB MCP Server: 197 инструментов Seller API, транспорт SSE.
 RUN pip install --no-cache-dir wb-mcp-server==2.6.1
 
+# Единый healthcheck: проверяет WB_API_TOKEN и /api/health.
+COPY infra/mcp/healthcheck.py /usr/local/bin/mcp-healthcheck.py
+RUN chmod +x /usr/local/bin/mcp-healthcheck.py
+
 VOLUME /data
 EXPOSE 5002
 

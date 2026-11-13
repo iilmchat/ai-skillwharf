@@ -7,8 +7,12 @@ import { SecurityModule } from '../security/security.module.js';
 import { AgentInternalController } from './agent-internal.controller.js';
 import { AgentRuntimeService } from './agent-runtime.service.js';
 import { AgentToolsService } from './agent-tools.service.js';
+import { FinanceDataService } from './finance/finance-data.service.js';
+import { FinanceToolsService } from './finance/finance-tools.service.js';
+import { MidjourneyService } from './finance/midjourney.service.js';
 import { LlmBudgetService } from './llm-budget.service.js';
 import { LlmWorkerClient } from './llm-worker.client.js';
+import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 
 /**
  * Agent Gateway: инструменты, policy/billing-мост для llm-worker и
@@ -28,6 +32,10 @@ import { LlmWorkerClient } from './llm-worker.client.js';
     AgentRuntimeService,
     LlmBudgetService,
     LlmWorkerClient,
+    MarketplaceMcpService,
+    FinanceDataService,
+    FinanceToolsService,
+    MidjourneyService,
   ],
   exports: [
     AgentToolsService,

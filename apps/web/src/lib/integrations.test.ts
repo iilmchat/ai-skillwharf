@@ -2,28 +2,32 @@ import { AxiosError, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import {
+  connectKeyIntegration,
   connectTelegram,
+  disconnectKeyIntegration,
   fetchGoogleAuthorizationUrl,
   fetchIntegrations,
   getActiveIntegrationChannels,
   getIntegrationErrorDetails,
   getTelegramDisplayName,
+  getWildberriesTokenExpiry,
   googleAuthorizationUrlSchema,
   integrationsSchema,
   telegramBotTokenSchema,
   type IntegrationsState,
 } from './integrations';
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  deleteMock: vi.fn(),
 }));
 
 vi.mock('./api', () => ({
   api: {
     get: getMock,
     post: postMock,
-    delete: vi.fn(),
+    delete: deleteMock,
   },
 }));
 
@@ -52,6 +56,9 @@ const ACTIVE_STATE: IntegrationsState = {
     botUsername: 'wharf_bot',
   },
   google: { status: 'active', email: 'owner@example.com' },
+  ozon: { status: 'disconnected' },
+  wildberries: { status: 'disconnected' },
+  midjourney: { status: 'disconnected' },
 };
 
 describe('integrationsSchema', () => {
@@ -65,6 +72,9 @@ describe('integrationsSchema', () => {
     ).toEqual({
       telegram: { status: 'disconnected' },
       google: { status: 'error', error: 'errors.google_oauth_unavailable' },
+      ozon: { status: 'disconnected' },
+      wildberries: { status: 'disconnected' },
+      midjourney: { status: 'disconnected' },
     });
   });
 
@@ -80,6 +90,28 @@ describe('integrationsSchema', () => {
         telegram: { status: 'active' },
       }).success,
     ).toBe(false);
+  });
+
+  it('принимает срок действия WB-токена в tokenExpiresAt и expiresAt', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'disconnected' },
+      google: { status: 'disconnected' },
+      wildberries: {
+        status: 'active',
+        tokenExpiresAt: '2027-05-12T00:00:00.000Z',
+      },
+    });
+
+    expect(getWildberriesTokenExpiry(state.wildberries)).toBe(
+      '2027-05-12T00:00:00.000Z',
+    );
+    expect(
+      getWildberriesTokenExpiry({
+        status: 'active',
+        expiresAt: '2027-05-12T00:00:00.000Z',
+      }),
+    ).toBe('2027-05-12T00:00:00.000Z');
+    expect(getWildberriesTokenExpiry({ status: 'active' })).toBeNull();
   });
 });
 
@@ -118,6 +150,7 @@ describe('integration API', () => {
   beforeEach(() => {
     getMock.mockReset();
     postMock.mockReset();
+    deleteMock.mockReset();
   });
 
   it('валидирует состояние из GET /integrations', async () => {
@@ -171,6 +204,43 @@ describe('integration API', () => {
       botToken: '123456789:secret',
     });
   });
+
+  it('подключает Ozon с Client ID и API Key', async () => {
+    await connectKeyIntegration({
+      provider: 'ozon',
+      clientId: 'client-1',
+      apiKey: 'secret-key',
+    });
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/ozon', {
+      clientId: 'client-1',
+      apiKey: 'secret-key',
+    });
+  });
+
+  it('подключает Wildberries только API Token', async () => {
+    await connectKeyIntegration({
+      provider: 'wildberries',
+      apiToken: 'wb-token',
+    });
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/wildberries', {
+      apiToken: 'wb-token',
+    });
+  });
+
+  it('подключает Midjourney только TT-API-KEY и отключает провайдера', async () => {
+    await connectKeyIntegration({
+      provider: 'midjourney',
+      apiKey: 'mj-key',
+    });
+    await disconnectKeyIntegration('midjourney');
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/midjourney', {
+      apiKey: 'mj-key',
+    });
+    expect(deleteMock).toHaveBeenCalledWith('/integrations/midjourney');
+  });
 });
 
 describe('getActiveIntegrationChannels', () => {
@@ -183,6 +253,9 @@ describe('getActiveIntegrationChannels', () => {
       getActiveIntegrationChannels({
         telegram: { status: 'active' },
         google: { status: 'disconnected' },
+        ozon: { status: 'disconnected' },
+        wildberries: { status: 'disconnected' },
+        midjourney: { status: 'disconnected' },
       }),
     ).toEqual(['telegram']);
     expect(getActiveIntegrationChannels(undefined)).toEqual([]);
@@ -282,6 +355,60 @@ describe('getIntegrationErrorDetails', () => {
         'telegramConnect',
       ).kind,
     ).toBe('invalidToken');
+  });
+
+  it('маппит ошибки Ozon/WB/Midjourney в invalidCredentials', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith(
+          { code: 'errors.provider_auth_required', message: 'Bad keys' },
+          401,
+        ),
+        'ozonConnect',
+      ),
+    ).toEqual({
+      kind: 'invalidCredentials',
+      serverMessage: 'errors.provider_auth_required',
+    });
+
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Bad keys' }, 400),
+        'wildberriesConnect',
+      ).kind,
+    ).toBe('invalidCredentials');
+
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Bad key' }, 403),
+        'midjourneyConnect',
+      ).kind,
+    ).toBe('forbidden');
+
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Bad key' }, 401),
+        'midjourneyConnect',
+      ).kind,
+    ).toBe('sessionExpired');
+  });
+
+  it('маппит provider_unavailable в unavailable', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith(
+          {
+            code: 'errors.provider_unavailable',
+            message: 'Ozon API is unavailable',
+          },
+          502,
+        ),
+        'ozonConnect',
+      ),
+    ).toEqual({
+      kind: 'unavailable',
+      serverMessage: 'errors.provider_unavailable',
+    });
   });
 
   it('маппит сеть, 401, 403, 404 и 5xx', () => {

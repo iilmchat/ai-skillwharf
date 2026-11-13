@@ -1418,8 +1418,8 @@ Ledger. После восстановления проверьте отсутс�
 
 ```bash
 # В .env / compose
-API_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com
-LLM_WORKER_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru
+API_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru
+LLM_WORKER_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru
 ```
 
 Правила:
@@ -1507,3 +1507,116 @@ KMS. Без `TOKEN_ENCRYPTION_KEY` подключение Google не сохра
   `.env`/compose.
 * Тесты без реальных ключей: `pnpm --filter api test` — Telegram/Google
   эмулируются nock (429/401/refresh, тела запросов, webhook secret).
+
+## 19. Финансовые интеграции и Midjourney
+
+### 19.1. Источники данных Ozon/WB
+
+Финансовые инструменты не используют демо-данные: они вызывают MCP-серверы
+Ozon/WB. Нужны ключи продавца и запущенный MCP-стек
+(`docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d`).
+
+* `OZON_CLIENT_ID`, `OZON_API_KEY` — Ozon Seller API; для рекламы нужны
+  Performance-ключи `OZON_PERF_CLIENT_ID`/`OZON_PERF_CLIENT_SECRET` и
+  `OZON_PERFORMANCE_API_BASE_URL=https://api-performance.ozon.ru`
+  (старый `performance.ozon.ru` не использовать);
+* `WB_API_TOKEN` — Wildberries Seller/Marketplace + Pricing;
+  Pricing API живёт на отдельном хосте
+  `WB_PRICING_API_BASE_URL=https://discounts-prices-api.wildberries.ru`
+  (не `marketplace-api.wildberries.ru`);
+* токен WB действует 180 дней; отдельного API-поля срока действия нет —
+  дату создания/окончания фиксируйте в кабинете продавца и проверяйте
+  `GET {WB_PRICING_API_BASE_URL}/ping` (см. `scripts/test-integrations.sh`);
+* endpoint берётся из `mcp_endpoint` манифеста навыка, fallback —
+  `OZON_MCP_URL`/`WB_MCP_URL` (compose задаёт `http://ozon-mcp:5001`,
+  `http://wb-mcp:5002`);
+* `MCP_AUTH_TOKEN` — общий Bearer для `/sse` (опционально).
+
+Получение ключей:
+
+* **Ozon Performance**: кабинет Ozon Performance → API → создать
+  Client ID/Secret; запросы идут на `https://api-performance.ozon.ru`
+  (старый `performance.ozon.ru` мёртв с января 2025).
+* **WB Pricing**: кабинет продавца → Настройки → Доступ к API → создать
+  токен с категорией «Цены и скидки»; запросы — на
+  `https://discounts-prices-api.wildberries.ru`, токен действует 180 дней.
+
+Проверка ключей без MCP UI:
+
+```bash
+bash scripts/test-integrations.sh --ozon --wb
+```
+
+Ozon проверяется `POST /v1/product/import/prices` с пустым `prices:[]`
+(цены не меняются), WB — `GET /ping` на Pricing-хосте. 401/403 — ошибка,
+400/422 для Ozon означает, что ключ принят, а тестовое тело отклонено.
+
+Проверка MCP: `curl http://127.0.0.1:5001/api/health` и
+`scripts/test-integrations.sh` (при заданных ключах делает реальные запросы,
+секреты не печатает).
+
+### 19.2. Инструменты и периоды
+
+| Инструмент | Действия MCP | Особенности |
+| --- | --- | --- |
+| `calculate_unit_economics` | `ozon_finance_totals`, `ozon_analytics`, `ozon_get_prices`, `wb_finance_report` | Ozon — период ≤ 31 дня; расходы распределяются по выручке SKU (KI-061); без `cost` маржа не считается |
+| `detect_profit_leaks` | `ozon_finance_totals`, `ozon_finance_transactions`, `wb_finance_report`, `wb_deductions`, `wb_prices_quarantine` | Pay-per-Call 300 ₽, списание после успешного вызова; аномалии — по реальным accruals |
+| `monitor_competitor_prices` | `ozon_get_prices`, `ozon_pricing_competitor_prices`, `wb_prices_list` | Для Ozon нужен `productId`; WB конкурентные цены не отдаёт |
+| `audit_fraud_risk` | `ozon_ad_campaigns`, `ozon_ad_statistics_expenses`, `wb_advert_list`, `wb_advert_costs`, `wb_deductions`, `wb_analytics_antifraud` | Pay-per-Outcome 500 ₽ + подтверждение; ERID/UTM проверяются в сырых данных (KI-062) |
+
+Ошибки: нет данных по SKU — `dataAvailable:false`; непригодный ответ MCP —
+502 `errors.mcp_provider`; лимит/таймаут MCP — `errors.mcp_timeout`;
+не сконфигурирован — `errors.mcp_unavailable`.
+
+Сверка MCP-действий с аудитом API (11.2026):
+
+* `ozon_analytics` → `/v1/analytics/data`;
+* `ozon_finance_totals` / `ozon_finance_transactions` → начисления
+  `/v1/finance/accrual/by-day`: `/v3/finance/transaction/list` отключён
+  Ozon, MCP-сервер пересобирает операции по дням (не вызывайте v3 напрямую);
+* `ozon_get_prices` → `/v5/product/info/prices` — это read-метод;
+  `/v1/product/import/prices` — write-импорт цен (используется только в
+  `scripts/test-integrations.sh` с пустым телом);
+* `ozon_pricing_competitor_prices`, `ozon_ad_campaigns`,
+  `ozon_ad_statistics_expenses` — Ozon Performance
+  (`api-performance.ozon.ru`);
+* `wb_prices_list` → хост `discounts-prices-api.wildberries.ru`,
+  `/api/v2/list/goods/filter`; внутри MCP-сервера авторизация — raw
+  `Authorization` без `Bearer`, наружу это не выходит;
+* `wb_finance_report` → отчёт о реализации (комиссии, логистика,
+  возвраты, штрафы), `wb_deductions` → удержания за подмены,
+  `wb_analytics_antifraud` → самовыкупы.
+
+### 19.3. Midjourney (TTAPI)
+
+Официального API нет; разрешён только TTAPI — выбранный провайдер по аудиту
+ноября 2026. GoAPI/UseAPI и Discord-обёртки не используются.
+
+1. Получите ключ в кабинете TTAPI и задайте:
+
+   ```text
+   MIDJOURNEY_API_KEY=<ключ TTAPI>
+   ```
+
+2. Эндпоинты зафиксированы в коде и не переопределяются окружением:
+   * `POST https://api.ttapi.io/midjourney/v1/imagine`
+     (заголовок `TT-API-KEY`, тело `{ "prompt": "...", "mode": "fast" }`)
+     → `jobId`;
+   * `GET https://api.ttapi.io/midjourney/v1/fetch?jobId=<jobId>`
+     (тот же заголовок) → `status`, `imageUrl`.
+   Поллинг — `MIDJOURNEY_POLL_INTERVAL_MS`/`MIDJOURNEY_TIMEOUT_MS`.
+3. Домен `api.ttapi.io` зафиксирован в `API_OUTBOUND_ALLOWLIST`; другие
+   домены Midjourney не добавляйте — смена провайдера запрещена.
+4. Проверка ключа без генерации:
+
+   ```bash
+   bash scripts/test-integrations.sh --midjourney
+   ```
+
+   Скрипт делает `GET /midjourney/v1/fetch?jobId=test`; 404/2xx — ключ
+   принят, 401 — ключ отклонён.
+
+Ограничения: 429/5xx повторяются, после исчерпания —
+`errors.provider_rate_limited`/`provider_unavailable`; Pay-per-Call
+0.50 ₽ списывается после успешной генерации; при ошибке/таймауте списания
+нет. TTAPI не даёт официального SLA (KI-059).

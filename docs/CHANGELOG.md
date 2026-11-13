@@ -4,6 +4,113 @@
 
 ## [Unreleased]
 
+### Sprint 19: Finance & Creative Integrations UI
+
+- В разделе «Интеграции» появились карточки Ozon, Wildberries и Midjourney:
+  Ozon — Client ID + API Key (цены v1, товары v3); Wildberries — только
+  `API Token` с предупреждением о сроке 180 дней и показом `tokenExpiresAt`/
+  `expiresAt`; Midjourney — `TT-API-KEY` с пометкой TTAPI (не официальный
+  API). Статусы `active`/`disconnected`/`error`, подключение и отключение.
+- Чат распознаёт изображения в ответе агента (Markdown и прямые URL,
+  включая `imageUrl` TTAPI): показывает превью и открывает оригинал в новой
+  вкладке; небезопасные схемы (`javascript:`, `data:`) в `<img>` не
+  превращаются.
+- Добавлена защищённая страница `/app/finance`: выручка, прибыль (`margin`),
+  маржа (`marginPercent`), таблица unit-economics по SKU, алерты
+  `profit-leak-detector` и статус `fraud-shield-audit`, выведенный из
+  `findings`/`checks`. Контракт использует реальные поля
+  `FinanceToolsService`: `GET /finance/overview` с fallback на
+  `/finance/unit-economics`, `/finance/profit-leaks` и
+  `/finance/fraud-shield`; ответы валидируются Zod,
+  `errors.provider_unavailable` локализуется.
+- Новый остаток: KI-060 — UI Sprint 19 проверен на mock API; реальные
+  endpoints Ozon/WB/Midjourney и финансового дашборда требуют backend-реализации
+  (KI-057–062 уже заняты бэкенд-задачами).
+
+### Sprint 19: Real Finance Data & Midjourney (backend)
+
+- Финансовые инструменты больше не используют Mock: `calculate_unit_economics`,
+  `detect_profit_leaks`, `monitor_competitor_prices` и `audit_fraud_risk`
+  вызывают реальные MCP-действия Ozon/WB. Сверка с аудитом API (11.2026):
+  `ozon_analytics` → `/v1/analytics/data`; `ozon_finance_totals` /
+  `ozon_finance_transactions` → начисления `/v1/finance/accrual/by-day`
+  (аудит указывает `/v3/finance/transaction/list`, но Ozon его отключил —
+  MCP-сервер пересобирает операции по дням); `ozon_get_prices` →
+  `/v5/product/info/prices` (это read-метод; `/v1/product/import/prices` —
+  write-импорт цен); `ozon_pricing_competitor_prices`,
+  `ozon_ad_campaigns`, `ozon_ad_statistics_expenses`.
+  WB: `wb_finance_report` (отчёт о реализации), `wb_deductions`,
+  `wb_prices_list` → хост `discounts-prices-api.wildberries.ru`,
+  `/api/v2/list/goods/filter` (авторизация — raw `Authorization` внутри MCP),
+  `wb_prices_quarantine`, `wb_advert_list`, `wb_advert_costs`,
+  `wb_analytics_antifraud`.
+- `detect_profit_leaks` для Ozon дополнительно анализирует реальные
+  `ozon_finance_transactions` (accruals): отрицательные начисления
+  группируются по категориям, топ-5 попадает в `findings` как
+  `transaction_anomaly`.
+- Вынесен `MarketplaceMcpService`: endpoint провайдера берётся из
+  `mcp_endpoint` навыка или `OZON_MCP_URL`/`WB_MCP_URL`, клиент/gateway
+  кешируются, ошибки MCP маппятся в единый JSON. `ozon_mcp_call`/
+  `wb_mcp_call` используют его же.
+- `FinanceDataService` валидирует и нормализует ответы MCP (Zod-обёртки,
+  camelCase/snake_case, вложенные `data.list`/`report`/`accruals`); не-JSON
+  и отсутствие обязательных полей — 502 `errors.mcp_provider`, пустой
+  валидный ответ — `dataAvailable:false` без фейковых чисел.
+- `generate_image` реально работает через TTAPI (единственный разрешённый
+  провайдер): `POST https://api.ttapi.io/midjourney/v1/imagine` с заголовком
+  `TT-API-KEY` и `{prompt, mode:"fast"}` → `jobId` → поллинг
+  `GET https://api.ttapi.io/midjourney/v1/fetch?jobId=...` до `completed` →
+  `imageUrl`. Базовый URL и пути зафиксированы в коде; GoAPI/UseAPI и
+  Discord-обёртки не используются. 429/5xx повторяются с экспоненциальным
+  backoff, `failed`/таймаут — `provider_unavailable`, без ключа — 503
+  `provider_not_configured`. Env: `MIDJOURNEY_API_KEY`,
+  `MIDJOURNEY_POLL_INTERVAL_MS`, `MIDJOURNEY_TIMEOUT_MS`.
+- Оплата: Pay-per-Call для `detect_profit_leaks`/`generate_image`
+  списывается через BAL после успешного реального вызова; Pay-per-Outcome
+  (`fraud-shield-audit`, `dzen-article`) — hold до подтверждения и capture
+  после успеха; ошибка провайдера отменяет hold. Проверено
+  `agent-runtime.service.spec.ts`.
+- Strict-схемы MCP-действий расширены финансовыми операциями (даты, лимиты,
+  `view`, `filter_nm_id`, `metrics`/`dimensions`), `ozon_get_prices`
+  поддерживает реальные `offer_id`/`product_id`.
+- Обновлены манифесты навыков (без «заглушек», периоды, `cost`, ограничения
+  ERID/UTM), `.env.example` и `docker-compose.yml` (TTAPI, allowlist,
+  retry).
+- Тесты: `finance-data.service.spec.ts` (включая `ozon_finance_transactions`),
+  `finance-tools.service.spec.ts` (аномалии транзакций),
+  `midjourney.service.spec.ts` (nock TTAPI: imagine/fetch, TT-API-KEY,
+  mode=fast, 429/5xx/failed/timeout/no-key), `agent-tools.service.spec.ts`,
+  `agent-runtime.service.spec.ts`, `mcp-gateway.spec.ts`.
+- KI-015 и KI-055 закрыты; остатки — KI-061 (распределение расходов Ozon)
+  и KI-062 (ERID/UTM не отдаются MCP).
+
+### Sprint 19: Midjourney & Marketplace Integrations
+
+- Добавлены секреты Midjourney через TTAPI (единственный выбранный прокси):
+  `MIDJOURNEY_API_KEY`, `MIDJOURNEY_BASE_URL=https://api.ttapi.io`,
+  `MIDJOURNEY_WEBHOOK_URL` (опционально). GoAPI/UseAPI и хосты
+  `api.goapi.ai`/`api.midjourney.com` не используются. Для egress добавлены
+  `api.ttapi.io`, `api-performance.ozon.ru` (Ozon Performance) и
+  `discounts-prices-api.wildberries.ru` (WB Pricing) в
+  `API_OUTBOUND_ALLOWLIST`/`LLM_WORKER_OUTBOUND_ALLOWLIST` и default
+  allowlist `@skillwharf/shared`.
+- Ozon/WB MCP: ключи по-прежнему передаются только контейнерам MCP через
+  env; добавлен `infra/mcp/healthcheck.py`, который в healthcheck проверяет
+  наличие `OZON_CLIENT_ID`/`OZON_API_KEY` или `WB_API_TOKEN` и доступность
+  `/api/health`. Пустые ключи делают контейнер unhealthy (обход только
+  `MCP_ALLOW_MISSING_KEYS=1` для локальной панели).
+- `scripts/test-integrations.sh`: Ozon — `POST /v1/product/import/prices`
+  с пустым `prices:[]` (без изменения цен), WB — `GET /ping` на
+  `discounts-prices-api.wildberries.ru`, Midjourney — TTAPI
+  `GET /midjourney/v1/fetch?jobId=test` (404/2xx — ключ принят, 401 —
+  ошибка); без ключей — WARN/SKIP. Секреты не печатаются.
+- Runbook: получение ключей TTAPI, Ozon Performance, WB Pricing; отдельные
+  хосты финансовых API, проверка 180-дневного токена WB, запуск
+  MCP-стека, healthcheck и проверка коннектов.
+- Новые ограничения: KI-057 (healthcheck не проверяет scope/срок ключей),
+  KI-058 (тестовые endpoint'ы версионно-зависимы), KI-059 (нет официального
+  Midjourney API/SLA).
+
 ### Sprint 18: Telegram Webhooks, Google OAuth & Egress
 
 - Caddy (`deploy/Caddyfile`, `deploy/Caddyfile.staging`) проксирует

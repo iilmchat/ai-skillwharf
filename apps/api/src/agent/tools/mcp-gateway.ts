@@ -97,6 +97,18 @@ const skuSchema = z.array(z.string().min(1).max(128)).max(100).optional();
 const idsSchema = z.array(z.string().min(1).max(128)).max(100).optional();
 const limitSchema = z.number().int().min(1).max(1000).optional();
 const offsetSchema = z.number().int().min(0).optional();
+const viewSchema = z.enum(['compact', 'full']).optional();
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const isoDateTimeSchema = z.string().max(64);
+const productIdsSchema = z
+  .array(z.number().int().nonnegative())
+  .max(100)
+  .optional();
+const numericIdsSchema = z.array(z.number().int()).max(100).optional();
+const offerIdsSchema = z
+  .array(z.string().min(1).max(128))
+  .max(100)
+  .optional();
 
 /**
  * Строгие схемы параметров известных действий Ozon. Незнакомые ключи
@@ -106,9 +118,14 @@ const offsetSchema = z.number().int().min(0).optional();
 const OZON_ACTION_SCHEMAS = {
   ozon_get_prices: z.strictObject({
     shop_id: shopIdSchema,
+    // Актуальные фильтры /v5/product/info/prices.
+    offer_id: offerIdsSchema,
+    product_id: productIdsSchema,
+    // Legacy-поля: старые вызовы из манифестов/тестов продолжают работать.
     sku: skuSchema,
     limit: limitSchema,
     offset: offsetSchema,
+    view: viewSchema,
   }),
   ozon_orders_fbs: z.strictObject({
     shop_id: shopIdSchema,
@@ -131,6 +148,61 @@ const OZON_ACTION_SCHEMAS = {
     limit: limitSchema,
     offset: offsetSchema,
   }),
+  // --- Финансы и аналитика (Sprint 19) ----------------------------------
+  ozon_finance_totals: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: isoDateTimeSchema,
+    date_to: isoDateTimeSchema,
+  }),
+  ozon_finance_transactions: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: isoDateTimeSchema,
+    date_to: isoDateTimeSchema,
+    page: z.number().int().min(1).optional(),
+    page_size: z.number().int().min(1).max(1000).optional(),
+    operation_type: z.array(z.string().min(1).max(64)).max(20).optional(),
+    view: viewSchema,
+  }),
+  ozon_analytics: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: isoDateTimeSchema,
+    date_to: isoDateTimeSchema,
+    metrics: z.array(z.string().min(1).max(64)).min(1).max(20),
+    dimensions: z.array(z.string().min(1).max(64)).min(1).max(5),
+    limit: limitSchema,
+    offset: offsetSchema,
+    view: viewSchema,
+  }),
+  ozon_pricing_competitor_prices: z.strictObject({
+    shop_id: shopIdSchema,
+    product_id: z.number().int().positive(),
+    view: viewSchema,
+  }),
+  ozon_ad_campaigns: z.strictObject({
+    shop_id: shopIdSchema,
+    campaign_ids: numericIdsSchema,
+    adv_object_type: z.string().min(1).max(64).optional(),
+    state: z.string().min(1).max(64).optional(),
+    view: viewSchema,
+  }),
+  ozon_ad_statistics_expenses: z.strictObject({
+    shop_id: shopIdSchema,
+    campaigns: z.array(z.number().int()).max(10),
+    date_from: isoDateTimeSchema,
+    date_to: isoDateTimeSchema,
+    view: viewSchema,
+  }),
+  ozon_actions_list: z.strictObject({
+    shop_id: shopIdSchema,
+    view: viewSchema,
+  }),
+  ozon_cancellation_list: z.strictObject({
+    shop_id: shopIdSchema,
+    posting_number: z.string().min(1).max(128).optional(),
+    state: z.string().min(1).max(64).optional(),
+    limit: limitSchema,
+    view: viewSchema,
+  }),
 };
 
 /** Строгие схемы параметров известных действий Wildberries. */
@@ -142,13 +214,40 @@ const WB_ACTION_SCHEMAS = {
   }),
   wb_finance_report: z.strictObject({
     shop_id: shopIdSchema,
+    date_from: dateSchema,
+    date_to: dateSchema,
+    limit: limitSchema,
+    rrd_id: z.number().int().min(0).optional(),
+    view: viewSchema,
+  }),
+  wb_finance_reports_list: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: dateSchema,
+    date_to: dateSchema,
+    period: z.enum(['weekly', 'monthly']).optional(),
     limit: limitSchema,
     offset: offsetSchema,
   }),
+  wb_finance_report_detailed: z.strictObject({
+    shop_id: shopIdSchema,
+    report_id: z.string().min(1).max(128),
+    limit: limitSchema,
+    rrd_id: z.number().int().min(0).optional(),
+    view: viewSchema,
+  }),
   wb_advert_list: z.strictObject({
     shop_id: shopIdSchema,
+    ids: numericIdsSchema,
+    statuses: z.array(z.number().int()).max(20).optional(),
+    payment_type: z.enum(['cpm', 'cpc']).optional(),
     limit: limitSchema,
     offset: offsetSchema,
+    view: viewSchema,
+  }),
+  wb_advert_costs: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: dateSchema,
+    date_to: dateSchema,
   }),
   wb_orders_list: z.strictObject({
     shop_id: shopIdSchema,
@@ -160,6 +259,33 @@ const WB_ACTION_SCHEMAS = {
     sku: skuSchema,
     limit: limitSchema,
     offset: offsetSchema,
+  }),
+  // --- Финансы, цены и антифрод (Sprint 19) -----------------------------
+  wb_deductions: z.strictObject({
+    shop_id: shopIdSchema,
+    date_from: dateSchema,
+    date_to: dateSchema,
+    limit: limitSchema,
+    offset: offsetSchema,
+  }),
+  wb_prices_list: z.strictObject({
+    shop_id: shopIdSchema,
+    limit: limitSchema,
+    offset: offsetSchema,
+    filter_nm_id: z.number().int().positive().optional(),
+    view: viewSchema,
+  }),
+  wb_prices_quarantine: z.strictObject({
+    shop_id: shopIdSchema,
+    limit: limitSchema,
+    offset: offsetSchema,
+  }),
+  wb_analytics_antifraud: z.strictObject({
+    shop_id: shopIdSchema,
+    date: dateSchema,
+  }),
+  wb_finance_balance: z.strictObject({
+    shop_id: shopIdSchema,
   }),
 };
 
@@ -189,6 +315,20 @@ export function mcpUnavailableError(): ApiException {
     error: 'Service Unavailable',
     code: ERROR_KEYS.mcpUnavailable,
     message: 'MCP-сервер не сконфигурирован',
+  });
+}
+
+/**
+ * Ошибка провайдера MCP: сервер ответил, но данные непригодны (не JSON,
+ * нет обязательных полей). Отдаётся как 502 `errors.mcp_provider`, а не
+ * подменяется демонстрационными значениями.
+ */
+export function mcpProviderError(message: string): ApiException {
+  return new ApiException({
+    statusCode: HttpStatus.BAD_GATEWAY,
+    error: 'Bad Gateway',
+    code: ERROR_KEYS.mcpProvider,
+    message,
   });
 }
 

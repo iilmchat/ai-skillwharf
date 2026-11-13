@@ -881,6 +881,29 @@ export function OfficePage() {
               <LanguageSwitcher />
               <ThemeToggle />
               <Link
+                to="/app/finance"
+                aria-label={t('nav.finance')}
+                title={t('nav.finance')}
+                className="inline-flex size-10 items-center justify-center gap-1.5 rounded-full border border-outline bg-surface-container text-on-surface-variant transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:px-3"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
+                  <path d="M4 19V5M4 19h16" />
+                  <path d="M8 16v-5M12 16V8M16 16v-3" />
+                </svg>
+                <span className="hidden text-xs font-semibold sm:inline">
+                  {t('nav.finance')}
+                </span>
+              </Link>
+              <Link
                 to={isAuthenticated ? '/app/chat' : '/login'}
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >

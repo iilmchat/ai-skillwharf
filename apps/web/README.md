@@ -77,11 +77,24 @@ Zod (`src/lib/ledger.ts`).
   `handshake.auth` и отправляет сообщения событием `send_message`;
 - `/app/skills` — защищённый каталог навыков;
 - `/app/store` — защищённый магазин навыков;
+- `/app/finance` — защищённый финансовый дашборд (unit-economics и
+  fraud-shield-audit);
 - `/app/settings` — защищённые настройки: управление долговременной
   памятью и (при включённом флаге) просмотр записей RAG-памяти.
 
-Старые пути `/chat`, `/skills`, `/store` перенаправляют на `/app/*`, чтобы
-сохранённые ссылки продолжали работать.
+Старые пути `/chat`, `/skills`, `/store`, `/finance` перенаправляют на
+`/app/*`, чтобы сохранённые ссылки продолжали работать.
+
+## Картинки в чате
+
+Ответ ассистента разбирается на текст и изображения (`src/lib/message-images.ts`).
+Поддерживаются Markdown `![alt](https://...png)`, «голые» http(s)-URL с
+расширением `png/jpg/jpeg/gif/webp/avif`, а также JSON-ответ инструмента
+`generate_image` с `imageUrl`/`image_url` (TTAPI может не добавлять
+расширение файла). Картинка показывается превью `max-h-80`; клик открывает её
+в новой вкладке в полном размере (`target="_blank"`,
+`rel="noopener noreferrer"`). Ссылки с другими схемами (`javascript:`,
+`data:`) не превращаются в `<img>`, а остаются текстом.
 
 ## AI-Офис и ожидания подтверждения
 
@@ -103,8 +116,8 @@ Google Workspace активен, в карточках агентов и в бо
 
 Страница `/app/settings` содержит три независимых блока:
 
-- «Интеграции» — Telegram и Google Workspace: подключение, статус и отзыв
-  доступа (см. раздел «Интеграции» ниже).
+- «Интеграции» — Telegram, Google Workspace, Ozon, Wildberries и Midjourney:
+  подключение, статус и отзыв доступа (см. раздел «Интеграции» ниже).
 - «Долговременная память» — кнопка «Забыть меня» вызывает
   `DELETE /api/v1/chat/memory` и показывает тост об успехе или ошибке.
 - «Память» — список записей RAG-памяти. Раздел управляется feature-флагом
@@ -171,6 +184,20 @@ docker build -f apps/web/Dockerfile \
   backend возвращает браузер в настройки, иначе callback отдаёт JSON для
   диагностики — откройте `/app/settings` вручную. Кнопка «Отозвать доступ»
   вызывает `DELETE /api/v1/integrations/google`.
+- **Ozon.** Поля `Client ID` и `API Key` отправляются в
+  `POST /api/v1/integrations/ozon`; в `GET /api/v1/integrations` приходит
+  `{ status, clientId? }`. Цены Ozon Seller API — v1, товары — v3. Кнопка
+  «Отключить» вызывает `DELETE /api/v1/integrations/ozon`.
+- **Wildberries.** Поле `API Token` (без Client ID) отправляется в
+  `POST /api/v1/integrations/wildberries`
+  (`{ apiToken }`); backend ходит на `discounts-prices-api.wildberries.ru`.
+  Токен действует 180 дней: если API вернул `tokenExpiresAt` или `expiresAt`,
+  UI показывает «Действует до …», иначе предупреждение о 180 днях. Секрет
+  после подключения не возвращается.
+- **Midjourney.** Поле `TT-API-KEY` отправляется в
+  `POST /api/v1/integrations/midjourney` (`{ apiKey }`); подпись в карточке
+  явно сообщает, что используется TTAPI, а не официальный API Midjourney.
+  Отключение — `DELETE /api/v1/integrations/midjourney`.
 - **Ошибки.** Коды `errors.provider_auth_required`,
   `errors.provider_not_configured`, `errors.provider_unavailable`,
   `errors.provider_rate_limited`, а также `errors.invalid_telegram_token` и
@@ -178,6 +205,59 @@ docker build -f apps/web/Dockerfile \
   ответов показывается локализованная категория по HTTP-статусу (сеть, 401,
   403, 404, 5xx) или текст сервера. Если API интеграций ещё не развёрнут,
   карточка показывает ошибку `notFound`, а не вымышленный статус.
+
+## Финансы
+
+Страница `/app/finance` — дашборд Track J. UI использует поля фактических
+ответов `FinanceToolsService` (`unit-economics`, `profit-leak-detector`,
+`fraud-shield-audit`) и валидирует их Zod (`src/lib/finance.ts`). Ожидаемый
+агрегирующий endpoint — `GET /api/v1/finance/overview`:
+
+```json
+{
+  "currency": "RUB",
+  "period": { "from": "2026-11-01", "to": "2026-11-30" },
+  "unitEconomics": [
+    {
+      "tool": "unit-economics",
+      "marketplace": "ozon",
+      "sku": "SKU-1",
+      "period": { "from": "2026-11-01", "to": "2026-11-30" },
+      "dataAvailable": true,
+      "revenue": 120000,
+      "margin": 30000,
+      "marginPercent": 25
+    }
+  ],
+  "profitLeaks": [
+    {
+      "tool": "profit-leak-detector",
+      "marketplace": "ozon",
+      "dataAvailable": true,
+      "findings": [
+        { "code": "penalty", "severity": "high", "amount": 100, "detail": "Штраф Ozon", "source": "ozon_finance_totals" }
+      ]
+    }
+  ],
+  "fraudShield": {
+    "tool": "fraud-shield-audit",
+    "marketplace": "ozon",
+    "dataAvailable": true,
+    "findings": [],
+    "checks": [{ "id": "erid_present", "passed": true }]
+  }
+}
+```
+
+Если агрегирующего endpoint нет, клиент делает fallback на
+`GET /api/v1/finance/unit-economics`, `/api/v1/finance/profit-leaks` и
+`/api/v1/finance/fraud-shield`. Дашборд показывает выручку, прибыль (`margin`
+в рублях), маржу (`marginPercent` или отношение margin/revenue), таблицу SKU
+и алерты `profit-leak-detector`; статус `fraud-shield-audit` выводится из
+`dataAvailable`/`findings`/`checks`: «Доказательный пакет полный», «Есть
+риски» или «Статус не определён». Ошибка `errors.provider_unavailable`
+показывается локализованным сообщением, сырые ответы провайдеров не
+выводятся.
 
 ## Навыки
 
@@ -191,8 +271,9 @@ docker build -f apps/web/Dockerfile \
 администратору, остальные пользователи видят статус, цену и подсказку о
 правах. Роль берётся из `auth.store`.
 
-Все страницы (`LoginPage`, `ChatPage`, `SkillsPage`) загружаются лениво через
-`React.lazy` + `Suspense`, поэтому основной чанк не превышает 500 КБ.
+Все страницы (`LoginPage`, `ChatPage`, `SkillsPage`, `FinancePage`)
+загружаются лениво через `React.lazy` + `Suspense`, поэтому основной чанк не
+превышает 500 КБ.
 
 Access-токен хранится только в памяти вкладки: после перезагрузки страницы
 нужно войти заново, пока не реализована ротация refresh-токена.

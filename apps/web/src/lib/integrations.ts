@@ -22,7 +22,12 @@ import { api } from './api';
  * - `DELETE /api/v1/integrations/telegram` — отключение бота;
  * - `GET /api/v1/integrations/google/authorization-url` — `{ url }` (или
  *   `{ authorizationUrl }`) для редиректа на Google OAuth;
- * - `DELETE /api/v1/integrations/google` — отзыв доступа.
+ * - `DELETE /api/v1/integrations/google` — отзыв доступа;
+ * - `POST/DELETE /api/v1/integrations/ozon` — `{ clientId, apiKey }`;
+ * - `POST/DELETE /api/v1/integrations/wildberries` — `{ apiToken }`,
+ *   срок действия 180 дней (`tokenExpiresAt`/`expiresAt` в статусе);
+ * - `POST/DELETE /api/v1/integrations/midjourney` — `{ apiKey }`
+ *   (TT-API-KEY через TTAPI).
  *
  * Ответы валидируются Zod: UI не показывает частично распарсенное состояние
  * и не подставляет вымышленные имена ботов/email.
@@ -30,6 +35,16 @@ import { api } from './api';
 export const INTEGRATION_PROVIDERS = ['telegram', 'google'] as const;
 
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
+
+/** Провайдеры, которые подключаются ключами (Sprint 19). */
+export const KEY_INTEGRATION_PROVIDERS = [
+  'ozon',
+  'wildberries',
+  'midjourney',
+] as const;
+
+export type KeyIntegrationProvider =
+  (typeof KEY_INTEGRATION_PROVIDERS)[number];
 
 export const integrationStatusSchema = z.enum([
   'active',
@@ -63,9 +78,45 @@ export const googleIntegrationSchema = z.object({
 
 export type GoogleIntegration = z.infer<typeof googleIntegrationSchema>;
 
+/** Ozon: Client ID показывается, API Key остаётся на сервере. */
+export const ozonIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  clientId: z.string().trim().min(1).nullable().optional(),
+  error: integrationErrorTextSchema,
+});
+
+export type OzonIntegration = z.infer<typeof ozonIntegrationSchema>;
+
+/** Wildberries: только API Token; срок действия — 180 дней. */
+export const wildberriesIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  /** Дата истечения токена; поддерживаем оба имени от backend. */
+  tokenExpiresAt: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  error: integrationErrorTextSchema,
+});
+
+export type WildberriesIntegration = z.infer<
+  typeof wildberriesIntegrationSchema
+>;
+
+/** Midjourney: только TT-API-KEY (TTAPI, не официальный API). */
+export const midjourneyIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  error: integrationErrorTextSchema,
+});
+
+export type MidjourneyIntegration = z.infer<
+  typeof midjourneyIntegrationSchema
+>;
+
 export const integrationsSchema = z.object({
   telegram: telegramIntegrationSchema,
   google: googleIntegrationSchema,
+  // Новые провайдеры необязательны: старый API без них продолжает работать.
+  ozon: ozonIntegrationSchema.default({ status: 'disconnected' }),
+  wildberries: wildberriesIntegrationSchema.default({ status: 'disconnected' }),
+  midjourney: midjourneyIntegrationSchema.default({ status: 'disconnected' }),
 });
 
 export type IntegrationsState = z.infer<typeof integrationsSchema>;
@@ -133,6 +184,33 @@ export async function disconnectGoogle(): Promise<void> {
   await api.delete('/integrations/google');
 }
 
+export type KeyIntegrationConnectInput =
+  | { provider: 'ozon'; clientId: string; apiKey: string }
+  | { provider: 'wildberries'; apiToken: string }
+  | { provider: 'midjourney'; apiKey: string };
+
+/** Подключение Ozon/WB/Midjourney; тело зависит от провайдера. */
+export async function connectKeyIntegration(
+  input: KeyIntegrationConnectInput,
+): Promise<void> {
+  const { provider, ...body } = input;
+
+  await api.post(`/integrations/${provider}`, body);
+}
+
+export async function disconnectKeyIntegration(
+  provider: KeyIntegrationProvider,
+): Promise<void> {
+  await api.delete(`/integrations/${provider}`);
+}
+
+/** Срок действия WB-токена из возможных полей backend. */
+export function getWildberriesTokenExpiry(
+  integration: WildberriesIntegration,
+): string | null {
+  return integration.tokenExpiresAt ?? integration.expiresAt ?? null;
+}
+
 /** Отображаемое имя бота: имя, иначе @username. */
 export function getTelegramDisplayName(
   integration: TelegramIntegration,
@@ -170,7 +248,13 @@ export type IntegrationOperation =
   | 'telegramConnect'
   | 'telegramDisconnect'
   | 'googleConnect'
-  | 'googleDisconnect';
+  | 'googleDisconnect'
+  | 'ozonConnect'
+  | 'ozonDisconnect'
+  | 'wildberriesConnect'
+  | 'wildberriesDisconnect'
+  | 'midjourneyConnect'
+  | 'midjourneyDisconnect';
 
 export type IntegrationErrorKind =
   | 'network'
@@ -178,6 +262,7 @@ export type IntegrationErrorKind =
   | 'forbidden'
   | 'notFound'
   | 'invalidToken'
+  | 'invalidCredentials'
   | 'oauthUnavailable'
   | 'unavailable'
   | 'invalidResponse'
@@ -234,6 +319,16 @@ function readServerCode(value: unknown): string | null {
     : null;
 }
 
+const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
+  'ozonConnect',
+  'wildberriesConnect',
+  'midjourneyConnect',
+];
+
+function isKeyConnectOperation(operation: IntegrationOperation): boolean {
+  return KEY_CONNECT_OPERATIONS.includes(operation);
+}
+
 /**
  * Категория ошибки для локализованного сообщения. HTTP-статус важнее текста;
  * для 400/422 контекст операции отличает неверный Telegram-токен от
@@ -281,6 +376,16 @@ export function getIntegrationErrorDetails(
     return { kind: 'oauthUnavailable', serverMessage };
   }
 
+  // Ozon/WB/Midjourney: provider_auth_required — неверные ключи провайдера,
+  // а не истёкшая сессия SkillWharf (provider-http отдаёт его при 401/403
+  // внешнего API, но как 502 для нашего клиента).
+  if (
+    isKeyConnectOperation(operation) &&
+    code === 'errors.provider_auth_required'
+  ) {
+    return { kind: 'invalidCredentials', serverMessage };
+  }
+
   if (status === 401) {
     return { kind: 'sessionExpired', serverMessage };
   }
@@ -300,6 +405,10 @@ export function getIntegrationErrorDetails(
   if (status === 400 || status === 422) {
     if (operation === 'telegramConnect') {
       return { kind: 'invalidToken', serverMessage };
+    }
+
+    if (isKeyConnectOperation(operation)) {
+      return { kind: 'invalidCredentials', serverMessage };
     }
 
     if (operation === 'googleConnect') {

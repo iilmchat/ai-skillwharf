@@ -114,10 +114,10 @@ describe('tool-policies', () => {
       egressRequested: true,
     });
     expect(TOOL_POLICIES.ozon_mcp_call).toMatchObject({
-      requiredPermission: 'network',
+      requiredPermission: null,
       taint: 'block',
-      egress: 'gateway-network',
+      egress: 'none',
     });
-    expect(TOOL_POLICIES.calculate_unit_economics.taint).toBe('none');
+    expect(TOOL_POLICIES.calculate_unit_economics.taint).toBe('block');
   });
 });

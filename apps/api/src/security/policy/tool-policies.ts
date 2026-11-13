@@ -74,6 +74,12 @@ const isoDateTime = () =>
       'ожидается дата/время ISO 8601',
     );
 
+/** Дата финансового периода YYYY-MM-DD. */
+const financeDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'ожидается дата YYYY-MM-DD')
+  .optional();
+
 /** Ячейка таблицы: примитив, который можно безопасно записать. */
 const tableCell = z.union([
   z.string().max(2000),
@@ -140,18 +146,18 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   ozon_mcp_call: {
     name: 'ozon_mcp_call',
     schema: mcpArgsSchema,
-    requiredPermission: 'network',
-    egress: 'gateway-network',
-    egressRequested: true,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
     taint: 'block',
     allowedRoles: ALL_ROLES,
   },
   wb_mcp_call: {
     name: 'wb_mcp_call',
     schema: mcpArgsSchema,
-    requiredPermission: 'network',
-    egress: 'gateway-network',
-    egressRequested: true,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
     taint: 'block',
     allowedRoles: ALL_ROLES,
   },
@@ -274,38 +280,70 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   },
   calculate_unit_economics: {
     name: 'calculate_unit_economics',
-    schema: z.object({ sku: identifier(256) }).strict(),
+    schema: z
+      .object({
+        sku: identifier(256),
+        marketplace: z.enum(['ozon', 'wb']).optional(),
+        cost: z.number().nonnegative().max(100_000_000).optional(),
+        price: z.number().nonnegative().max(100_000_000).optional(),
+        dateFrom: financeDateSchema,
+        dateTo: financeDateSchema,
+        sellerId: identifier(64).optional(),
+      })
+      .strict(),
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
-    taint: 'none',
+    taint: 'block',
     allowedRoles: ALL_ROLES,
   },
   detect_profit_leaks: {
     name: 'detect_profit_leaks',
-    schema: z.object({ sellerId: identifier(256) }).strict(),
+    schema: z
+      .object({
+        sellerId: identifier(64),
+        marketplace: z.enum(['ozon', 'wb']).optional(),
+        dateFrom: financeDateSchema,
+        dateTo: financeDateSchema,
+      })
+      .strict(),
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
-    taint: 'none',
+    taint: 'block',
     allowedRoles: ALL_ROLES,
   },
   monitor_competitor_prices: {
     name: 'monitor_competitor_prices',
-    schema: z.object({ sku: identifier(256) }).strict(),
+    schema: z
+      .object({
+        sku: identifier(256),
+        marketplace: z.enum(['ozon', 'wb']).optional(),
+        productId: z.number().int().positive().optional(),
+        sellerId: identifier(64).optional(),
+      })
+      .strict(),
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
-    taint: 'none',
+    taint: 'block',
     allowedRoles: ALL_ROLES,
   },
   audit_fraud_risk: {
     name: 'audit_fraud_risk',
-    schema: z.object({ campaignId: identifier(256) }).strict(),
+    schema: z
+      .object({
+        campaignId: identifier(128),
+        marketplace: z.enum(['ozon', 'wb']).optional(),
+        dateFrom: financeDateSchema,
+        dateTo: financeDateSchema,
+        sellerId: identifier(64).optional(),
+      })
+      .strict(),
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
-    taint: 'none',
+    taint: 'block',
     allowedRoles: ALL_ROLES,
   },
   check_facts: {

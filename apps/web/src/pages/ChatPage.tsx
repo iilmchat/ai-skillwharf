@@ -19,6 +19,7 @@ import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
 import { LlmProviderBadge } from '../components/LlmProviderBadge';
+import { MessageContent } from '../components/MessageContent';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TokenUsageWidget } from '../components/TokenUsageWidget';
@@ -85,15 +86,11 @@ function MessageBubble({
         <span className="sr-only">
           {isUser ? t('chat.you') : t('chat.assistant')}
         </span>
-        <p className="whitespace-pre-wrap break-words">
-          {message.content}
-          {isStreaming && (
-            <span
-              aria-hidden="true"
-              className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-sm bg-current align-baseline"
-            />
-          )}
-        </p>
+        <MessageContent
+          content={message.content}
+          isStreaming={isStreaming}
+          imageAltFallback={t('chat.imageAlt')}
+        />
       </div>
     </li>
   );
@@ -340,6 +337,23 @@ export function ChatPage() {
                 <path d="M9 21v-6h6v6" />
               </svg>
               {t('nav.office')}
+            </NavLink>
+
+            <NavLink to="/app/finance" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M4 19V5M4 19h16" />
+                <path d="M8 16v-5M12 16V8M16 16v-3" />
+              </svg>
+              {t('nav.finance')}
             </NavLink>
 
             <NavLink to="/app/settings" className={navItemClasses}>

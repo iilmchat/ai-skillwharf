@@ -35,6 +35,25 @@ describe('provider egress', () => {
     ).toThrow(ApiException);
   });
 
+  it('разрешает TTAPI, Ozon Performance и WB Pricing из default allowlist', () => {
+    vi.stubEnv('OUTBOUND_ALLOWLIST', '');
+
+    expect(() =>
+      assertProviderEgress(
+        'https://api.ttapi.io/midjourney/v1/fetch?jobId=test',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertProviderEgress('https://api-performance.ozon.ru/api/client/campaign'),
+    ).not.toThrow();
+    expect(() =>
+      assertProviderEgress('https://discounts-prices-api.wildberries.ru/ping'),
+    ).not.toThrow();
+    expect(() => assertProviderEgress('https://api.goapi.ai/hook')).toThrow(
+      ApiException,
+    );
+  });
+
   it('разрешает локальный Telegram API для тестов/self-hosted', () => {
     vi.stubEnv('OUTBOUND_ALLOWLIST', 'api.telegram.org');
 

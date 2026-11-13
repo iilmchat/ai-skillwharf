@@ -286,19 +286,17 @@ describe('AgentGatewayService', () => {
       expect(error.message).toContain('POLICY_NETWORK_DENIED');
     });
 
-    it('блокирует MCP без навыка', () => {
-      const error = expectBlocked(() =>
-        service.validateToolCall(
-          'ozon_mcp_call',
-          { action: 'ozon_get_prices', params: { sku: ['1'] } },
-          userContext(),
-        ),
+    it('разрешает MCP без network-навыка: egress идёт через gateway/MCP', () => {
+      const decision = service.validateToolCall(
+        'ozon_mcp_call',
+        { action: 'ozon_get_prices', params: { sku: ['1'] } },
+        userContext(),
       );
 
-      expect(error.message).toContain('POLICY_NETWORK_DENIED');
+      expect(decision.egress).toEqual({ requested: false, allowlist: [] });
     });
 
-    it('разрешает MCP с network-навыком', () => {
+    it('не применяет egress навыка к MCP-вызову', () => {
       const decision = service.validateToolCall(
         'ozon_mcp_call',
         { action: 'ozon_get_prices', params: { sku: ['1'] } },
@@ -306,7 +304,7 @@ describe('AgentGatewayService', () => {
       );
 
       expect(decision.egress).toEqual({
-        requested: true,
+        requested: false,
         allowlist: ['api.ozon.ru'],
       });
     });
@@ -360,15 +358,17 @@ describe('AgentGatewayService', () => {
       expect(decision.args).toEqual({ query: 'погода в Москве' });
     });
 
-    it('фиксирует taint без блокировки для не-эксфильтрационных инструментов', () => {
-      const decision = service.validateToolCall(
-        'calculate_unit_economics',
-        { sku: `SKU-${SECRET}` },
-        userContext([], [SECRET]),
+    it('блокирует taint для финансовых инструментов', () => {
+      const error = expectBlocked(() =>
+        service.validateToolCall(
+          'calculate_unit_economics',
+          { sku: `SKU-${SECRET}` },
+          userContext([], [SECRET]),
+        ),
       );
 
-      expect(decision.taint).toEqual({ detected: true, masked: false });
-      expect(decision.args).toEqual({ sku: `SKU-${SECRET}` });
+      expect(error.message).toContain('POLICY_TAINT_BLOCKED');
+      expect(error.message).not.toContain(SECRET);
     });
   });
 

@@ -105,6 +105,9 @@ export function SettingsPage() {
               <NavLink to="/app/office" className={navLinkClasses}>
                 {t('nav.office')}
               </NavLink>
+              <NavLink to="/app/finance" className={navLinkClasses}>
+                {t('nav.finance')}
+              </NavLink>
               <NavLink to="/app/settings" className={navLinkClasses}>
                 {t('nav.settings')}
               </NavLink>

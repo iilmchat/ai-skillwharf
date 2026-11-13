@@ -1,23 +1,34 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useIntegrations } from '../hooks/useIntegrations';
 import {
+  connectKeyIntegration,
   connectTelegram,
   disconnectGoogle,
+  disconnectKeyIntegration,
   disconnectTelegram,
   fetchGoogleAuthorizationUrl,
   getIntegrationErrorDetails,
   getTelegramDisplayName,
+  getWildberriesTokenExpiry,
   integrationsQueryKey,
   telegramBotTokenSchema,
   type IntegrationErrorKind,
   type IntegrationOperation,
   type IntegrationStatus,
   type GoogleIntegration,
+  type KeyIntegrationConnectInput,
+  type KeyIntegrationProvider,
+  type MidjourneyIntegration,
+  type OzonIntegration,
   type TelegramIntegration,
+  type WildberriesIntegration,
 } from '../lib/integrations';
-import { useState } from 'react';
-import { IntegrationIcon } from './IntegrationIcon';
+import {
+  IntegrationIcon,
+  type IntegrationLogoProvider,
+} from './IntegrationIcon';
 
 const SECTION_CLASSES =
   'rounded-2xl border border-outline-variant bg-surface-container p-5 shadow-sm sm:p-6';
@@ -60,20 +71,13 @@ const ERROR_KEYS: Record<IntegrationErrorKind, string> = {
   forbidden: 'settings.integrations.errors.forbidden',
   notFound: 'settings.integrations.errors.notFound',
   invalidToken: 'settings.integrations.errors.invalidToken',
+  invalidCredentials: 'settings.integrations.errors.invalidCredentials',
   oauthUnavailable: 'settings.integrations.errors.oauthUnavailable',
   unavailable: 'settings.integrations.errors.unavailable',
   invalidResponse: 'settings.integrations.errors.invalidResponse',
   requestFailed: 'settings.integrations.errors.requestFailed',
   unknown: 'settings.integrations.errors.unknown',
 };
-
-function translateServerText(
-  text: string,
-  t: (key: string) => string,
-  exists: (key: string) => boolean,
-): string {
-  return text.startsWith('errors.') && exists(text) ? t(text) : text;
-}
 
 function IntegrationStatusBadge({ status }: { status: IntegrationStatus }) {
   const { t } = useTranslation();
@@ -102,7 +106,9 @@ function IntegrationErrorAlert({
   const { t, i18n } = useTranslation();
   const details = getIntegrationErrorDetails(error, operation);
   const useKindMessage =
-    details.kind === 'invalidToken' || details.kind === 'oauthUnavailable';
+    details.kind === 'invalidToken' ||
+    details.kind === 'invalidCredentials' ||
+    details.kind === 'oauthUnavailable';
   const translatedServerMessage =
     details.serverMessage !== null &&
     details.serverMessage.startsWith('errors.') &&
@@ -135,12 +141,17 @@ function IntegrationStateError({
     return null;
   }
 
+  const message =
+    text.startsWith('errors.') && i18n.exists(text)
+      ? t(text)
+      : t('settings.integrations.errors.providerError');
+
   return (
     <div
       role="alert"
       className="mt-3 rounded-xl border border-error/30 bg-error-container px-3 py-2.5 text-sm leading-relaxed text-on-error-container"
     >
-      {translateServerText(text, t, (key) => i18n.exists(key))}
+      {message}
     </div>
   );
 }
@@ -170,7 +181,7 @@ function IntegrationCardHeader({
   status,
   titleId,
 }: {
-  provider: 'telegram' | 'google';
+  provider: IntegrationLogoProvider;
   title: string;
   description: string;
   status: IntegrationStatus;
@@ -474,6 +485,301 @@ function GoogleIntegrationCard({
   );
 }
 
+const KEY_CONNECT_OPERATIONS: Record<
+  KeyIntegrationProvider,
+  IntegrationOperation
+> = {
+  ozon: 'ozonConnect',
+  wildberries: 'wildberriesConnect',
+  midjourney: 'midjourneyConnect',
+};
+
+const KEY_DISCONNECT_OPERATIONS: Record<
+  KeyIntegrationProvider,
+  IntegrationOperation
+> = {
+  ozon: 'ozonDisconnect',
+  wildberries: 'wildberriesDisconnect',
+  midjourney: 'midjourneyDisconnect',
+};
+
+function formatIntegrationDate(value: string, language: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    language.startsWith('en') ? 'en-US' : 'ru-RU',
+    { dateStyle: 'medium' },
+  ).format(date);
+}
+
+function ProviderKeyCard({
+  provider,
+  integration,
+  onRefresh,
+}: {
+  provider: KeyIntegrationProvider;
+  integration:
+    | OzonIntegration
+    | WildberriesIntegration
+    | MidjourneyIntegration
+    | undefined;
+  onRefresh: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const [clientId, setClientId] = useState('');
+  const [secret, setSecret] = useState('');
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const isOzon = provider === 'ozon';
+  const isWildberries = provider === 'wildberries';
+  const status = integration?.status ?? 'disconnected';
+  const isActive = status === 'active';
+  const displayClientId =
+    integration !== undefined && 'clientId' in integration
+      ? (integration.clientId ?? null)
+      : null;
+  const expiry =
+    integration !== undefined && 'tokenExpiresAt' in integration
+      ? (getWildberriesTokenExpiry(integration) ?? null)
+      : null;
+  const prefix = `settings.integrations.${provider}`;
+  const secretLabelKey = isOzon
+    ? `${prefix}.apiKey`
+    : isWildberries
+      ? `${prefix}.apiToken`
+      : `${prefix}.ttApiKey`;
+  const secretPlaceholderKey = isOzon
+    ? `${prefix}.apiKeyPlaceholder`
+    : isWildberries
+      ? `${prefix}.apiTokenPlaceholder`
+      : `${prefix}.ttApiKeyPlaceholder`;
+  const secretHintKey = isOzon
+    ? `${prefix}.apiKeyHint`
+    : isWildberries
+      ? `${prefix}.apiTokenHint`
+      : `${prefix}.ttApiKeyHint`;
+  const secretFieldId = isWildberries
+    ? `${provider}-api-token`
+    : `${provider}-api-key`;
+
+  const connectMutation = useMutation({
+    mutationFn: (input: KeyIntegrationConnectInput) =>
+      connectKeyIntegration(input),
+    onMutate: () => {
+      setNotice(null);
+    },
+    onSuccess: () => {
+      setSecret('');
+      setFieldError(null);
+      setNotice(t(`${prefix}.connected`));
+      onRefresh();
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => disconnectKeyIntegration(provider),
+    onMutate: () => {
+      setNotice(null);
+    },
+    onSuccess: () => {
+      setNotice(t(`${prefix}.disconnected`));
+      onRefresh();
+    },
+  });
+
+  function handleConnect(): void {
+    const trimmedSecret = secret.trim();
+    const trimmedClientId = clientId.trim();
+
+    if (trimmedSecret === '' || (isOzon && trimmedClientId === '')) {
+      setFieldError(t(`${prefix}.invalidFields`));
+      return;
+    }
+
+    setFieldError(null);
+
+    const input: KeyIntegrationConnectInput =
+      provider === 'ozon'
+        ? { provider, clientId: trimmedClientId, apiKey: trimmedSecret }
+        : provider === 'wildberries'
+          ? { provider, apiToken: trimmedSecret }
+          : { provider, apiKey: trimmedSecret };
+
+    connectMutation.mutate(input);
+  }
+
+  function handleClientIdChange(value: string): void {
+    setClientId(value);
+    setFieldError(null);
+    connectMutation.reset();
+  }
+
+  function handleSecretChange(value: string): void {
+    setSecret(value);
+    setFieldError(null);
+    connectMutation.reset();
+  }
+
+  const secretHintId = `${provider}-secret-hint`;
+
+  return (
+    <article
+      aria-labelledby={`${provider}-integration-title`}
+      className={CARD_CLASSES}
+    >
+      <IntegrationCardHeader
+        provider={provider}
+        title={t(`${prefix}.title`)}
+        description={t(`${prefix}.description`)}
+        status={status}
+        titleId={`${provider}-integration-title`}
+      />
+
+      {status === 'error' && (
+        <IntegrationStateError
+          text={
+            integration !== undefined && integration.error !== undefined
+              ? integration.error
+              : null
+          }
+        />
+      )}
+
+      {isActive ? (
+        <>
+          <ConnectedAccount
+            label={t(`${prefix}.connectedAs`)}
+            value={isOzon ? displayClientId : t(`${prefix}.keySaved`)}
+            unknown={t('settings.integrations.providers.keySaved')}
+          />
+          {isWildberries && (
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              {expiry === null
+                ? t(`${prefix}.expiryWarning`)
+                : t(`${prefix}.expiresAt`, {
+                    date: formatIntegrationDate(expiry, i18n.language),
+                  })}
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              aria-busy={disconnectMutation.isPending}
+              className={DANGER_BUTTON_CLASSES}
+            >
+              {disconnectMutation.isPending
+                ? t(`${prefix}.disconnecting`)
+                : t(`${prefix}.disconnect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {disconnectMutation.isError && (
+            <IntegrationErrorAlert
+              error={disconnectMutation.error}
+              operation={KEY_DISCONNECT_OPERATIONS[provider]}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {isOzon && (
+            <div className="mt-4">
+              <label
+                htmlFor={`${provider}-client-id`}
+                className="block text-sm font-medium text-on-surface"
+              >
+                {t(`${prefix}.clientId`)}
+              </label>
+              <input
+                id={`${provider}-client-id`}
+                name="clientId"
+                type="text"
+                autoComplete="off"
+                value={clientId}
+                onChange={(event) =>
+                  handleClientIdChange(event.target.value)
+                }
+                placeholder={t(`${prefix}.clientIdPlaceholder`)}
+                disabled={connectMutation.isPending}
+                className={INPUT_CLASSES}
+              />
+            </div>
+          )}
+
+          <div className="mt-4">
+            <label
+              htmlFor={secretFieldId}
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t(secretLabelKey)}
+            </label>
+            <input
+              id={secretFieldId}
+              name={isWildberries ? 'apiToken' : 'apiKey'}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={secret}
+              onChange={(event) => handleSecretChange(event.target.value)}
+              placeholder={t(secretPlaceholderKey)}
+              aria-invalid={fieldError !== null}
+              aria-describedby={secretHintId}
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+            <p
+              id={secretHintId}
+              className="mt-2 text-xs leading-relaxed text-on-surface-variant"
+            >
+              {t(secretHintKey)}
+            </p>
+            {fieldError !== null && (
+              <p role="alert" className="mt-2 text-sm text-error">
+                {fieldError}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connectMutation.isPending}
+              aria-busy={connectMutation.isPending}
+              className={PRIMARY_BUTTON_CLASSES}
+            >
+              {connectMutation.isPending
+                ? t(`${prefix}.connecting`)
+                : t(`${prefix}.connect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {connectMutation.isError && (
+            <IntegrationErrorAlert
+              error={connectMutation.error}
+              operation={KEY_CONNECT_OPERATIONS[provider]}
+            />
+          )}
+        </>
+      )}
+    </article>
+  );
+}
+
 export function IntegrationsSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -633,6 +939,32 @@ export function IntegrationsSection() {
             onConnect={() => googleAuthMutation.mutate()}
             onDisconnect={() => disconnectGoogleMutation.mutate()}
           />
+
+          <div className="border-t border-outline-variant pt-5">
+            <h3 className="font-display text-base font-bold text-on-surface">
+              {t('settings.integrations.providers.title')}
+            </h3>
+            <p className="mt-1 text-sm leading-relaxed text-on-surface-variant">
+              {t('settings.integrations.providers.description')}
+            </p>
+            <div className="mt-4 space-y-4">
+              <ProviderKeyCard
+                provider="ozon"
+                integration={data.ozon}
+                onRefresh={refreshIntegrations}
+              />
+              <ProviderKeyCard
+                provider="wildberries"
+                integration={data.wildberries}
+                onRefresh={refreshIntegrations}
+              />
+              <ProviderKeyCard
+                provider="midjourney"
+                integration={data.midjourney}
+                onRefresh={refreshIntegrations}
+              />
+            </div>
+          </div>
         </div>
       )}
     </section>
