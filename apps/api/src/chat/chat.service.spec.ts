@@ -82,6 +82,7 @@ interface RouterMock {
 interface MemoryMock {
   buildContext: MockFn;
   remember: MockFn;
+  clear: MockFn;
 }
 
 interface TestPricing {
@@ -173,6 +174,7 @@ describe('ChatService', () => {
     memory = {
       buildContext: vi.fn().mockResolvedValue(''),
       remember: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(0),
     };
 
     // Настоящий LlmService нужен, чтобы граф получил реальные инструменты;
@@ -222,6 +224,17 @@ describe('ChatService', () => {
         data: { userId: USER_ID, title: 'Мой чат' },
         select: { id: true },
       });
+    });
+  });
+
+  describe('clearMemory', () => {
+    it('удаляет долговременную память текущего пользователя (GDPR)', async () => {
+      memory.clear.mockResolvedValue(5);
+
+      await expect(service.clearMemory(USER_ID)).resolves.toEqual({
+        deleted: 5,
+      });
+      expect(memory.clear).toHaveBeenCalledWith(USER_ID);
     });
   });
 

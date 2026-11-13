@@ -580,6 +580,13 @@ export class ChatService {
     });
   }
 
+  /** Удаляет всю долговременную память пользователя (GDPR/152-ФЗ). */
+  async clearMemory(userId: string): Promise<{ deleted: number }> {
+    const deleted = await this.memoryService.clear(userId);
+
+    return { deleted };
+  }
+
   async handleMessage(
     userId: string,
     conversationId: string,

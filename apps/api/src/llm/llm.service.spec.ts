@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, HttpException } from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
@@ -19,6 +19,7 @@ import {
   type SandboxService,
 } from '../sandbox/sandbox.service.js';
 import {
+  DAILY_TOKEN_LIMIT_MESSAGE,
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   LlmService,
@@ -32,6 +33,8 @@ import {
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   calculateLlmCost,
+  needsDailyTokenReset,
+  startOfUtcDay,
   withLanguageInstruction,
   withMemoryContext,
 } from './llm.service.js';
@@ -62,6 +65,25 @@ function createService(sandbox: SandboxMock = createSandbox()): LlmService {
 interface BillingMock {
   getBalance: MockFn;
   chargeForSkill: MockFn;
+}
+
+interface DailyTokenUser {
+  dailyTokenLimit: number;
+  dailyTokensUsed: number;
+  lastTokenReset: Date;
+}
+
+interface PrismaUserMock {
+  user: { findUnique: MockFn; updateMany: MockFn };
+}
+
+function createPrismaUser(user: DailyTokenUser | null = null): PrismaUserMock {
+  return {
+    user: {
+      findUnique: vi.fn().mockResolvedValue(user),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+  };
 }
 
 function createBilling(balance = '100.00'): BillingMock {
@@ -429,6 +451,143 @@ describe('LlmService', () => {
 
       expect(billing.getBalance).not.toHaveBeenCalled();
       expect(billing.chargeForSkill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('дневной лимит токенов (Budget Guard)', () => {
+    const userId = '11111111-1111-1111-1111-111111111111';
+
+    function enableLlm(): void {
+      process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+      process.env.LLM_MODEL = 'llama3';
+    }
+
+    it('бросает 429 и не вызывает модель, если лимит исчерпан', async () => {
+      enableLlm();
+      const prisma = createPrismaUser({
+        dailyTokenLimit: 100,
+        dailyTokensUsed: 100,
+        lastTokenReset: new Date(),
+      });
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        undefined,
+        prisma as unknown as PrismaService,
+      );
+      const client = clientWithUsage(10, 10);
+
+      Object.assign(service, { client });
+
+      const error = await service
+        .chatWithTools([new HumanMessage('привет')], [], undefined, { userId })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(429);
+      expect((error as HttpException).message).toBe(DAILY_TOKEN_LIMIT_MESSAGE);
+      expect(client.invoke).not.toHaveBeenCalled();
+    });
+
+    it('инкрементирует расход токенов после ответа модели', async () => {
+      enableLlm();
+      const prisma = createPrismaUser({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 10,
+        lastTokenReset: new Date(),
+      });
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        undefined,
+        prisma as unknown as PrismaService,
+      );
+
+      Object.assign(service, { client: clientWithUsage(100, 50) });
+
+      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+        userId,
+      });
+
+      expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: userId },
+        data: { dailyTokensUsed: { increment: 150 } },
+      });
+    });
+
+    it('сбрасывает счётчик при первом запросе нового дня', async () => {
+      enableLlm();
+      const prisma = createPrismaUser({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 900,
+        lastTokenReset: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        undefined,
+        prisma as unknown as PrismaService,
+      );
+      const client = clientWithUsage(100, 20);
+
+      Object.assign(service, { client });
+
+      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+        userId,
+      });
+
+      const [resetCall, incrementCall] = prisma.user.updateMany.mock.calls as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ][];
+
+      expect(resetCall?.[0]).toMatchObject({
+        where: { id: userId, lastTokenReset: { lt: expect.any(Date) } },
+        data: { dailyTokensUsed: 0, lastTokenReset: expect.any(Date) },
+      });
+      expect(incrementCall?.[0]).toEqual({
+        where: { id: userId },
+        data: { dailyTokensUsed: { increment: 120 } },
+      });
+      expect(client.invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('не учитывает токены без контекста пользователя', async () => {
+      enableLlm();
+      const prisma = createPrismaUser(null);
+      const service = new LlmService(
+        createSandbox() as unknown as SandboxService,
+        undefined,
+        undefined,
+        prisma as unknown as PrismaService,
+      );
+
+      Object.assign(service, { client: clientWithUsage(10, 10) });
+
+      await service.chatWithTools([new HumanMessage('привет')], []);
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('дневные лимиты: helpers', () => {
+    it('needsDailyTokenReset сравнивает календарные дни UTC', () => {
+      const now = new Date('2026-11-13T10:00:00.000Z');
+
+      expect(
+        needsDailyTokenReset(new Date('2026-11-12T23:59:59.000Z'), now),
+      ).toBe(true);
+      expect(
+        needsDailyTokenReset(new Date('2026-11-13T00:00:00.000Z'), now),
+      ).toBe(false);
+    });
+
+    it('startOfUtcDay обнуляет время', () => {
+      expect(
+        startOfUtcDay(new Date('2026-11-13T10:20:30.000Z')).toISOString(),
+      ).toBe('2026-11-13T00:00:00.000Z');
     });
   });
 

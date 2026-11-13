@@ -107,6 +107,20 @@ export class MemoryService {
 
     return formatMemoryChunks(chunks);
   }
+
+  /**
+   * Удаляет всю долговременную память пользователя (GDPR/152-ФЗ).
+   * Возвращает количество удалённых фрагментов.
+   */
+  async clear(userId: string): Promise<number> {
+    const { count } = await this.prisma.memoryChunk.deleteMany({
+      where: { userId },
+    });
+
+    this.logger.log(`Удалено ${count} фрагментов памяти user=${userId}`);
+
+    return count;
+  }
 }
 
 /**

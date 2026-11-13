@@ -22,6 +22,7 @@ function createPrisma() {
   return {
     memoryChunk: {
       create: vi.fn().mockResolvedValue({ id: 'chunk-1' }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
@@ -152,5 +153,17 @@ describe('MemoryService.buildContext', () => {
     await expect(service.buildContext(USER_ID, 'заказ')).resolves.toBe(
       '1. самовывоз\n2. скидка 10%',
     );
+  });
+});
+
+describe('MemoryService.clear', () => {
+  it('удаляет все фрагменты памяти пользователя (GDPR/152-ФЗ)', async () => {
+    const { service, prisma } = createService();
+    prisma.memoryChunk.deleteMany.mockResolvedValue({ count: 3 });
+
+    await expect(service.clear(USER_ID)).resolves.toBe(3);
+    expect(prisma.memoryChunk.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER_ID },
+    });
   });
 });

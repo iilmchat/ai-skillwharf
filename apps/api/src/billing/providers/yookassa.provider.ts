@@ -28,6 +28,15 @@ export interface YooKassaPaymentResponse {
   confirmation?: { type: string; confirmation_url?: string };
 }
 
+/** Ответ API ЮKassa на запрос статуса платежа (используемые поля). */
+export interface YooKassaPaymentStatus {
+  id: string;
+  status: string;
+  paid: boolean;
+  amount?: { value?: string; currency?: string };
+  metadata?: Record<string, unknown>;
+}
+
 /** Уведомление ЮKassa о событии платежа. */
 export interface YooKassaWebhookPayload {
   type?: string;
@@ -55,6 +64,43 @@ export interface YooKassaPaymentNotification {
 export interface YooKassaOptions {
   shopId?: string;
   secretKey?: string;
+}
+
+/**
+ * Совпадает ли платёж, подтверждённый API ЮKassa, с телом вебхука.
+ * Защита от подделки: статус, сумма и владелец берутся из ответа API,
+ * а не из уведомления.
+ */
+export function isPaymentNotificationConfirmed(
+  payment: YooKassaPaymentStatus | null | undefined,
+  notification: YooKassaPaymentNotification,
+): boolean {
+  if (!payment) {
+    return false;
+  }
+
+  if (payment.id !== notification.paymentId) {
+    return false;
+  }
+
+  if (payment.status !== 'succeeded' || payment.paid !== true) {
+    return false;
+  }
+
+  const paidAmount = Number.parseFloat(payment.amount?.value ?? '');
+
+  if (
+    !Number.isFinite(paidAmount) ||
+    Math.abs(paidAmount - notification.amount) > 0.005
+  ) {
+    return false;
+  }
+
+  const metadataUserId = payment.metadata?.userId;
+
+  return (
+    typeof metadataUserId === 'string' && metadataUserId === notification.userId
+  );
 }
 
 /**
@@ -169,6 +215,57 @@ export class YooKassaProvider implements IBillingProvider {
       );
       throw new ServiceUnavailableException(
         'Не удалось создать платёж в ЮKassa',
+      );
+    }
+  }
+
+  /**
+   * Запрашивает актуальный статус платежа в ЮKassa. Вебхук использует его
+   * как источник истины: тело уведомления может быть подделано, ответ API —
+   * нет. `404` означает, что такого платежа у магазина нет.
+   */
+  async getPaymentStatus(paymentId: string): Promise<YooKassaPaymentStatus> {
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Платёжный провайдер ЮKassa не настроен',
+      );
+    }
+
+    if (typeof paymentId !== 'string' || paymentId.trim() === '') {
+      throw new BadRequestException('paymentId обязателен');
+    }
+
+    try {
+      const { data } = await this.http.get<YooKassaPaymentStatus>(
+        `/payments/${encodeURIComponent(paymentId.trim())}`,
+        { auth: { username: this.shopId, password: this.secretKey } },
+      );
+
+      return data;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ServiceUnavailableException ||
+        isAxiosError(error) === false
+      ) {
+        throw error;
+      }
+
+      const status = error.response?.status ?? 0;
+      const response = error.response?.data as
+        { description?: string } | undefined;
+
+      if (status === 404) {
+        this.logger.warn(`ЮKassa: платёж ${paymentId} не найден`);
+
+        throw new BadRequestException(`Платёж ${paymentId} не найден в ЮKassa`);
+      }
+
+      this.logger.error(
+        `ЮKassa: не удалось получить статус платежа ${paymentId} (HTTP ${status}): ${response?.description ?? error.message}`,
+      );
+      throw new ServiceUnavailableException(
+        'Не удалось проверить платёж в ЮKassa',
       );
     }
   }

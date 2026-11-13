@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   Optional,
@@ -31,6 +33,7 @@ import { GigaChatAdapter } from './adapters/gigachat.adapter.js';
 import type { NativeProviderAdapter } from './adapters/types.js';
 import { YandexAdapter } from './adapters/yandex.adapter.js';
 import { McpClient } from './tools/mcp-client.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
 import {
@@ -75,6 +78,25 @@ export interface LlmCallOptions {
   userId?: string;
   /** Блок «Долговременная память» из pgvector, добавляется в системный промпт. */
   memoryContext?: string;
+}
+
+/** Текст ошибки при исчерпании дневного лимита токенов. */
+export const DAILY_TOKEN_LIMIT_MESSAGE =
+  'Дневной лимит токенов исчерпан. Попробуйте завтра';
+
+/**
+ * Начало текущих суток в UTC. Счётчик токенов сбрасывается при первом
+ * запросе нового дня; UTC выбран как единая граница для всех реплик API.
+ */
+export function startOfUtcDay(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
+/** Нужно ли сбросить дневной счётчик: счётчик последнего сброса — прошлые сутки. */
+export function needsDailyTokenReset(lastReset: Date, now: Date): boolean {
+  return lastReset.getTime() < startOfUtcDay(now).getTime();
 }
 
 /** Заголовок блока долговременной памяти в системном промпте. */
@@ -361,6 +383,7 @@ export class LlmService {
     private readonly sandboxService: SandboxService,
     @Optional() private readonly promptsService?: PromptsService,
     @Optional() private readonly billingService?: BillingService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     const baseURL = process.env.LLM_BASE_URL;
     const model = process.env.LLM_MODEL;
@@ -817,6 +840,8 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): Promise<AIMessage> {
+    await this.assertDailyTokenLimit(options.userId);
+
     const adapter = this.resolveAdapter(route);
 
     if (adapter) {
@@ -845,6 +870,7 @@ export class LlmService {
 
     this.logGenAiUsage(route, response.usage_metadata);
     await this.chargeLlmUsage(options.userId, response.usage_metadata);
+    await this.recordDailyTokenUsage(options.userId, response.usage_metadata);
 
     return response;
   }
@@ -860,6 +886,8 @@ export class LlmService {
     route?: LlmRouteSelection,
     options: LlmCallOptions = {},
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
+    await this.assertDailyTokenLimit(options.userId);
+
     const adapter = this.resolveAdapter(route);
 
     if (adapter) {
@@ -921,6 +949,7 @@ export class LlmService {
 
     this.logGenAiUsage(route, message.usage_metadata);
     await this.chargeLlmUsage(options.userId, message.usage_metadata);
+    await this.recordDailyTokenUsage(options.userId, message.usage_metadata);
 
     yield { type: 'message', message };
   }
@@ -939,6 +968,83 @@ export class LlmService {
 
     if (Number.parseFloat(balance) < MIN_LLM_BALANCE) {
       throw new BadRequestException(ERROR_KEYS.insufficientFunds);
+    }
+  }
+
+  /**
+   * Budget Guard: проверяет дневной лимит токенов и лениво сбрасывает
+   * счётчик при первом запросе нового дня. Бросает 429, если лимит исчерпан.
+   */
+  private async assertDailyTokenLimit(userId?: string): Promise<void> {
+    if (!userId || !this.prisma) {
+      return;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        dailyTokenLimit: true,
+        dailyTokensUsed: true,
+        lastTokenReset: true,
+      },
+    });
+
+    if (!user) {
+      return;
+    }
+
+    const now = new Date();
+    let used = user.dailyTokensUsed;
+
+    if (needsDailyTokenReset(user.lastTokenReset, now)) {
+      // Условный updateMany исключает двойной сброс при параллельных запросах.
+      await this.prisma.user.updateMany({
+        where: { id: userId, lastTokenReset: { lt: startOfUtcDay(now) } },
+        data: { dailyTokensUsed: 0, lastTokenReset: now },
+      });
+      used = 0;
+    }
+
+    if (used >= user.dailyTokenLimit) {
+      throw new HttpException(
+        DAILY_TOKEN_LIMIT_MESSAGE,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * Инкрементирует дневной расход токенов после ответа модели. Ошибку БД
+   * только логируем: ответ уже получен, и ронять запрос из-за счётчика хуже,
+   * чем недосчитать лимит в одном вызове.
+   */
+  private async recordDailyTokenUsage(
+    userId: string | undefined,
+    usage: AIMessage['usage_metadata'],
+  ): Promise<void> {
+    if (!userId || !this.prisma) {
+      return;
+    }
+
+    const tokens =
+      usage?.total_tokens ??
+      (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
+
+    if (!Number.isFinite(tokens) || tokens <= 0) {
+      return;
+    }
+
+    try {
+      await this.prisma.user.updateMany({
+        where: { id: userId },
+        data: { dailyTokensUsed: { increment: tokens } },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось учесть ${tokens} токенов у ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -980,6 +1086,7 @@ export class LlmService {
     }
   }
 
+
   /**
    * OTel-совместимый лог вызова LLM. Пока пишем JSON в лог приложения:
    * позже эти атрибуты можно отправить в OTLP-коллектор без изменения
@@ -1018,6 +1125,7 @@ export class LlmService {
 
     this.logGenAiUsage(route, response.usage_metadata);
     await this.chargeLlmUsage(options.userId, response.usage_metadata);
+    await this.recordDailyTokenUsage(options.userId, response.usage_metadata);
 
     return response;
   }

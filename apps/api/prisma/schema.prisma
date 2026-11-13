@@ -17,17 +17,21 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  passwordHash  String
-  role          String         @default("user")
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  sessions      Session[]
-  transactions  Transaction[]
-  conversations Conversation[]
-  wallet        Wallet?
-  auditLogs     AuditLog[]
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  role            String         @default("user")
+  /// Budget Guard: дневной лимит токенов LLM и расход за текущие сутки.
+  dailyTokenLimit Int            @default(100000)
+  dailyTokensUsed Int            @default(0)
+  lastTokenReset  DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  sessions        Session[]
+  transactions    Transaction[]
+  conversations   Conversation[]
+  wallet          Wallet?
+  auditLogs       AuditLog[]
 }
 
 model Session {

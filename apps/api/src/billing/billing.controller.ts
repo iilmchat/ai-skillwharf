@@ -25,6 +25,7 @@ import { ChargeDto } from './dto/charge.dto.js';
 import { CreatePaymentDto } from './dto/create-payment.dto.js';
 import { TopUpDto } from './dto/topup.dto.js';
 import {
+  isPaymentNotificationConfirmed,
   YooKassaProvider,
   type YooKassaWebhookPayload,
 } from './providers/yookassa.provider.js';
@@ -103,8 +104,10 @@ export class BillingController {
 
   /**
    * Webhook ЮKassa. Публичный: ЮKassa не умеет ходить с нашим JWT.
-   * Всегда отвечаем 200, чтобы платёжный сервис не повторял уведомление
-   * бесконечно; идемпотентность обеспечивает ключ `yookassa:<paymentId>`.
+   * Перед зачислением платёж перепроверяется запросом к API ЮKassa, поэтому
+   * поддельное уведомление не пополнит баланс. Для остальных событий
+   * отвечаем 200, чтобы платёжный сервис не повторял уведомление бесконечно;
+   * идемпотентность обеспечивает ключ `yookassa:<paymentId>`.
    */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
@@ -123,6 +126,18 @@ export class BillingController {
 
     if (notification.paymentId === '') {
       throw new BadRequestException('В уведомлении отсутствует id платежа');
+    }
+
+    const payment = await this.yooKassaProvider.getPaymentStatus(
+      notification.paymentId,
+    );
+
+    if (!isPaymentNotificationConfirmed(payment, notification)) {
+      this.logger.warn(
+        `ЮKassa webhook: платёж ${notification.paymentId} не подтверждён ЮKassa — уведомление отклонено`,
+      );
+
+      throw new BadRequestException('Платёж не подтверждён ЮKassa');
     }
 
     await this.billingService.addFunds(

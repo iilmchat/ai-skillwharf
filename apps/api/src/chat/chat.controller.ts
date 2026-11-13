@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   HttpCode,
   HttpStatus,
   Post,
@@ -35,5 +36,23 @@ export class ChatController {
     }
 
     return this.chatService.createConversation(userId, dto.title);
+  }
+
+  /**
+   * Удаляет всю долговременную память текущего пользователя
+   * (GDPR/152-ФЗ: право на забвение).
+   */
+  @Delete('memory')
+  @UseGuards(JwtAuthGuard)
+  async clearMemory(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ deleted: number }> {
+    const userId = request.user?.userId;
+
+    if (!userId) {
+      throw new UnauthorizedException('Пользователь не аутентифицирован');
+    }
+
+    return this.chatService.clearMemory(userId);
   }
 }

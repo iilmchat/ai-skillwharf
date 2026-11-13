@@ -1,4 +1,8 @@
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator.js';
 import { BillingController } from './billing.controller.js';
@@ -21,6 +25,7 @@ interface BillingMock {
 interface YooKassaMock {
   createPayment: MockFn;
   parsePaymentSucceeded: MockFn;
+  getPaymentStatus: MockFn;
 }
 
 type ControllerRequest = Parameters<BillingController['topup']>[0];
@@ -58,7 +63,11 @@ describe('BillingController', () => {
       balance: '500.00',
       entryId: 'entry-1',
     });
-    yooKassa = { createPayment: vi.fn(), parsePaymentSucceeded: vi.fn() };
+    yooKassa = {
+      createPayment: vi.fn(),
+      parsePaymentSucceeded: vi.fn(),
+      getPaymentStatus: vi.fn(),
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [BillingController],
@@ -151,13 +160,25 @@ describe('BillingController', () => {
   });
 
   describe('webhook', () => {
-    it('зачисляет средства по payment.succeeded', async () => {
-      yooKassa.parsePaymentSucceeded.mockReturnValue({
-        paymentId: 'payment-1',
-        userId: USER_ID,
-        amount: 500,
-      });
+    const notification = {
+      paymentId: 'payment-1',
+      userId: USER_ID,
+      amount: 500,
+    };
+    const confirmedPayment = {
+      id: 'payment-1',
+      status: 'succeeded',
+      paid: true,
+      amount: { value: '500.00', currency: 'RUB' },
+      metadata: { userId: USER_ID },
+    };
 
+    beforeEach(() => {
+      yooKassa.parsePaymentSucceeded.mockReturnValue(notification);
+      yooKassa.getPaymentStatus.mockResolvedValue(confirmedPayment);
+    });
+
+    it('зачисляет средства по payment.succeeded', async () => {
       await expect(
         controller.webhook({
           event: 'payment.succeeded',
@@ -165,6 +186,8 @@ describe('BillingController', () => {
         }),
       ).resolves.toEqual({ ok: true });
 
+      // Перед зачислением платёж перепроверяется в API ЮKassa.
+      expect(yooKassa.getPaymentStatus).toHaveBeenCalledWith('payment-1');
       expect(billing.addFunds).toHaveBeenCalledWith(
         USER_ID,
         500,
@@ -180,6 +203,55 @@ describe('BillingController', () => {
         controller.webhook({ event: 'payment.canceled' }),
       ).resolves.toEqual({ ok: true });
 
+      expect(billing.addFunds).not.toHaveBeenCalled();
+      expect(yooKassa.getPaymentStatus).not.toHaveBeenCalled();
+    });
+
+    it('отклоняет поддельное уведомление с другой суммой', async () => {
+      yooKassa.getPaymentStatus.mockResolvedValue({
+        ...confirmedPayment,
+        amount: { value: '1.00', currency: 'RUB' },
+      });
+
+      await expect(
+        controller.webhook({ event: 'payment.succeeded' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(billing.addFunds).not.toHaveBeenCalled();
+    });
+
+    it('отклоняет уведомление о незавершённом платеже', async () => {
+      yooKassa.getPaymentStatus.mockResolvedValue({
+        ...confirmedPayment,
+        status: 'pending',
+        paid: false,
+      });
+
+      await expect(
+        controller.webhook({ event: 'payment.succeeded' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(billing.addFunds).not.toHaveBeenCalled();
+    });
+
+    it('отклоняет уведомление с чужим userId', async () => {
+      yooKassa.getPaymentStatus.mockResolvedValue({
+        ...confirmedPayment,
+        metadata: { userId: OTHER_USER_ID },
+      });
+
+      await expect(
+        controller.webhook({ event: 'payment.succeeded' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(billing.addFunds).not.toHaveBeenCalled();
+    });
+
+    it('не зачисляет средства, если ЮKassa недоступна', async () => {
+      yooKassa.getPaymentStatus.mockRejectedValue(
+        new ServiceUnavailableException('ЮKassa недоступна'),
+      );
+
+      await expect(
+        controller.webhook({ event: 'payment.succeeded' }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
       expect(billing.addFunds).not.toHaveBeenCalled();
     });
   });
