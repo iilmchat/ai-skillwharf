@@ -590,54 +590,69 @@ describe('LlmService', () => {
   });
 
   describe('createOzonMcpTool', () => {
-    it('возвращает фейковые данные продаж для get_sales', async () => {
-      const service = createService();
-
-      const tool = service.createOzonMcpTool();
-      const raw = await tool.invoke({
-        action: 'get_sales',
-        params: { period: 'month' },
-      });
-      const data = JSON.parse(raw as string) as Record<string, unknown>;
-
-      expect(tool.name).toBe(OZON_MCP_TOOL_NAME);
-      expect(data).toMatchObject({
-        platform: 'ozon',
-        action: 'get_sales',
-        sales: 15000,
-        items: 42,
-      });
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
 
-    it('вызывает paywall-хук до возврата данных', async () => {
+    it('без ключей возвращает понятную ошибку', async () => {
+      vi.stubEnv('OZON_CLIENT_ID', '');
+      vi.stubEnv('OZON_API_KEY', '');
+      vi.stubEnv('OZON_MCP_URL', '');
+
+      const service = createService();
+      const tool = service.createOzonMcpTool();
+
+      await expect(
+        tool.invoke({ action: 'ozon_get_prices', params: {} }),
+      ).resolves.toBe('Ozon API keys not configured');
+      expect(tool.name).toBe(OZON_MCP_TOOL_NAME);
+    });
+
+    it('вызывает McpClient и paywall-хук', async () => {
       const beforeExecute = vi.fn();
+      const callTool = vi.fn().mockResolvedValue('{"prices":[]}');
       const service = createService();
 
-      await service
-        .createOzonMcpTool({ beforeExecute })
-        .invoke({ action: 'get_orders', params: {} });
+      const result = await service
+        .createOzonMcpTool({ beforeExecute, client: { callTool } })
+        .invoke({ action: 'ozon_get_prices', params: { shop_id: 'default' } });
 
+      expect(result).toBe('{"prices":[]}');
+      expect(callTool).toHaveBeenCalledWith('ozon_get_prices', {
+        shop_id: 'default',
+      });
       expect(beforeExecute).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('createWbMcpTool', () => {
-    it('возвращает фейковые данные Wildberries', async () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('без токена возвращает понятную ошибку', async () => {
+      vi.stubEnv('WB_API_TOKEN', '');
+      vi.stubEnv('WB_MCP_URL', '');
+
+      const service = createService();
+      const tool = service.createWbMcpTool();
+
+      await expect(
+        tool.invoke({ action: 'wb_cards_list', params: {} }),
+      ).resolves.toBe('WB API token not configured');
+      expect(tool.name).toBe(WB_MCP_TOOL_NAME);
+    });
+
+    it('вызывает McpClient с именем реального инструмента', async () => {
+      const callTool = vi.fn().mockResolvedValue('{"cards":[]}');
       const service = createService();
 
-      const tool = service.createWbMcpTool();
-      const raw = await tool.invoke({
-        action: 'get_sales',
-        params: {},
-      });
-      const data = JSON.parse(raw as string) as Record<string, unknown>;
+      const result = await service
+        .createWbMcpTool({ client: { callTool } })
+        .invoke({ action: 'wb_cards_list', params: {} });
 
-      expect(tool.name).toBe(WB_MCP_TOOL_NAME);
-      expect(data).toMatchObject({
-        platform: 'wb',
-        sales: 15000,
-        items: 42,
-      });
+      expect(result).toBe('{"cards":[]}');
+      expect(callTool).toHaveBeenCalledWith('wb_cards_list', {});
     });
   });
 

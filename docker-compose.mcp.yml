@@ -1,0 +1,72 @@
+# MCP-серверы Ozon и Wildberries (Python, SSE).
+# Запуск вместе с основным стеком:
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build
+#
+# Ключи берутся из .env:
+#   OZON_CLIENT_ID, OZON_API_KEY, OZON_PERF_CLIENT_ID, OZON_PERF_CLIENT_SECRET
+#   WB_API_TOKEN
+#   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
+services:
+  api:
+    environment:
+      OZON_MCP_URL: http://ozon-mcp:5001
+      WB_MCP_URL: http://wb-mcp:5002
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+
+  ozon-mcp:
+    build:
+      context: .
+      dockerfile: infra/mcp/ozon.Dockerfile
+    environment:
+      PORT: 5001
+      DATA_DIR: /data
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      OZON_CLIENT_ID: ${OZON_CLIENT_ID:-}
+      OZON_API_KEY: ${OZON_API_KEY:-}
+      OZON_PERF_CLIENT_ID: ${OZON_PERF_CLIENT_ID:-}
+      OZON_PERF_CLIENT_SECRET: ${OZON_PERF_CLIENT_SECRET:-}
+      # 0 отключает фоновые проверки, чтобы не тратить лимиты API.
+      HEALTH_CHECK_INTERVAL_MIN: ${OZON_HEALTH_CHECK_INTERVAL_MIN:-0}
+    ports:
+      - '5001:5001'
+    volumes:
+      - ozon_mcp_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:5001/api/health'')"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  wb-mcp:
+    build:
+      context: .
+      dockerfile: infra/mcp/wb.Dockerfile
+    environment:
+      PORT: 5002
+      DATA_DIR: /data
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      WB_API_TOKEN: ${WB_API_TOKEN:-}
+      HEALTH_CHECK_INTERVAL_MIN: ${WB_HEALTH_CHECK_INTERVAL_MIN:-0}
+    ports:
+      - '5002:5002'
+    volumes:
+      - wb_mcp_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:5002/api/health'')"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ozon_mcp_data:
+  wb_mcp_data:

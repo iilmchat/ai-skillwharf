@@ -30,6 +30,7 @@ import {
 import { GigaChatAdapter } from './adapters/gigachat.adapter.js';
 import type { NativeProviderAdapter } from './adapters/types.js';
 import { YandexAdapter } from './adapters/yandex.adapter.js';
+import { McpClient } from './tools/mcp-client.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 import type { PromptsService } from '../prompts/prompts.service.js';
 import {
@@ -122,18 +123,20 @@ export const OZON_MCP_TOOL_NAME = 'ozon_mcp_call';
 
 /** Описание MCP-инструмента Ozon для LLM. */
 export const OZON_MCP_TOOL_DESCRIPTION =
-  'Вызывает MCP-инструмент Ozon Seller: карточки, заказы, продажи и отзывы';
+  'Вызывает реальный MCP-сервер Ozon Seller. Передайте имя MCP-инструмента в action (например, ozon_get_prices) и аргументы в params';
 
 /** Имя MCP-инструмента Wildberries. */
 export const WB_MCP_TOOL_NAME = 'wb_mcp_call';
 
 /** Описание MCP-инструмента Wildberries для LLM. */
 export const WB_MCP_TOOL_DESCRIPTION =
-  'Вызывает MCP-инструмент Wildberries Seller: карточки, заказы, продажи и отзывы';
+  'Вызывает реальный MCP-сервер Wildberries Seller. Передайте имя MCP-инструмента в action (например, wb_cards_list) и аргументы в params';
 
 /** Схема аргументов marketplace MCP-инструментов. */
 export const McpToolSchema = z.object({
-  action: z.string().describe('Действие MCP-инструмента'),
+  action: z
+    .string()
+    .describe('Точное имя MCP-инструмента, например ozon_get_prices'),
   params: z.record(z.string(), z.any()).describe('Параметры действия'),
 });
 
@@ -326,6 +329,11 @@ export interface SandboxToolOptions {
   beforeExecute?: () => Promise<void>;
 }
 
+/** Опции MCP-инструмента; client позволяет подменить транспорт в тестах. */
+export interface McpToolOptions extends SandboxToolOptions {
+  client?: Pick<McpClient, 'callTool'>;
+}
+
 export interface DzenPublishOptions extends SandboxToolOptions {
   /** Каталог для готовых Markdown-черновиков (по умолчанию `./dzen-output`). */
   outputDir?: string;
@@ -342,6 +350,7 @@ export interface DzenPublishOptions extends SandboxToolOptions {
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly client: ChatOpenAI | null;
+  private readonly mcpClients = new Map<string, McpClient>();
 
   constructor(
     private readonly sandboxService: SandboxService,
@@ -444,45 +453,100 @@ export class LlmService {
     });
   }
 
-  /**
-   * MCP-заглушка Ozon: пока реальный MCP-сервер не подключён, инструмент
-   * возвращает демонстрационные данные по запрошенному действию.
-   */
-  createOzonMcpTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
-    return this.createMarketplaceMcpTool(
-      OZON_MCP_TOOL_NAME,
-      OZON_MCP_TOOL_DESCRIPTION,
-      'ozon',
-      options,
-    );
+  /** Реальный MCP-инструмент Ozon Seller. */
+  createOzonMcpTool(options: McpToolOptions = {}): DynamicStructuredTool {
+    return this.createMarketplaceMcpTool('ozon', options);
   }
 
-  /** MCP-заглушка Wildberries. */
-  createWbMcpTool(options: SandboxToolOptions = {}): DynamicStructuredTool {
-    return this.createMarketplaceMcpTool(
-      WB_MCP_TOOL_NAME,
-      WB_MCP_TOOL_DESCRIPTION,
-      'wb',
-      options,
-    );
+  /** Реальный MCP-инструмент Wildberries Seller. */
+  createWbMcpTool(options: McpToolOptions = {}): DynamicStructuredTool {
+    return this.createMarketplaceMcpTool('wb', options);
   }
 
   private createMarketplaceMcpTool(
-    name: string,
-    description: string,
     platform: 'ozon' | 'wb',
-    options: SandboxToolOptions,
+    options: McpToolOptions,
   ): DynamicStructuredTool {
+    const config =
+      platform === 'ozon'
+        ? {
+            name: OZON_MCP_TOOL_NAME,
+            description: OZON_MCP_TOOL_DESCRIPTION,
+            keyVars: ['OZON_CLIENT_ID', 'OZON_API_KEY'],
+            missingKeys: 'Ozon API keys not configured',
+            missingUrl: 'Ozon MCP server not configured',
+          }
+        : {
+            name: WB_MCP_TOOL_NAME,
+            description: WB_MCP_TOOL_DESCRIPTION,
+            keyVars: ['WB_API_TOKEN'],
+            missingKeys: 'WB API token not configured',
+            missingUrl: 'WB MCP server not configured',
+          };
+
     return new DynamicStructuredTool({
-      name,
-      description,
+      name: config.name,
+      description: config.description,
       schema: McpToolSchema,
       func: async ({ action, params }) => {
+        const client = options.client ?? this.getMcpClient(platform);
+
+        if (options.client === undefined) {
+          if (!hasEnv(...config.keyVars)) {
+            return config.missingKeys;
+          }
+
+          if (client === null) {
+            return config.missingUrl;
+          }
+        }
+
+        if (client === null) {
+          return config.missingUrl;
+        }
+
         await options.beforeExecute?.();
 
-        return mockMarketplaceResponse(platform, action, params);
+        try {
+          return await client.callTool(action, params);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+
+          this.logger.warn(`MCP ${platform}: ${message}`);
+
+          return `MCP error: ${message}`;
+        }
       },
     });
+  }
+
+  private getMcpClient(platform: 'ozon' | 'wb'): McpClient | null {
+    const url =
+      platform === 'ozon' ? process.env.OZON_MCP_URL : process.env.WB_MCP_URL;
+
+    if (url === undefined || url.trim() === '') {
+      return null;
+    }
+
+    const cached = this.mcpClients.get(url);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const client = new McpClient({
+      baseUrl: url,
+      authToken:
+        process.env.MCP_AUTH_TOKEN === undefined ||
+        process.env.MCP_AUTH_TOKEN === ''
+          ? undefined
+          : process.env.MCP_AUTH_TOKEN,
+    });
+
+    this.mcpClients.set(url, client);
+
+    return client;
   }
 
   /** Mock-инструмент отправки сообщений в мессенджеры. */
@@ -1035,53 +1099,18 @@ export function withLanguageInstruction(
   return [new SystemMessage(systemPrompt), ...messages];
 }
 
-/**
- * Демо-ответ MCP-заглушки. Реальные Ozon/WB MCP-серверы ещё не подключены,
- * поэтому возвращаем предсказуемые данные для сценариев и тестов.
- */
-function mockMarketplaceResponse(
-  platform: 'ozon' | 'wb',
-  action: string,
-  params: unknown,
-): string {
-  const base = { platform, action, mock: true, params };
+/** Проверяет, что все перечисленные env-переменные заданы. */
+function hasEnv(...names: string[]): boolean {
+  return names.every((name) => {
+    const value = process.env[name];
 
-  switch (action) {
-    case 'get_sales':
-      return JSON.stringify({
-        ...base,
-        sales: 15000,
-        items: 42,
-        currency: 'RUB',
-      });
-    case 'get_orders':
-      return JSON.stringify({
-        ...base,
-        orders: [{ id: 'order-1', status: 'delivered', amount: 2500 }],
-        total: 42,
-      });
-    case 'get_products':
-      return JSON.stringify({
-        ...base,
-        products: [{ id: 'product-1', name: 'Демо-товар', price: 1990 }],
-        total: 42,
-      });
-    case 'update_product':
-      return JSON.stringify({ ...base, updated: true });
-    case 'get_reviews':
-      return JSON.stringify({
-        ...base,
-        reviews: [{ id: 'review-1', rating: 5, text: 'Отличный товар' }],
-        rating: 4.8,
-      });
-    case 'reply_review':
-      return JSON.stringify({ ...base, replied: true });
-    default:
-      return JSON.stringify({ ...base, result: 'ok' });
-  }
+    return value !== undefined && value !== '';
+  });
 }
 
-/** Собирает разрешённые секреты из окружения Gateway для песочницы. */
+/**
+ * Собирает разрешённые секреты из окружения Gateway для песочницы.
+ */
 function sandboxEnv(): Record<string, string> {
   const env: Record<string, string> = {};
 

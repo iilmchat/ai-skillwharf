@@ -610,3 +610,101 @@ docker compose up -d api
 Если вебхук не приходит, проверьте, что туннель запущен, URL в кабинете
 указывает на `/api/v1/billing/webhook`, а API доступен по `/api/v1/health`.
 Не коммитьте реальные ключи ЮKassa и выключайте туннель после тестирования.
+
+## 15. Подключение MCP-серверов
+
+Для Ozon и Wildberries используются Python MCP-серверы с транспортом SSE:
+
+| Сервис | Пакет | Версия | Порт |
+| --- | --- | --- | --- |
+| `ozon-mcp` | `ozon-mcp-server` | 2.5.2 | 5001 |
+| `wb-mcp` | `wb-mcp-server` | 2.6.1 | 5002 |
+
+Оба сервиса описаны в `docker-compose.mcp.yml` и собираются из
+`infra/mcp/*.Dockerfile`. API обращается к ним по внутренней сети через
+`OZON_MCP_URL` и `WB_MCP_URL`, а ключи передаются только контейнерам MCP.
+
+### Получение ключей
+
+**Ozon** (seller.ozon.ru):
+
+1. Настройки → API-ключи: создайте Client ID и Api-Key для Seller API.
+2. Для рекламы (Performance API) создайте отдельные Client ID и
+   Client Secret.
+3. Заполните в `.env`:
+
+   ```text
+   OZON_CLIENT_ID=<client-id>
+   OZON_API_KEY=<api-key>
+   OZON_PERF_CLIENT_ID=<performance-client-id>
+   OZON_PERF_CLIENT_SECRET=<performance-client-secret>
+   ```
+
+**Wildberries** (seller.wildberries.ru):
+
+1. Настройки → Доступ к API → Создать токен. Отметьте категории, которые
+   нужны навыку (контент, цены, заказы, финансы и т.д.).
+2. Заполните в `.env`:
+
+   ```text
+   WB_API_TOKEN=<токен>
+   ```
+
+3. Токен действует 180 дней; срок можно проверить на странице
+   `/diagnostics` WB MCP-сервера.
+
+Для защиты `/sse` задайте общий токен:
+
+```text
+MCP_AUTH_TOKEN=<случайная строка>
+```
+
+Пустое значение отключает авторизацию — допустимо только во внутренней
+compose-сети.
+
+### Запуск MCP-серверов
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build
+```
+
+Проверка:
+
+```bash
+curl http://localhost:5001/api/health
+curl http://localhost:5002/api/health
+```
+
+Веб-панели MCP-серверов: <http://localhost:5001/shops> и
+<http://localhost:5002/shops>. Через них можно добавить магазин и проверить
+ключи кнопкой «Проверить».
+
+### Вызов из агента
+
+Инструменты `ozon_mcp_call` и `wb_mcp_call` передают `action` как точное имя
+MCP-инструмента из `tools/list`:
+
+```json
+{
+  "action": "ozon_get_prices",
+  "params": { "shop_id": "default" }
+}
+```
+
+Примеры имён: `ozon_get_prices`, `ozon_orders_fbs`, `ozon_reviews_list`,
+`wb_cards_list`, `wb_finance_report`, `wb_advert_list`. Полный список
+возвращает `tools/list` соответствующего сервера.
+
+Если ключи не заданы, инструмент вернёт `Ozon API keys not configured` или
+`WB API token not configured` и не будет обращаться к MCP-серверу.
+
+### Безопасность
+
+* Не публикуйте порты `5001`/`5002` в интернет: веб-панели MCP не защищены
+  `MCP_AUTH_TOKEN`.
+* Для удалённого доступа используйте VPN или reverse proxy с TLS.
+* Ключи маркетплейсов хранятся в зашифрованном виде в volume
+  `ozon_mcp_data`/`wb_mcp_data`; не копируйте только `shops.json` без
+  `.encryption_key`.
+* Фоновые проверки MCP-серверов отключены (`HEALTH_CHECK_INTERVAL_MIN=0`),
+  чтобы не расходовать лимиты API; включайте их осознанно.
