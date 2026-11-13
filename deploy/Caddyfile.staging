@@ -10,5 +10,47 @@
 {$DOMAIN} {
 	tls internal
 	encode zstd gzip
-	reverse_proxy web:80
+
+	# Точные пути без слэша тоже требуют авторизацию, затем редирект.
+	handle /grafana {
+		route {
+			basic_auth {
+				{$MONITORING_BASIC_AUTH_USER} {$MONITORING_BASIC_AUTH_HASH}
+			}
+			redir /grafana/ 308
+		}
+	}
+	handle /prometheus {
+		route {
+			basic_auth {
+				{$MONITORING_BASIC_AUTH_USER} {$MONITORING_BASIC_AUTH_HASH}
+			}
+			redir /prometheus/ 308
+		}
+	}
+
+	# Grafana: Basic Auth на edge, затем проксирование без префикса.
+	# GF_SERVER_ROOT_URL в compose содержит /grafana/, поэтому Grafana
+	# отдаёт ссылки и ассеты с этим префиксом.
+	handle_path /grafana/* {
+		basic_auth {
+			{$MONITORING_BASIC_AUTH_USER} {$MONITORING_BASIC_AUTH_HASH}
+		}
+		reverse_proxy grafana:3000
+	}
+
+	# Prometheus: Caddy проверяет креды и пробрасывает Authorization дальше.
+	# Нативный web.config.file Prometheus проверяет тот же bcrypt-хэш ещё раз,
+	# поэтому прямой доступ к 127.0.0.1:9090 тоже защищён.
+	handle_path /prometheus/* {
+		basic_auth {
+			{$MONITORING_BASIC_AUTH_USER} {$MONITORING_BASIC_AUTH_HASH}
+		}
+		reverse_proxy prometheus:9090
+	}
+
+	# API, web и healthcheck работают как раньше, без Basic Auth.
+	handle {
+		reverse_proxy web:80
+	}
 }

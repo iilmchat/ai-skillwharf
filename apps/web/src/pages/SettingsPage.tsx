@@ -4,8 +4,10 @@ import { Link, NavLink } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { RagMemoryPanel } from '../components/RagMemoryPanel';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { RAG_MEMORY_PANEL_ENABLED } from '../lib/feature-flags';
 import { clearMemory, getMemoryErrorMessage } from '../lib/memory';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
@@ -14,6 +16,10 @@ interface Notice {
   tone: 'success' | 'error';
   message: string;
 }
+
+/** Единый контейнер секций страницы настроек. */
+const SECTION_CLASSES =
+  'rounded-2xl border border-outline-variant bg-surface-container p-5 shadow-sm sm:p-6';
 
 function navLinkClasses({ isActive }: { isActive: boolean }): string {
   return `rounded-lg px-3 py-2 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
@@ -124,38 +130,46 @@ export function SettingsPage() {
           {t('settings.subtitle')}
         </p>
 
-        <section
-          aria-labelledby="memory-title"
-          className="mt-8 rounded-2xl border border-outline-variant bg-surface-container p-5 shadow-sm sm:p-6"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 max-w-xl">
-              <h2
-                id="memory-title"
-                className="font-display text-lg font-bold text-on-surface"
-              >
-                {t('settings.memory.title')}
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-                {t('settings.memory.description')}
-              </p>
-            </div>
+        <div className="mt-8 space-y-6">
+          <section
+            aria-labelledby="memory-title"
+            aria-describedby="memory-description"
+            className={SECTION_CLASSES}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 max-w-xl">
+                <h2
+                  id="memory-title"
+                  className="font-display text-lg font-bold text-on-surface"
+                >
+                  {t('settings.memory.title')}
+                </h2>
+                <p
+                  id="memory-description"
+                  className="mt-2 text-sm leading-relaxed text-on-surface-variant"
+                >
+                  {t('settings.memory.description')}
+                </p>
+              </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                void handleClearMemory();
-              }}
-              disabled={isClearing}
-              aria-busy={isClearing}
-              className="inline-flex shrink-0 items-center justify-center rounded-lg bg-error px-4 py-2 text-sm font-semibold text-on-error shadow-sm shadow-error/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
-            >
-              {isClearing
-                ? t('settings.memory.clearing')
-                : t('settings.memory.clear')}
-            </button>
-          </div>
-        </section>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleClearMemory();
+                }}
+                disabled={isClearing}
+                aria-busy={isClearing}
+                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-error px-4 py-2 text-sm font-semibold text-on-error shadow-sm shadow-error/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+              >
+                {isClearing
+                  ? t('settings.memory.clearing')
+                  : t('settings.memory.clear')}
+              </button>
+            </div>
+          </section>
+
+          {RAG_MEMORY_PANEL_ENABLED && <RagMemoryPanel />}
+        </div>
       </main>
 
       {notice?.tone === 'success' && (

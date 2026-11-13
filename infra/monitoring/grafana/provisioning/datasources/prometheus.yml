@@ -8,3 +8,9 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+    # Prometheus закрыт нативным basic_auth; Grafana передаёт те же креды
+    # из окружения контейнера ( provisioning подставляет ${VAR} ).
+    basicAuth: true
+    basicAuthUser: ${MONITORING_BASIC_AUTH_USER}
+    secureJsonData:
+      basicAuthPassword: ${MONITORING_BASIC_AUTH_PASSWORD}

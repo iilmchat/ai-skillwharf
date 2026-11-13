@@ -58,6 +58,28 @@ services:
       # Web доступен только через Caddy и с localhost для диагностики.
       - "127.0.0.1:8080:80"
 
+  prometheus:
+    environment:
+      # Без этих значений мониторинг не стартует: пароль и bcrypt-хэш
+      # задаются только в .env, в git их нет.
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
+      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:?MONITORING_BASIC_AUTH_PASSWORD is required in .env}
+      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:?MONITORING_BASIC_AUTH_HASH is required in .env}
+      # Публичный URL нужен Prometheus для корректных ссылок за Caddy.
+      PROMETHEUS_EXTERNAL_URL: https://${DOMAIN:?DOMAIN is required in .env}/prometheus/
+
+  grafana:
+    environment:
+      # Grafana доступна через Caddy по /grafana/; admin-пароль не admin.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER is required in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required in .env}
+      GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required in .env}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Datasource Grafana → Prometheus использует нативную Basic Auth.
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
+      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:?MONITORING_BASIC_AUTH_PASSWORD is required in .env}
+
   caddy:
     # Для голого IP нужен self-signed сертификат: Let's Encrypt не выпускает
     # сертификаты на IP. Если задан домен, замените Caddyfile.staging на
@@ -75,5 +97,8 @@ services:
       # Let's Encrypt staging: сертификат недоверенный, лимиты не расходуются.
       # Для боевого домена задайте https://acme-v02.api.letsencrypt.org/directory.
       ACME_CA: ${ACME_CA:-https://acme-staging-v02.api.letsencrypt.org/directory}
+      # Basic Auth для /grafana/ и /prometheus/ на edge.
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
+      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:?MONITORING_BASIC_AUTH_HASH is required in .env}
     volumes:
       - ./deploy/Caddyfile.staging:/etc/caddy/Caddyfile.staging:ro

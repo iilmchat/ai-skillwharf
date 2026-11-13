@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import type { Socket } from 'socket.io';
 import { ChatGateway } from './chat.gateway.js';
+import { DailyTokenLimitException } from '../llm/daily-token-limit.exception.js';
 import type { ChatService } from './chat.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
@@ -241,6 +242,27 @@ describe('ChatGateway', () => {
         error: {
           statusCode: 403,
           message: 'Диалог принадлежит другому пользователю',
+        },
+      });
+    });
+
+    it('передаёт code ошибки лимита токенов в WsException', async () => {
+      const socket = createSocket();
+      socket.data.userId = USER_ID;
+      chatService.streamMessage.mockRejectedValue(
+        new DailyTokenLimitException(),
+      );
+
+      await expect(
+        gateway.handleSendMessage(socket as unknown as Socket, {
+          conversationId: CONVERSATION_ID,
+          content: 'привет',
+        }),
+      ).rejects.toMatchObject({
+        error: {
+          statusCode: 429,
+          message: 'Дневной лимит токенов исчерпан. Попробуйте завтра',
+          code: 'errors.daily_token_limit',
         },
       });
     });

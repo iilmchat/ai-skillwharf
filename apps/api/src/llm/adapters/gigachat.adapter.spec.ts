@@ -1,4 +1,5 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const oauthPost = vi.fn();
@@ -13,8 +14,11 @@ vi.mock('axios', () => ({
     (error as { isAxiosError?: boolean }).isAxiosError === true,
 }));
 
-const { GigaChatAdapter, collapseParallelToolCalls } =
-  await import('./gigachat.adapter.js');
+const {
+  GigaChatAdapter,
+  collapseParallelToolCalls,
+  parseGigaChatStreamPayload,
+} = await import('./gigachat.adapter.js');
 
 const CLIENT_ID = 'client-id';
 const CLIENT_SECRET = 'client-secret';
@@ -44,6 +48,28 @@ function mockChat(content = 'Привет'): void {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     },
   });
+}
+
+/** Строка SSE-сообщения `data: <payload>`, как её присылает GigaChat. */
+function sse(payload: unknown): string {
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+
+  return `data: ${body}\n\n`;
+}
+
+/** Собирает все дельты и финальное сообщение из стрима адаптера. */
+async function collectStream(
+  stream: AsyncGenerator<{ type: 'delta'; text: string }, AIMessage, void>,
+): Promise<{ deltas: string[]; message: AIMessage }> {
+  const deltas: string[] = [];
+  let step = await stream.next();
+
+  while (!step.done) {
+    deltas.push(step.value.text);
+    step = await stream.next();
+  }
+
+  return { deltas, message: step.value };
 }
 
 describe('GigaChatAdapter', () => {
@@ -235,6 +261,167 @@ describe('GigaChatAdapter', () => {
     ).rejects.toThrow(/GIGACHAT_CLIENT_ID/);
     expect(oauthPost).not.toHaveBeenCalled();
   });
+
+  describe('chatStream', () => {
+    function chatRequest() {
+      return {
+        messages: [new HumanMessage('привет')],
+        tools: [],
+        systemPrompt: '',
+      };
+    }
+
+    it('отдаёт дельты и собирает финальное сообщение с usage', async () => {
+      mockOauth();
+      chatPost.mockResolvedValue({
+        data: Readable.from([
+          sse({ choices: [{ delta: { role: 'assistant' } }] }),
+          sse({ choices: [{ delta: { content: 'При' } }] }),
+          sse({ choices: [{ delta: { content: 'вет' } }] }),
+          sse({
+            choices: [],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              total_tokens: 15,
+            },
+          }),
+          sse('[DONE]'),
+        ]),
+      });
+      const adapter = createAdapter();
+
+      const { deltas, message } = await collectStream(
+        adapter.chatStream(chatRequest()),
+      );
+
+      expect(deltas).toEqual(['При', 'вет']);
+      expect(message.content).toBe('Привет');
+      expect(message.usage_metadata).toMatchObject({
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+      });
+
+      const [, body, config] = chatPost.mock.calls[0] as [
+        string,
+        { stream?: boolean },
+        { headers: Record<string, string>; responseType?: string },
+      ];
+
+      expect(body.stream).toBe(true);
+      expect(config.responseType).toBe('stream');
+      expect(config.headers.Authorization).toBe(`Bearer ${ACCESS_TOKEN}`);
+      expect(config.headers.Accept).toBe('text/event-stream');
+    });
+
+    it('собирает function_call из дельт одним tool_call', async () => {
+      mockOauth();
+      chatPost.mockResolvedValue({
+        data: Readable.from([
+          sse({
+            choices: [
+              {
+                delta: {
+                  function_call: {
+                    name: 'execute_sandbox_code',
+                    arguments: '{"code":',
+                  },
+                },
+              },
+            ],
+          }),
+          sse({
+            choices: [
+              {
+                delta: {
+                  function_call: { arguments: '"print(1)"}' },
+                },
+              },
+            ],
+          }),
+          sse('[DONE]'),
+        ]),
+      });
+      const adapter = createAdapter();
+
+      const { message } = await collectStream(
+        adapter.chatStream(chatRequest()),
+      );
+
+      expect(message.tool_calls).toHaveLength(1);
+      expect(message.tool_calls?.[0]).toMatchObject({
+        name: 'execute_sandbox_code',
+        args: { code: 'print(1)' },
+      });
+    });
+
+    it('обрабатывает последнюю строку без перевода строки', async () => {
+      mockOauth();
+      chatPost.mockResolvedValue({
+        data: Readable.from([
+          'data: {"choices":[{"delta":{"content":"хвост"}}]}',
+        ]),
+      });
+      const adapter = createAdapter();
+
+      const { deltas, message } = await collectStream(
+        adapter.chatStream(chatRequest()),
+      );
+
+      expect(deltas).toEqual(['хвост']);
+      expect(message.content).toBe('хвост');
+    });
+
+    it('обновляет токен и повторяет запрос после 401', async () => {
+      mockOauth();
+      chatPost
+        .mockRejectedValueOnce({
+          isAxiosError: true,
+          message: 'Request failed with status code 401',
+          response: { status: 401 },
+        })
+        .mockResolvedValueOnce({
+          data: Readable.from([
+            sse({ choices: [{ delta: { content: 'ok' } }] }),
+            sse('[DONE]'),
+          ]),
+        });
+      const adapter = createAdapter();
+
+      const { deltas } = await collectStream(adapter.chatStream(chatRequest()));
+
+      expect(oauthPost).toHaveBeenCalledTimes(2);
+      expect(chatPost).toHaveBeenCalledTimes(2);
+      expect(deltas).toEqual(['ok']);
+    });
+
+    it('пробрасывает ошибку провайдера из стрима', async () => {
+      mockOauth();
+      chatPost.mockResolvedValue({
+        data: Readable.from([
+          sse({ error: { message: 'quota exceeded', code: '429' } }),
+        ]),
+      });
+      const adapter = createAdapter();
+
+      await expect(
+        collectStream(adapter.chatStream(chatRequest())),
+      ).rejects.toThrow(/quota exceeded/);
+    });
+
+    it('пробрасывает ошибку при некорректном JSON в SSE', async () => {
+      mockOauth();
+      chatPost.mockResolvedValue({
+        data: Readable.from(['data: {broken\n\n']),
+      });
+      const adapter = createAdapter();
+
+      await expect(
+        collectStream(adapter.chatStream(chatRequest())),
+      ).rejects.toThrow(/некорректный JSON/);
+    });
+  });
 });
 
 describe('collapseParallelToolCalls', () => {
@@ -249,5 +436,37 @@ describe('collapseParallelToolCalls', () => {
   it('не трогает одиночный или пустой список', () => {
     expect(collapseParallelToolCalls([{ name: 'a' }])).toEqual([{ name: 'a' }]);
     expect(collapseParallelToolCalls([])).toEqual([]);
+  });
+});
+
+describe('parseGigaChatStreamPayload', () => {
+  it('валидирует чанк с текстом и usage', () => {
+    expect(
+      parseGigaChatStreamPayload(
+        JSON.stringify({
+          choices: [{ delta: { content: 'Привет' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+        }),
+      ),
+    ).toMatchObject({ kind: 'chunk' });
+  });
+
+  it('возвращает ошибку провайдера из поля error', () => {
+    expect(
+      parseGigaChatStreamPayload(
+        JSON.stringify({ error: { message: 'quota exceeded' } }),
+      ),
+    ).toEqual({ kind: 'error', message: 'quota exceeded' });
+  });
+
+  it('отклоняет некорректный JSON и формат чанка', () => {
+    expect(parseGigaChatStreamPayload('{broken')).toEqual({
+      kind: 'error',
+      message: 'некорректный JSON в SSE-чанке',
+    });
+    expect(parseGigaChatStreamPayload('[1,2,3]')).toEqual({
+      kind: 'error',
+      message: 'некорректный формат SSE-чанка',
+    });
   });
 });

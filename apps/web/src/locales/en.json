@@ -572,6 +572,28 @@
       "error": "Could not clear the memory. Please try again.",
       "sessionExpired": "Your session has expired. Please sign in again.",
       "network": "The server is unreachable. Check your connection."
+    },
+    "rag": {
+      "title": "Memory",
+      "description": "Entries the assistant saved from your conversations to keep context. Only you can see them.",
+      "listLabel": "Agent memory entries",
+      "count": "Entries: {{count}}",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "loading": "Loading memory entries…",
+      "entryType": "Memory chunk",
+      "createdAt": "Created: {{date}}",
+      "emptyTitle": "The agent has not remembered anything yet",
+      "emptyBody": "Entries will appear here after conversations once the assistant saves details useful for answers.",
+      "retry": "Try again",
+      "metadataNote": "The server currently returns only the entry text and creation date; source, type, and relevance will appear later.",
+      "errors": {
+        "unauthorized": "Your session has expired. Please sign in again.",
+        "unavailable": "Memory view is not available yet: the API does not support this section.",
+        "network": "The server is unreachable. Check your connection.",
+        "invalid": "The server returned invalid memory data.",
+        "unknown": "Could not load memory. Please try again."
+      }
     }
   }
 }

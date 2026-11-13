@@ -196,10 +196,78 @@ bash scripts/backup-db.sh
 BACKUP_DIR=/mnt/backups bash scripts/backup-db.sh
 ```
 
-Рекомендуется добавить запуск в cron (например, ежедневно в 02:00):
+Дамп пишется во временный файл `.partial` и переименовывается только после
+успешного `pg_dump` и проверки непустоты. Если бэкап не создан, скрипт
+завершается с кодом `1` и печатает причину.
+
+Перед дампом проверяется свободное место в `BACKUP_DIR`. По умолчанию
+требуется не меньше 512 МБ (`BACKUP_MIN_FREE_MB`); при нехватке места
+бэкап не начинается:
+
+```text
+ОШИБКА: недостаточно свободного места в /mnt/backups: доступно 120 МБ,
+требуется минимум 512 МБ.
+```
+
+### Ротация бэкапов
+
+После успешного бэкапа `backup-db.sh` вызывает `scripts/rotate-backups.sh`.
+Политика: хранить `BACKUP_KEEP_DAYS` дней, но всегда оставлять не меньше
+`BACKUP_KEEP_MIN` последних успешных дампов. Удаляются только файлы
+`${POSTGRES_DB}-YYYYMMDD-HHMMSS.dump` старше срока и только сверх минимума.
+Каждое удаление пишется в лог с датой, возрастом и размером.
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `BACKUP_DIR` | `backups` | Каталог с дампами |
+| `BACKUP_KEEP_DAYS` | `14` | Хранить последние N дней |
+| `BACKUP_KEEP_MIN` | `7` | Всегда оставлять N последних дампов |
+| `BACKUP_MIN_FREE_MB` | `512` | Минимум свободного места перед дампом |
+
+Проверить, что будет удалено, без изменений на диске:
+
+```bash
+bash scripts/rotate-backups.sh --dry-run
+# поддерживается также -DryRun
+```
+
+Запустить только ротацию с другими параметрами:
+
+```bash
+bash scripts/rotate-backups.sh --keep-days 30 --keep-min 10
+```
+
+### Включение по расписанию
+
+Рекомендуется добавить запуск в cron (например, ежедневно в 02:00). Ротация
+запускается автоматически после успешного бэкапа:
 
 ```cron
-0 2 * * * cd /opt/skillwharf && BACKUP_DIR=/mnt/backups bash scripts/backup-db.sh >> /var/log/skillwharf-backup.log 2>&1
+0 2 * * * cd /opt/skillwharf && \
+  BACKUP_DIR=/mnt/backups BACKUP_KEEP_DAYS=14 BACKUP_KEEP_MIN=7 \
+  bash scripts/backup-db.sh >> /var/log/skillwharf-backup.log 2>&1
+```
+
+Если ротация должна выполняться отдельным заданием, добавьте
+`--skip-prune` к бэкапу и второй cron-вызов:
+
+```cron
+30 2 * * * cd /opt/skillwharf && BACKUP_DIR=/mnt/backups \
+  bash scripts/rotate-backups.sh >> /var/log/skillwharf-backup.log 2>&1
+```
+
+### Проверка бэкапов
+
+```bash
+# Последний запуск завершился без ошибок?
+tail -n 30 /var/log/skillwharf-backup.log
+
+# Сколько дампов и какой объём занимают?
+ls -lh /mnt/backups/*.dump | tail -n 10
+du -sh /mnt/backups
+
+# Что будет удалено при текущей политике?
+BACKUP_DIR=/mnt/backups bash scripts/rotate-backups.sh --dry-run
 ```
 
 Дампы в `backups/` не попадают в git. Каталог `backups/` стоит хранить на
@@ -208,12 +276,25 @@ BACKUP_DIR=/mnt/backups bash scripts/backup-db.sh
 **Восстановление:**
 
 ```bash
+docker compose stop api
 docker compose exec -T postgres pg_restore \
   --username "$POSTGRES_USER" \
   --dbname "$POSTGRES_DB" \
   --clean --if-exists \
   < backups/skillwharf_db-20261113-121500.dump
+docker compose start api
 ```
+
+После восстановления проверьте здоровье API и баланс Ledger:
+
+```bash
+curl -fsS http://localhost:3001/api/v1/health
+curl -fsS http://localhost:3001/metrics | head
+```
+
+**Изменение retention:** задайте `BACKUP_KEEP_DAYS` и `BACKUP_KEEP_MIN` в
+`.env` (или в cron) и проверьте результат через `--dry-run`. Уменьшать
+`BACKUP_KEEP_MIN` ниже 1 не рекомендуется: это разрешает удалить все дампы.
 
 ## 6. Диагностика проблем
 
@@ -741,16 +822,62 @@ API отдаёт метрики на `GET /metrics` (вне префикса `ap
 скрейпит `api:3000/metrics`, Grafana при старте получает datasource и дашборд
 `SkillWharf Overview` из `infra/monitoring`.
 
+Мониторинг закрыт HTTP Basic Auth. Пароли и bcrypt-хэши не хранятся в git:
+задайте их в `.env` (см. `.env.example`). На staging оба пути проходят через
+Caddy, а Prometheus дополнительно проверяет креды нативно через
+`web.config.file` с `basic_auth_users`.
+
 ```bash
-docker compose --profile monitoring up -d
+# 1. Сгенерируйте bcrypt-хэш пароля (значение содержит `$`).
+read -rs -p 'Monitoring password: ' P; echo
+docker run --rm caddy:2-alpine caddy hash-password --plaintext "$P"
+
+# 2. Внесите в .env; хэш — в одинарных кавычках.
+# Пароль — без `$` (Grafana provisioning повторно интерпретирует `$`).
+# MONITORING_BASIC_AUTH_USER=monitoring
+# MONITORING_BASIC_AUTH_PASSWORD=<пароль без $>
+# MONITORING_BASIC_AUTH_HASH='$2a$...'
+# GRAFANA_ADMIN_USER=admin
+# GRAFANA_ADMIN_PASSWORD=<отдельный пароль Grafana>
+
+# 3. Запустите staging с профилем monitoring.
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --profile production --profile monitoring up -d
 ```
 
-* Prometheus: <http://localhost:9090>
-* Grafana: <http://localhost:3003> (логин/пароль — `GRAFANA_ADMIN_*` из `.env`)
+Проверка на staging:
+
+```bash
+# -k нужен для self-signed сертификата staging; на боевом домене уберите его.
+# Без кредов — 401 (Caddy для /grafana/ и /prometheus/).
+curl -ksS -o /dev/null -w '%{http_code}\n' https://$DOMAIN/grafana/
+curl -ksS -o /dev/null -w '%{http_code}\n' https://$DOMAIN/prometheus/
+
+# С кредами — 302/200 для Grafana и 200 для Prometheus.
+curl -ksS -u "$MONITORING_BASIC_AUTH_USER:$MONITORING_BASIC_AUTH_PASSWORD" \
+  -o /dev/null -w '%{http_code}\n' https://$DOMAIN/grafana/
+curl -ksS -u "$MONITORING_BASIC_AUTH_USER:$MONITORING_BASIC_AUTH_PASSWORD" \
+  -o /dev/null -w '%{http_code}\n' https://$DOMAIN/prometheus/
+
+# Healthcheck API не должен затрагиваться Basic Auth.
+curl -kfsS https://$DOMAIN/api/v1/health
+```
+
+* Grafana: <https://$DOMAIN/grafana/> — Caddy Basic Auth, затем вход в
+  Grafana с `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`. Дефолтный
+  `admin/admin` не используется.
+* Prometheus: <https://$DOMAIN/prometheus/> — Caddy Basic Auth и нативная
+  проверка `basic_auth_users`. Прямой `http://127.0.0.1:9090` тоже требует
+  креды.
+
+В локальном dev-профиле (`docker compose --profile monitoring up -d`) те же
+переменные обязательны: контейнеры не стартуют с пустыми паролями.
+Порты по-прежнему опубликованы только на `127.0.0.1`; для удалённого доступа
+используйте SSH-туннель или Caddy.
 
 Дашборд показывает `http_requests_total`, `llm_tokens_total` и
-`llm_errors_total`. Оба порта опубликованы только на `127.0.0.1`; для
-удалённого доступа используйте SSH-туннель или reverse proxy с TLS.
+`llm_errors_total`. Grafana обращается к Prometheus с теми же
+`MONITORING_BASIC_AUTH_*` через provisioned datasource.
 
 ### Staging
 
@@ -758,6 +885,12 @@ docker compose --profile monitoring up -d
 открыты только `80`/`443` (Caddy), остальные порты слушают `127.0.0.1`.
 Критичные переменные объявлены через `${VAR:?}`: без реальных значений в
 `.env` запуск падает до старта контейнеров, mock-провайдеры не включаются.
+Это же касается `MONITORING_BASIC_AUTH_*` и `GRAFANA_ADMIN_PASSWORD`.
+
+Caddy на staging маршрутизирует `/grafana/*` и `/prometheus/*` через Basic
+Auth, а остальной трафик — на `web:80`. Поэтому API healthcheck
+(`/api/v1/health`) и фронтенд не требуют авторизации мониторинга. Для
+доступа к панелям поднимите профиль `monitoring` (см. раздел выше).
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.staging.yml \

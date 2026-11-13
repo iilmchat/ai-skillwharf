@@ -64,6 +64,23 @@ function isLlmAuthError(error: unknown): boolean {
   );
 }
 
+/** Машиночитаемый `code` из тела HttpException (единый формат ошибок API). */
+function errorCodeOf(error: HttpException): string | undefined {
+  const response = error.getResponse();
+
+  if (
+    typeof response !== 'object' ||
+    response === null ||
+    !('code' in response)
+  ) {
+    return undefined;
+  }
+
+  const code = (response as { code?: unknown }).code;
+
+  return typeof code === 'string' ? code : undefined;
+}
+
 @WebSocketGateway({ cors: true })
 export class ChatGateway implements OnGatewayConnection {
   private readonly logger = new Logger(ChatGateway.name);
@@ -166,12 +183,15 @@ export class ChatGateway implements OnGatewayConnection {
 
       return reply;
     } catch (error) {
-      // HttpException (404/403) по умолчанию превращается в "Internal server error";
-      // передаём клиенту осмысленный статус и сообщение.
+      // HttpException (404/403/429) по умолчанию превращается в "Internal server error";
+      // передаём клиенту осмысленный статус, сообщение и код ошибки.
       if (error instanceof HttpException) {
+        const code = errorCodeOf(error);
+
         throw new WsException({
           statusCode: error.getStatus(),
           message: error.message,
+          ...(code === undefined ? {} : { code }),
         });
       }
 

@@ -7,6 +7,7 @@
  */
 export const ERROR_KEYS = {
   insufficientFunds: 'errors.insufficient_funds',
+  dailyTokenLimit: 'errors.daily_token_limit',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];

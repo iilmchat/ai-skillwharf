@@ -9,6 +9,12 @@ export interface NativeChatRequest {
   systemPrompt: string;
 }
 
+/** Событие стриминга нативного провайдера: очередной фрагмент текста. */
+export interface NativeStreamDelta {
+  type: 'delta';
+  text: string;
+}
+
 /**
  * Адаптер провайдера с собственным протоколом (YandexGPT, GigaChat).
  * Возвращает `AIMessage` в формате LangChain, чтобы граф агента не знал,
@@ -19,6 +25,16 @@ export interface NativeProviderAdapter {
   readonly provider: string;
 
   chat(request: NativeChatRequest): Promise<AIMessage>;
+
+  /**
+   * Стриминг ответа (опционально). Фрагменты текста отдаются событиями,
+   * а готовое сообщение с `usage` — возвращаемым значением генератора.
+   * Адаптеры без стриминга метод не реализуют: `LlmService` тогда
+   * использует `chat()`.
+   */
+  chatStream?(
+    request: NativeChatRequest,
+  ): AsyncGenerator<NativeStreamDelta, AIMessage, void>;
 }
 
 /** Роль сообщения в формате российских провайдеров. */

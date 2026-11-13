@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Infrastructure & Security
+
+- Grafana и Prometheus в staging закрыты HTTP Basic Auth. Caddy защищает `/grafana/` и `/prometheus/`, Prometheus дополнительно использует нативный `web.config.file` с `basic_auth_users` и bcrypt-хэшем; без кредов оба пути отдают `401`.
+- Пароли и хэши мониторинга не хранятся в git: добавлены `MONITORING_BASIC_AUTH_USER`, `MONITORING_BASIC_AUTH_PASSWORD`, `MONITORING_BASIC_AUTH_HASH`, `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`. Дефолтный `admin/admin` больше не используется, пустые значения останавливают запуск контейнеров.
+- Grafana провижинит datasource Prometheus с Basic Auth, поэтому дашборды работают при закрытом `/metrics`; API healthcheck и `/api/v1/health` не затронуты.
+- Добавлена ротация бэкапов БД `scripts/rotate-backups.sh`: `BACKUP_KEEP_DAYS` дней, но не меньше `BACKUP_KEEP_MIN` последних дампов, удаление только просроченных файлов, лог каждого удаления и режим `--dry-run`/`-DryRun`.
+- `scripts/backup-db.sh` проверяет свободное место (`BACKUP_MIN_FREE_MB`), пишет дамп во временный `.partial`, проверяет непустоту и запускает ротацию только после успешного `pg_dump`.
+- Runbook обновлён: включение бэкапов и ротации, проверка, восстановление, изменение retention, генерация bcrypt-хэша и проверка `401`/`200` для мониторинга.
+
+### Web UI
+
+- Страница настроек дополнена разделом «Память»: feature-flag `VITE_RAG_MEMORY_ENABLED` (по умолчанию выключен) управляет показом списка записей RAG-памяти. Пока в API нет read-эндпоинта `GET /api/v1/chat/memory`, раздел скрыт, не делает запросов и не подменяется моками (KI-023).
+- Ответ памяти валидируется Zod (`id`, `content`, `createdAt`); панель показывает краткое содержание, тип «фрагмент памяти» и дату создания через `<time>`, поддерживает состояния загрузки, пустоты, ошибки (401/404/сеть/невалидный ответ) и повторную загрузку.
+- Полировка страницы настроек: единый контейнер и отступы секций, `aria-labelledby`/`aria-describedby`, `aria-busy`/`aria-live`, focus-visible у новых кнопок, адаптивная вёрстка; строки добавлены в RU/EN-словари.
+- `apps/web/README.md` дополнен разделом о настройках, памяти и переменной `VITE_RAG_MEMORY_ENABLED`.
+
 ### Control Plane UI
 
 - Защищённый раздел `/admin` с вкладками «Промпты», «LLM Роутер» и «Аудит». В «Промптах» доступны история версий и создание новой версии, в «LLM Роутере» — таблица правил и добавление правила, в «Аудите» — последние действия. Доступ разрешён только ролям `admin` и `owner`, ссылка в навигации показывается только им.
@@ -43,6 +59,12 @@
 - Cost Guardrails для LLM: `LlmService` списывает `0.01 ₽` за каждую 1000 токенов (`prompt_tokens + completion_tokens`) с описанием «Использование LLM» и отклоняет вызов до обращения к модели, если баланс меньше копейки.
 - Добавлена спецификация [Cost Guardrails](billing/Cost-Guardrails-Specification.md): тарификация токенов, минимальный баланс для запуска агента и ограничение ручного `topup` ролью `admin`.
 - Реальные адаптеры российских LLM: `YandexAdapter` (URI `gpt://<folder>/<model>`, Bearer IAM-токен) и `GigaChatAdapter` (OAuth с кэшем токена на 30 минут, один `tool_call` за ход); `LlmService` выбирает адаптер по `providerType` маршрута, OpenAI-совместимые провайдеры работают как раньше.
+
+### LLM: Budget Guards и стриминг GigaChat
+
+- Дневной жёсткий лимит токенов стал атомарным: после ответа модели токены списываются через `User.updateMany` с условием `dailyTokensUsed + tokens <= dailyTokenLimit`. При конкурентных запросах счётчик больше не может превысить лимит (`count === 0` → отказ), тест на `Promise.all` из 10 одновременных вызовов подтверждает ровно `floor(limit / tokens)` успешных.
+- Мягкий порог (80% от жёсткого лимита) сохраняется как предупреждение в логе (`gen_ai.budget.soft_limit`), а превышение жёсткого лимита возвращает `429` в едином JSON-формате `{ statusCode, error, code, message }` (`code: errors.daily_token_limit`), который понимает клиент.
+- `GigaChatAdapter` поддерживает стриминг (`stream: true`, SSE): дельты текста идут в существующий транспорт (`stream_delta` → WebSocket), финальное сообщение содержит `usage` и `tool_calls`. Чанки и ошибки провайдера валидируются Zod-схемами, есть таймаут простоя стрима и fallback на нестриминговый запрос, если стрим упал до первой дельты; OpenAI-совместимые провайдеры и YandexGPT работают как раньше.
 
 ### Content, HR & Legal
 

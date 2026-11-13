@@ -1,7 +1,5 @@
 import {
   BadRequestException,
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
   Optional,
@@ -30,8 +28,12 @@ import {
   normalizeProviderType,
 } from '../llm-router/provider-type.js';
 import { GigaChatAdapter } from './adapters/gigachat.adapter.js';
-import type { NativeProviderAdapter } from './adapters/types.js';
+import type {
+  NativeChatRequest,
+  NativeProviderAdapter,
+} from './adapters/types.js';
 import { YandexAdapter } from './adapters/yandex.adapter.js';
+import { DailyTokenLimitException } from './daily-token-limit.exception.js';
 import { McpClient } from './tools/mcp-client.js';
 import { MetricsService } from '../metrics/metrics.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -81,9 +83,8 @@ export interface LlmCallOptions {
   memoryContext?: string;
 }
 
-/** Текст ошибки при исчерпании дневного лимита токенов. */
-export const DAILY_TOKEN_LIMIT_MESSAGE =
-  'Дневной лимит токенов исчерпан. Попробуйте завтра';
+/** Доля жёсткого лимита, после которой Budget Guard пишет предупреждение. */
+export const DAILY_TOKEN_SOFT_LIMIT_RATIO = 0.8;
 
 /**
  * Начало текущих суток в UTC. Счётчик токенов сбрасывается при первом
@@ -872,7 +873,10 @@ export class LlmService {
 
     this.logGenAiUsage(route, response.usage_metadata);
     await this.chargeLlmUsage(options.userId, response.usage_metadata);
-    await this.recordDailyTokenUsage(options.userId, response.usage_metadata);
+    await this.chargeDailyTokensAtomically(
+      options.userId,
+      response.usage_metadata,
+    );
 
     return response;
   }
@@ -893,17 +897,62 @@ export class LlmService {
     const adapter = this.resolveAdapter(route);
 
     if (adapter) {
-      // Нативные адаптеры отвечают целиком: отдаём текст одним чанком,
-      // чтобы фронтенд и граф работали одинаково.
-      const message = await this.chatWithAdapter(
-        adapter,
-        messages,
-        tools,
-        route,
-        options,
+      const systemPrompt = await this.getSystemPrompt(options.memoryContext);
+      const request: NativeChatRequest = { messages, tools, systemPrompt };
+
+      await this.assertCanAffordLlm(options.userId);
+
+      let message: AIMessage;
+      let emittedDelta = false;
+
+      if (adapter.chatStream) {
+        try {
+          const stream = adapter.chatStream(request);
+          let step = await stream.next();
+
+          while (!step.done) {
+            if (step.value.type === 'delta' && step.value.text !== '') {
+              emittedDelta = true;
+              yield { type: 'delta', text: step.value.text };
+            }
+
+            step = await stream.next();
+          }
+
+          message = step.value;
+        } catch (error) {
+          this.recordLlmError(route, error);
+
+          if (emittedDelta) {
+            // Часть ответа уже ушла клиенту: повторять запрос нельзя,
+            // иначе пользователь увидит текст дважды.
+            throw error;
+          }
+
+          this.logger.warn(
+            `LLM-адаптер ${adapter.provider}: стриминг недоступен (${describeError(error)}), fallback на обычный режим`,
+          );
+          message = await this.trackedLlmCall(route, () =>
+            adapter.chat(request),
+          );
+        }
+      } else {
+        // Адаптеры без стриминга (например, YandexGPT) отвечают целиком.
+        message = await this.trackedLlmCall(route, () => adapter.chat(request));
+      }
+
+      this.logGenAiUsage(route, message.usage_metadata);
+      await this.chargeLlmUsage(options.userId, message.usage_metadata);
+      await this.chargeDailyTokensAtomically(
+        options.userId,
+        message.usage_metadata,
       );
 
-      if (typeof message.content === 'string' && message.content !== '') {
+      if (
+        !emittedDelta &&
+        typeof message.content === 'string' &&
+        message.content !== ''
+      ) {
         yield { type: 'delta', text: message.content };
       }
 
@@ -956,7 +1005,10 @@ export class LlmService {
 
     this.logGenAiUsage(route, message.usage_metadata);
     await this.chargeLlmUsage(options.userId, message.usage_metadata);
-    await this.recordDailyTokenUsage(options.userId, message.usage_metadata);
+    await this.chargeDailyTokensAtomically(
+      options.userId,
+      message.usage_metadata,
+    );
 
     yield { type: 'message', message };
   }
@@ -979,8 +1031,13 @@ export class LlmService {
   }
 
   /**
-   * Budget Guard: проверяет дневной лимит токенов и лениво сбрасывает
-   * счётчик при первом запросе нового дня. Бросает 429, если лимит исчерпан.
+   * Budget Guard, мягкая проверка перед вызовом LLM.
+   *
+   * Счётчик сбрасывается лениво при первом запросе нового дня. Проверка
+   * read-only: при конкурентных запросах несколько вызовов могут пройти её
+   * одновременно, поэтому жёсткую гарантию даёт атомарное списание после
+   * ответа. Мягкий порог (80% лимита) только логируется; уже исчерпанный
+   * лимит даёт ранний отказ, чтобы не тратить токены впустую.
    */
   private async assertDailyTokenLimit(userId?: string): Promise<void> {
     if (!userId || !this.prisma) {
@@ -1012,20 +1069,36 @@ export class LlmService {
       used = 0;
     }
 
-    if (used >= user.dailyTokenLimit) {
-      throw new HttpException(
-        DAILY_TOKEN_LIMIT_MESSAGE,
-        HttpStatus.TOO_MANY_REQUESTS,
+    const softLimit = Math.floor(
+      user.dailyTokenLimit * DAILY_TOKEN_SOFT_LIMIT_RATIO,
+    );
+
+    if (used >= softLimit) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'gen_ai.budget.soft_limit',
+          userId,
+          'gen_ai.daily_tokens_used': used,
+          'gen_ai.daily_token_limit': user.dailyTokenLimit,
+          'gen_ai.daily_token_soft_limit': softLimit,
+        }),
       );
+    }
+
+    if (used >= user.dailyTokenLimit) {
+      throw new DailyTokenLimitException();
     }
   }
 
   /**
-   * Инкрементирует дневной расход токенов после ответа модели. Ошибку БД
-   * только логируем: ответ уже получен, и ронять запрос из-за счётчика хуже,
-   * чем недосчитать лимит в одном вызове.
+   * Атомарно списывает токены с дневного счётчика (жёсткий лимит).
+   *
+   * `updateMany` с условием `dailyTokensUsed + tokens <= dailyTokenLimit`
+   * выполняется одной SQL-операцией: Postgres блокирует строку, поэтому при
+   * конкурентных запросах счётчик не может превысить жёсткий лимит.
+   * `count === 0` означает превышение — клиент получает 429 в едином формате.
    */
-  private async recordDailyTokenUsage(
+  private async chargeDailyTokensAtomically(
     userId: string | undefined,
     usage: AIMessage['usage_metadata'],
   ): Promise<void> {
@@ -1033,25 +1106,40 @@ export class LlmService {
       return;
     }
 
-    const tokens =
-      usage?.total_tokens ??
-      (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
+    const tokens = totalTokens(usage);
 
-    if (!Number.isFinite(tokens) || tokens <= 0) {
+    if (tokens <= 0) {
       return;
     }
 
-    try {
-      await this.prisma.user.updateMany({
-        where: { id: userId },
-        data: { dailyTokensUsed: { increment: tokens } },
-      });
-    } catch (error) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { dailyTokenLimit: true },
+    });
+
+    if (!user) {
+      return;
+    }
+
+    const charged = await this.prisma.user.updateMany({
+      where: {
+        id: userId,
+        dailyTokensUsed: { lte: user.dailyTokenLimit - tokens },
+      },
+      data: { dailyTokensUsed: { increment: tokens } },
+    });
+
+    if (charged.count === 0) {
       this.logger.warn(
-        `Не удалось учесть ${tokens} токенов у ${userId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        JSON.stringify({
+          event: 'gen_ai.budget.hard_limit',
+          userId,
+          'gen_ai.tokens': tokens,
+          'gen_ai.daily_token_limit': user.dailyTokenLimit,
+        }),
       );
+
+      throw new DailyTokenLimitException();
     }
   }
 
@@ -1178,7 +1266,10 @@ export class LlmService {
 
     this.logGenAiUsage(route, response.usage_metadata);
     await this.chargeLlmUsage(options.userId, response.usage_metadata);
-    await this.recordDailyTokenUsage(options.userId, response.usage_metadata);
+    await this.chargeDailyTokensAtomically(
+      options.userId,
+      response.usage_metadata,
+    );
 
     return response;
   }
@@ -1282,6 +1373,26 @@ export function withMemoryContext(
   }
 
   return `${systemPrompt}\n\n${MEMORY_PROMPT_HEADER}\n${memory}`;
+}
+
+/** Суммарное число токенов в usage ответа модели (0 при отсутствии данных). */
+function totalTokens(usage: AIMessage['usage_metadata']): number {
+  const tokens =
+    usage?.total_tokens ??
+    (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
+
+  return Number.isFinite(tokens) ? Math.max(0, tokens) : 0;
+}
+
+/** Безопасное описание ошибки для логов (без тел запросов и секретов). */
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.name === 'Error'
+      ? error.message
+      : `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
 }
 
 /** Проверяет, что все перечисленные env-переменные заданы. */

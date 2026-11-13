@@ -6,12 +6,15 @@ import axios, {
   type AxiosResponse,
 } from 'axios';
 import { randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
+import { z } from 'zod';
 import {
   parseToolArguments,
   toFunctionSpecs,
   toNativeMessages,
   type NativeChatRequest,
   type NativeProviderAdapter,
+  type NativeStreamDelta,
 } from './types.js';
 
 /** OAuth-эндпоинт GigaChat. */
@@ -30,6 +33,101 @@ export const GIGACHAT_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 /** Запас перед истечением токена, чтобы не отправить протухший запрос. */
 export const GIGACHAT_TOKEN_SKEW_MS = 60 * 1000;
+
+/**
+ * Таймаут простоя SSE-стрима: если провайдер не присылает данные дольше,
+ * соединение закрывается, и `LlmService` может уйти в нестриминговый fallback.
+ */
+export const GIGACHAT_STREAM_IDLE_TIMEOUT_MS = 30_000;
+
+/** Использование токенов в стрим-чанке (финальный чанк GigaChat). */
+const GigaChatUsageSchema = z.object({
+  prompt_tokens: z.number().optional(),
+  completion_tokens: z.number().optional(),
+  total_tokens: z.number().optional(),
+});
+
+type GigaChatUsage = z.infer<typeof GigaChatUsageSchema>;
+
+/** Накопитель текста, вызова функции и usage во время SSE-стрима. */
+interface StreamAccumulator {
+  content: string;
+  functionName: string;
+  functionArguments: string;
+  usage?: GigaChatUsage;
+}
+
+const GigaChatFunctionCallSchema = z.object({
+  name: z.string().optional(),
+  arguments: z.string().optional(),
+});
+
+const GigaChatStreamDeltaSchema = z.object({
+  role: z.string().optional(),
+  content: z.string().optional(),
+  function_call: GigaChatFunctionCallSchema.optional(),
+});
+
+/** Один чанк SSE-стрима GigaChat (формат `chat.completion.chunk`). */
+const GigaChatStreamChunkSchema = z.object({
+  choices: z
+    .array(
+      z.object({
+        delta: GigaChatStreamDeltaSchema.optional(),
+        index: z.number().optional(),
+        finish_reason: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
+  usage: GigaChatUsageSchema.optional(),
+});
+
+/** Ошибка, присланная GigaChat внутри стрима. */
+const GigaChatStreamErrorSchema = z.object({
+  error: z.object({
+    message: z.string().optional(),
+    code: z.union([z.string(), z.number()]).optional(),
+    type: z.string().optional(),
+  }),
+});
+
+/** Разобранное SSE-сообщение: чанк или ошибка провайдера. */
+export type GigaChatStreamPayload =
+  | { kind: 'chunk'; chunk: z.infer<typeof GigaChatStreamChunkSchema> }
+  | { kind: 'error'; message: string };
+
+/**
+ * Валидирует `data:`-payload стрима GigaChat Zod-схемой. Возвращает чанк
+ * либо безопасное сообщение об ошибке провайдера (без секретов и токенов).
+ */
+export function parseGigaChatStreamPayload(
+  payload: string,
+): GigaChatStreamPayload {
+  let decoded: unknown;
+
+  try {
+    decoded = JSON.parse(payload);
+  } catch {
+    return { kind: 'error', message: 'некорректный JSON в SSE-чанке' };
+  }
+
+  const providerError = GigaChatStreamErrorSchema.safeParse(decoded);
+
+  if (providerError.success) {
+    return {
+      kind: 'error',
+      message: providerError.data.error.message ?? 'ошибка провайдера',
+    };
+  }
+
+  const chunk = GigaChatStreamChunkSchema.safeParse(decoded);
+
+  if (!chunk.success) {
+    return { kind: 'error', message: 'некорректный формат SSE-чанка' };
+  }
+
+  return { kind: 'chunk', chunk: chunk.data };
+}
 
 /** Вызов функции в ответе GigaChat. */
 export interface GigaChatFunctionCall {
@@ -131,15 +229,7 @@ export class GigaChatAdapter implements NativeProviderAdapter {
       );
     }
 
-    const functions = toFunctionSpecs(request.tools);
-    const body = {
-      model: this.model,
-      temperature: 0.7,
-      messages: toNativeMessages(request.messages, request.systemPrompt),
-      ...(functions.length > 0
-        ? { functions, function_call: 'auto' as const }
-        : {}),
-    };
+    const body = this.buildChatBody(request, false);
 
     let data = await this.send<GigaChatChatResponse>(body);
 
@@ -172,6 +262,244 @@ export class GigaChatAdapter implements NativeProviderAdapter {
         input_tokens: usage?.prompt_tokens ?? 0,
         output_tokens: usage?.completion_tokens ?? 0,
         total_tokens: usage?.total_tokens ?? 0,
+      },
+    });
+  }
+
+  /**
+   * Стриминговый ответ GigaChat: текст отдаётся дельтами SSE, финальное
+   * сообщение (с `usage` и `tool_calls`) — возвращаемое значение генератора.
+   * Ошибки валидации/провайдера пробрасываются: `LlmService` уйдёт в
+   * нестриминговый fallback, если клиент ещё не получил ни одной дельты.
+   */
+  async *chatStream(
+    request: NativeChatRequest,
+  ): AsyncGenerator<NativeStreamDelta, AIMessage, void> {
+    if (!this.isConfigured()) {
+      throw new Error(
+        'GigaChat не настроен: отсутствуют GIGACHAT_CLIENT_ID/GIGACHAT_CLIENT_SECRET',
+      );
+    }
+
+    const stream = await this.openChatStream(this.buildChatBody(request, true));
+    const accumulated: StreamAccumulator = {
+      content: '',
+      functionName: '',
+      functionArguments: '',
+    };
+    let buffer = '';
+    let idleTimer: NodeJS.Timeout | undefined;
+    let finished = false;
+
+    const resetIdleTimer = (): void => {
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+      }
+
+      idleTimer = setTimeout(() => {
+        stream.destroy(new Error('GigaChat: таймаут стриминга'));
+      }, GIGACHAT_STREAM_IDLE_TIMEOUT_MS);
+      // Таймер не должен держать event loop.
+      idleTimer.unref();
+    };
+
+    const consumePayload = (payload: string): string => {
+      const parsed = parseGigaChatStreamPayload(payload);
+
+      if (parsed.kind === 'error') {
+        throw new Error(`GigaChat: ошибка стриминга: ${parsed.message}`);
+      }
+
+      if (parsed.chunk.usage !== undefined) {
+        accumulated.usage = parsed.chunk.usage;
+      }
+
+      let deltaText = '';
+
+      for (const choice of parsed.chunk.choices ?? []) {
+        const delta = choice.delta;
+
+        if (delta === undefined) {
+          continue;
+        }
+
+        if (delta.function_call?.name !== undefined) {
+          accumulated.functionName = delta.function_call.name;
+        }
+
+        if (delta.function_call?.arguments !== undefined) {
+          accumulated.functionArguments += delta.function_call.arguments;
+        }
+
+        if (typeof delta.content === 'string' && delta.content !== '') {
+          accumulated.content += delta.content;
+          deltaText += delta.content;
+        }
+      }
+
+      return deltaText;
+    };
+
+    try {
+      resetIdleTimer();
+
+      for await (const raw of stream as AsyncIterable<unknown>) {
+        resetIdleTimer();
+        buffer +=
+          typeof raw === 'string'
+            ? raw
+            : Buffer.isBuffer(raw) || raw instanceof Uint8Array
+              ? Buffer.from(raw as Uint8Array).toString('utf8')
+              : '';
+
+        let newline = buffer.indexOf('\n');
+
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).replace(/\r$/, '');
+          buffer = buffer.slice(newline + 1);
+
+          if (line.startsWith('data:')) {
+            const payload = line.slice('data:'.length).trim();
+
+            if (payload === '[DONE]') {
+              finished = true;
+              break;
+            }
+
+            const deltaText = consumePayload(payload);
+
+            if (deltaText !== '') {
+              yield { type: 'delta', text: deltaText };
+            }
+          }
+
+          newline = buffer.indexOf('\n');
+        }
+
+        if (finished) {
+          break;
+        }
+      }
+
+      // Провайдер может не завершить последнюю строку переводом строки.
+      if (!finished && buffer.trim() !== '') {
+        const line = buffer.trim();
+
+        if (line.startsWith('data:')) {
+          const payload = line.slice('data:'.length).trim();
+
+          if (payload !== '[DONE]') {
+            const deltaText = consumePayload(payload);
+
+            if (deltaText !== '') {
+              yield { type: 'delta', text: deltaText };
+            }
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`GigaChat: стриминг прерван: ${describe(error)}`);
+      throw error;
+    } finally {
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+      }
+    }
+
+    return this.buildStreamMessage(accumulated);
+  }
+
+  /** Тело запроса к GigaChat; `stream` включает SSE-режим. */
+  private buildChatBody(
+    request: NativeChatRequest,
+    stream: boolean,
+  ): Record<string, unknown> {
+    const functions = toFunctionSpecs(request.tools);
+
+    return {
+      model: this.model,
+      temperature: 0.7,
+      ...(stream ? { stream: true } : {}),
+      messages: toNativeMessages(request.messages, request.systemPrompt),
+      ...(functions.length > 0
+        ? { functions, function_call: 'auto' as const }
+        : {}),
+    };
+  }
+
+  /** Открывает SSE-стрим; на 401 один раз обновляет OAuth-токен. */
+  private async openChatStream(
+    body: Record<string, unknown>,
+  ): Promise<Readable> {
+    const authHeaders = (token: string): Record<string, string> => ({
+      Authorization: `Bearer ${token}`,
+      Accept: 'text/event-stream',
+    });
+    const token = await this.getToken();
+
+    try {
+      return await this.postStream(body, authHeaders(token));
+    } catch (error) {
+      if (!(isAxiosError(error) && error.response?.status === 401)) {
+        this.logger.error(
+          `GigaChat: не удалось открыть стрим: ${describe(error)}`,
+        );
+        throw error;
+      }
+
+      this.logger.warn('GigaChat: токен отклонён, обновляем OAuth-токен');
+      this.resetToken();
+
+      try {
+        return await this.postStream(body, authHeaders(await this.getToken()));
+      } catch (retryError) {
+        this.logger.error(
+          `GigaChat: не удалось открыть стрим: ${describe(retryError)}`,
+        );
+        throw retryError;
+      }
+    }
+  }
+
+  private async postStream(
+    body: Record<string, unknown>,
+    headers: Record<string, string>,
+  ): Promise<Readable> {
+    const response = await this.chatHttp.post<Readable>('', body, {
+      headers,
+      responseType: 'stream',
+    });
+
+    return response.data;
+  }
+
+  /** Собирает финальное сообщение из накопленных SSE-чанков. */
+  private buildStreamMessage(accumulated: StreamAccumulator): AIMessage {
+    const calls: GigaChatFunctionCall[] =
+      accumulated.functionName === ''
+        ? []
+        : [
+            {
+              name: accumulated.functionName,
+              arguments: accumulated.functionArguments,
+            },
+          ];
+    const collapsed = collapseParallelToolCalls(calls, this.logger);
+
+    return new AIMessage({
+      content: accumulated.content,
+      tool_calls: collapsed
+        .filter((call) => typeof call.name === 'string')
+        .map((call) => ({
+          name: call.name ?? '',
+          args: parseToolArguments(call.arguments),
+          id: '',
+          type: 'tool_call' as const,
+        })),
+      usage_metadata: {
+        input_tokens: accumulated.usage?.prompt_tokens ?? 0,
+        output_tokens: accumulated.usage?.completion_tokens ?? 0,
+        total_tokens: accumulated.usage?.total_tokens ?? 0,
       },
     });
   }

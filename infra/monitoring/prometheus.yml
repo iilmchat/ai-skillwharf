@@ -11,5 +11,10 @@ scrape_configs:
       - targets: ["api:3000"]
 
   - job_name: prometheus
+    # Self-scrape идёт через нативный basic_auth. Файлы создаёт entrypoint
+    # compose из MONITORING_BASIC_AUTH_*; в git паролей нет.
+    basic_auth:
+      username_file: /tmp/prometheus-auth/username
+      password_file: /tmp/prometheus-auth/password
     static_configs:
       - targets: ["localhost:9090"]

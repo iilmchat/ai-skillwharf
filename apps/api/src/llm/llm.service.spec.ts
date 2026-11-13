@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import {
   AIMessage,
   AIMessageChunk,
@@ -19,7 +19,6 @@ import {
   type SandboxService,
 } from '../sandbox/sandbox.service.js';
 import {
-  DAILY_TOKEN_LIMIT_MESSAGE,
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   LlmService,
@@ -37,7 +36,16 @@ import {
   startOfUtcDay,
   withLanguageInstruction,
   withMemoryContext,
+  type ChatStreamChunk,
 } from './llm.service.js';
+import type {
+  NativeProviderAdapter,
+  NativeStreamDelta,
+} from './adapters/types.js';
+import {
+  DAILY_TOKEN_LIMIT_MESSAGE,
+  DailyTokenLimitException,
+} from './daily-token-limit.exception.js';
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default-prompt.js';
 
 const ENV_KEYS = [
@@ -68,22 +76,101 @@ interface BillingMock {
 }
 
 interface DailyTokenUser {
+  id?: string;
   dailyTokenLimit: number;
   dailyTokensUsed: number;
   lastTokenReset: Date;
 }
 
-interface PrismaUserMock {
-  user: { findUnique: MockFn; updateMany: MockFn };
+interface UpdateManyWhere {
+  id?: string;
+  lastTokenReset?: { lt?: Date };
+  dailyTokensUsed?: { lte?: number };
 }
 
+interface UpdateManyData {
+  dailyTokensUsed?: { increment?: number } | number;
+  lastTokenReset?: Date;
+}
+
+interface UpdateManyArgs {
+  where: UpdateManyWhere;
+  data: UpdateManyData;
+}
+
+interface PrismaUserMock {
+  user: { findUnique: MockFn; updateMany: MockFn };
+  /** Текущее состояние «строки» User в фейковой БД. */
+  state: DailyTokenUser | null;
+}
+
+/**
+ * Фейковый Prisma с атомарной семантикой `updateMany`: условие `where`
+ * проверяется на актуальном состоянии синхронно, как Postgres под блокировкой
+ * строки. Это позволяет детерминированно проверять конкурентные запросы.
+ */
 function createPrismaUser(user: DailyTokenUser | null = null): PrismaUserMock {
-  return {
-    user: {
-      findUnique: vi.fn().mockResolvedValue(user),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    },
-  };
+  const state = user === null ? null : { ...user };
+  const findUnique = vi.fn();
+  const updateMany = vi.fn();
+
+  findUnique.mockImplementation(async () =>
+    state === null ? null : { ...state },
+  );
+
+  updateMany.mockImplementation(async (rawArgs: unknown) => {
+    const args = rawArgs as UpdateManyArgs;
+
+    if (state === null) {
+      return { count: 0 };
+    }
+
+    if (
+      args.where.id !== undefined &&
+      state.id !== undefined &&
+      args.where.id !== state.id
+    ) {
+      return { count: 0 };
+    }
+
+    const resetBefore = args.where.lastTokenReset?.lt;
+
+    if (resetBefore !== undefined) {
+      if (state.lastTokenReset.getTime() >= resetBefore.getTime()) {
+        return { count: 0 };
+      }
+
+      state.dailyTokensUsed = 0;
+
+      if (args.data.lastTokenReset instanceof Date) {
+        state.lastTokenReset = args.data.lastTokenReset;
+      }
+
+      return { count: 1 };
+    }
+
+    const maxUsed = args.where.dailyTokensUsed?.lte;
+
+    if (maxUsed !== undefined && state.dailyTokensUsed > maxUsed) {
+      return { count: 0 };
+    }
+
+    const update = args.data.dailyTokensUsed;
+
+    if (
+      typeof update === 'object' &&
+      update !== undefined &&
+      update.increment !== undefined
+    ) {
+      state.dailyTokensUsed += update.increment;
+    } else if (typeof update === 'number') {
+      state.dailyTokensUsed = update;
+    }
+
+    return { count: 1 };
+  });
+
+  return { user: { findUnique, updateMany }, state };
 }
 
 function createBilling(balance = '100.00'): BillingMock {
@@ -462,19 +549,28 @@ describe('LlmService', () => {
       process.env.LLM_MODEL = 'llama3';
     }
 
-    it('бросает 429 и не вызывает модель, если лимит исчерпан', async () => {
-      enableLlm();
-      const prisma = createPrismaUser({
-        dailyTokenLimit: 100,
-        dailyTokensUsed: 100,
-        lastTokenReset: new Date(),
-      });
+    function createLimitedService(user: DailyTokenUser): {
+      service: LlmService;
+      prisma: PrismaUserMock;
+    } {
+      const prisma = createPrismaUser({ id: userId, ...user });
       const service = new LlmService(
         createSandbox() as unknown as SandboxService,
         undefined,
         undefined,
         prisma as unknown as PrismaService,
       );
+
+      return { service, prisma };
+    }
+
+    it('бросает 429 в едином JSON-формате и не вызывает модель, если лимит исчерпан', async () => {
+      enableLlm();
+      const { service } = createLimitedService({
+        dailyTokenLimit: 100,
+        dailyTokensUsed: 100,
+        lastTokenReset: new Date(),
+      });
       const client = clientWithUsage(10, 10);
 
       Object.assign(service, { client });
@@ -483,25 +579,24 @@ describe('LlmService', () => {
         .chatWithTools([new HumanMessage('привет')], [], undefined, { userId })
         .catch((caught: unknown) => caught);
 
-      expect(error).toBeInstanceOf(HttpException);
-      expect((error as HttpException).getStatus()).toBe(429);
-      expect((error as HttpException).message).toBe(DAILY_TOKEN_LIMIT_MESSAGE);
+      expect(error).toBeInstanceOf(DailyTokenLimitException);
+      expect((error as DailyTokenLimitException).getStatus()).toBe(429);
+      expect((error as DailyTokenLimitException).getResponse()).toEqual({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        code: 'errors.daily_token_limit',
+        message: DAILY_TOKEN_LIMIT_MESSAGE,
+      });
       expect(client.invoke).not.toHaveBeenCalled();
     });
 
-    it('инкрементирует расход токенов после ответа модели', async () => {
+    it('атомарно инкрементирует счётчик с условием жёсткого лимита', async () => {
       enableLlm();
-      const prisma = createPrismaUser({
+      const { service, prisma } = createLimitedService({
         dailyTokenLimit: 1000,
         dailyTokensUsed: 10,
         lastTokenReset: new Date(),
       });
-      const service = new LlmService(
-        createSandbox() as unknown as SandboxService,
-        undefined,
-        undefined,
-        prisma as unknown as PrismaService,
-      );
 
       Object.assign(service, { client: clientWithUsage(100, 50) });
 
@@ -509,26 +604,20 @@ describe('LlmService', () => {
         userId,
       });
 
-      expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.state?.dailyTokensUsed).toBe(160);
       expect(prisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: userId },
+        where: { id: userId, dailyTokensUsed: { lte: 850 } },
         data: { dailyTokensUsed: { increment: 150 } },
       });
     });
 
     it('сбрасывает счётчик при первом запросе нового дня', async () => {
       enableLlm();
-      const prisma = createPrismaUser({
+      const { service, prisma } = createLimitedService({
         dailyTokenLimit: 1000,
         dailyTokensUsed: 900,
         lastTokenReset: new Date(Date.now() - 24 * 60 * 60 * 1000),
       });
-      const service = new LlmService(
-        createSandbox() as unknown as SandboxService,
-        undefined,
-        undefined,
-        prisma as unknown as PrismaService,
-      );
       const client = clientWithUsage(100, 20);
 
       Object.assign(service, { client });
@@ -537,20 +626,76 @@ describe('LlmService', () => {
         userId,
       });
 
-      const [resetCall, incrementCall] = prisma.user.updateMany.mock.calls as [
-        Record<string, unknown>,
-        Record<string, unknown>,
-      ][];
+      const calls = prisma.user.updateMany.mock.calls as [UpdateManyArgs][];
 
-      expect(resetCall?.[0]).toMatchObject({
+      expect(calls[0]?.[0]).toMatchObject({
         where: { id: userId, lastTokenReset: { lt: expect.any(Date) } },
         data: { dailyTokensUsed: 0, lastTokenReset: expect.any(Date) },
       });
-      expect(incrementCall?.[0]).toEqual({
-        where: { id: userId },
+      expect(calls[1]?.[0]).toEqual({
+        where: { id: userId, dailyTokensUsed: { lte: 880 } },
         data: { dailyTokensUsed: { increment: 120 } },
       });
+      expect(prisma.state?.dailyTokensUsed).toBe(120);
       expect(client.invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('не превышает жёсткий лимит при конкурентных запросах', async () => {
+      enableLlm();
+      // 10 вызовов по 300 токенов при лимите 1000: успешны ровно 3.
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 0,
+        lastTokenReset: new Date(),
+      });
+
+      Object.assign(service, { client: clientWithUsage(200, 100) });
+
+      const attempts = Array.from({ length: 10 }, () =>
+        service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+          userId,
+        }),
+      );
+      const results = await Promise.allSettled(attempts);
+      const fulfilled = results.filter(
+        (result) => result.status === 'fulfilled',
+      );
+      const rejected = results.filter((result) => result.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(3);
+      expect(rejected).toHaveLength(7);
+
+      for (const result of rejected) {
+        const error = (result as PromiseRejectedResult).reason as unknown;
+
+        expect(error).toBeInstanceOf(DailyTokenLimitException);
+        expect((error as DailyTokenLimitException).getStatus()).toBe(429);
+      }
+
+      expect(prisma.state?.dailyTokensUsed).toBe(900);
+      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThanOrEqual(
+        prisma.state?.dailyTokenLimit ?? 0,
+      );
+    });
+
+    it('мягкий порог (80%) — предупреждение, а не отказ', async () => {
+      enableLlm();
+      const { service, prisma } = createLimitedService({
+        dailyTokenLimit: 1000,
+        dailyTokensUsed: 850,
+        lastTokenReset: new Date(),
+      });
+
+      Object.assign(service, { client: clientWithUsage(60, 40) });
+
+      await service.chatWithTools([new HumanMessage('привет')], [], undefined, {
+        userId,
+      });
+
+      expect(prisma.state?.dailyTokensUsed).toBe(950);
+      expect(prisma.state?.dailyTokensUsed ?? 0).toBeLessThan(
+        prisma.state?.dailyTokenLimit ?? 0,
+      );
     });
 
     it('не учитывает токены без контекста пользователя', async () => {
@@ -588,6 +733,179 @@ describe('LlmService', () => {
       expect(
         startOfUtcDay(new Date('2026-11-13T10:20:30.000Z')).toISOString(),
       ).toBe('2026-11-13T00:00:00.000Z');
+    });
+  });
+
+  describe('стриминг нативных адаптеров', () => {
+    const llmRoute = {
+      id: 'route-gigachat',
+      name: 'gigachat',
+      modelName: 'GigaChat',
+      providerType: 'GigaChat',
+      baseUrl: 'https://gigachat.devices.sberbank.ru/api/v1',
+      apiKeyEnvVar: null,
+    } as unknown as LlmRouteSelection;
+
+    function useAdapter(
+      service: LlmService,
+      adapter: NativeProviderAdapter,
+    ): void {
+      vi.spyOn(
+        service as unknown as {
+          resolveAdapter: () => NativeProviderAdapter | null;
+        },
+        'resolveAdapter',
+      ).mockReturnValue(adapter);
+    }
+
+    async function collectStream(
+      stream: AsyncIterable<ChatStreamChunk>,
+    ): Promise<ChatStreamChunk[]> {
+      const chunks: ChatStreamChunk[] = [];
+
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      return chunks;
+    }
+
+    function adapterResponse(content: string): AIMessage {
+      return new AIMessage({
+        content,
+        usage_metadata: {
+          input_tokens: 3,
+          output_tokens: 2,
+          total_tokens: 5,
+        },
+      });
+    }
+
+    it('отдаёт дельты GigaChat и финальное сообщение с usage', async () => {
+      const chat = vi.fn();
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat,
+        chatStream: async function* () {
+          yield { type: 'delta', text: 'При' };
+          yield { type: 'delta', text: 'вет' };
+
+          return adapterResponse('Привет');
+        },
+      };
+      const service = createService();
+
+      useAdapter(service, adapter);
+
+      const chunks = await collectStream(
+        service.chatWithToolsStream([new HumanMessage('привет')], [], llmRoute),
+      );
+      const deltas = chunks.filter(
+        (chunk): chunk is { type: 'delta'; text: string } =>
+          chunk.type === 'delta',
+      );
+      const final = chunks[chunks.length - 1];
+
+      expect(deltas.map((chunk) => chunk.text)).toEqual(['При', 'вет']);
+      expect(final?.type).toBe('message');
+
+      if (final?.type === 'message') {
+        expect(final.message.content).toBe('Привет');
+        expect(final.message.usage_metadata).toMatchObject({
+          input_tokens: 3,
+          output_tokens: 2,
+          total_tokens: 5,
+        });
+      }
+
+      expect(chat).not.toHaveBeenCalled();
+    });
+
+    it('уходит в нестриминговый fallback, если стрим упал до первой дельты', async () => {
+      const chat = vi.fn().mockResolvedValue(adapterResponse('Ответ fallback'));
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat,
+        chatStream: async function* (): AsyncGenerator<
+          NativeStreamDelta,
+          AIMessage,
+          void
+        > {
+          yield* [] as NativeStreamDelta[];
+          throw new Error('stream is not supported');
+        },
+      };
+      const service = createService();
+
+      useAdapter(service, adapter);
+
+      const chunks = await collectStream(
+        service.chatWithToolsStream([new HumanMessage('привет')], [], llmRoute),
+      );
+      const deltas = chunks.filter(
+        (chunk): chunk is { type: 'delta'; text: string } =>
+          chunk.type === 'delta',
+      );
+
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(deltas.map((chunk) => chunk.text)).toEqual(['Ответ fallback']);
+      expect(chunks[chunks.length - 1]?.type).toBe('message');
+    });
+
+    it('не дублирует ответ, если стрим упал после первой дельты', async () => {
+      const chat = vi.fn().mockResolvedValue(adapterResponse('Повтор'));
+      const adapter: NativeProviderAdapter = {
+        provider: 'GigaChat',
+        chat,
+        chatStream: async function* (): AsyncGenerator<
+          NativeStreamDelta,
+          AIMessage,
+          void
+        > {
+          yield { type: 'delta', text: 'Начало' };
+          throw new Error('connection reset');
+        },
+      };
+      const service = createService();
+
+      useAdapter(service, adapter);
+
+      const chunks: ChatStreamChunk[] = [];
+      const attempt = (async () => {
+        for await (const chunk of service.chatWithToolsStream(
+          [new HumanMessage('привет')],
+          [],
+          llmRoute,
+        )) {
+          chunks.push(chunk);
+        }
+      })();
+
+      await expect(attempt).rejects.toThrow('connection reset');
+      expect(chat).not.toHaveBeenCalled();
+      expect(chunks.filter((chunk) => chunk.type === 'delta')).toHaveLength(1);
+    });
+
+    it('адаптер без стриминга отвечает одним чанком (YandexGPT)', async () => {
+      const chat = vi.fn().mockResolvedValue(adapterResponse('Один чанк'));
+      const adapter: NativeProviderAdapter = {
+        provider: 'YandexGPT',
+        chat,
+      };
+      const service = createService();
+
+      useAdapter(service, adapter);
+
+      const chunks = await collectStream(
+        service.chatWithToolsStream([new HumanMessage('привет')], [], llmRoute),
+      );
+      const deltas = chunks.filter(
+        (chunk): chunk is { type: 'delta'; text: string } =>
+          chunk.type === 'delta',
+      );
+
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(deltas.map((chunk) => chunk.text)).toEqual(['Один чанк']);
     });
   });
 
