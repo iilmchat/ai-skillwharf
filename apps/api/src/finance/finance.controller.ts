@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  HttpStatus,
   InternalServerErrorException,
   Logger,
   Query,
@@ -8,6 +9,12 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { invalidRequestError } from '../common/api-error.js';
@@ -43,6 +50,8 @@ interface AuthenticatedRequest extends Request {
  * маркетплейсов и не обходит оплату навыков. Если расчётов ещё не было,
  * ответ содержит `dataAvailable: false` и причину, а не вымышленные суммы.
  */
+@ApiTags('Finance')
+@ApiBearerAuth()
 @Controller('finance')
 @UseGuards(JwtAuthGuard)
 export class FinanceController {
@@ -51,6 +60,19 @@ export class FinanceController {
   constructor(private readonly finance: FinanceService) {}
 
   @Get('overview')
+  @ApiOperation({ summary: 'Сводка финансового дашборда' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Последние unit-economics, profit leaks и fraud shield.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  @ApiResponse({
+    status: HttpStatus.INTERNAL_SERVER_ERROR,
+    description: 'Ответ сервиса разошёлся с контрактом UI.',
+  })
   async overview(
     @Req() request: AuthenticatedRequest,
   ): Promise<FinanceOverviewResponse> {
@@ -72,6 +94,19 @@ export class FinanceController {
   }
 
   @Get('unit-economics')
+  @ApiOperation({ summary: 'Результаты unit-economics по маркетплейсам' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Список сохранённых расчётов.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректные фильтры запроса.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async unitEconomics(
     @Req() request: AuthenticatedRequest,
     @Query() query: unknown,
@@ -87,6 +122,19 @@ export class FinanceController {
   }
 
   @Get('profit-leaks')
+  @ApiOperation({ summary: 'Найденные утечки прибыли' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Список сохранённых утечек.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректные фильтры запроса.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async profitLeaks(
     @Req() request: AuthenticatedRequest,
     @Query() query: unknown,
@@ -102,6 +150,19 @@ export class FinanceController {
   }
 
   @Get('fraud-shield')
+  @ApiOperation({ summary: 'Результаты fraud-shield аудита' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Список сохранённых аудитов.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректные фильтры запроса.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async fraudShield(
     @Req() request: AuthenticatedRequest,
     @Query() query: unknown,

@@ -4,12 +4,19 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Logger,
   Post,
   Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { invalidRequestError } from '../common/api-error.js';
@@ -69,6 +76,8 @@ export interface IntegrationsState {
  * Контракт совпадает с `apps/web/src/lib/integrations.ts`:
  * `GET /integrations`, `POST/DELETE /integrations/{telegram|ozon|wildberries|midjourney}`.
  */
+@ApiTags('Integrations')
+@ApiBearerAuth()
 @Controller('integrations')
 export class IntegrationsController {
   private readonly logger = new Logger(IntegrationsController.name);
@@ -83,7 +92,18 @@ export class IntegrationsController {
   /** Сводное состояние всех провайдеров. */
   @Get()
   @UseGuards(JwtAuthGuard)
-  async status(@Req() request: AuthenticatedRequest): Promise<IntegrationsState> {
+  @ApiOperation({ summary: 'Состояние всех интеграций пользователя' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Статусы Telegram, Google, Ozon, WB и Midjourney.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  async status(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<IntegrationsState> {
     const userId = requireUserId(request);
     const [telegram, google, providers] = await Promise.all([
       this.telegramBots.describe(userId),
@@ -119,6 +139,19 @@ export class IntegrationsController {
   @Post('telegram')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить Telegram-бота' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Бот подключён, токен сохранён в зашифрованном виде.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается { botToken }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async connectTelegram(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -134,10 +167,7 @@ export class IntegrationsController {
       throw invalidRequestError('Ожидается { botToken }');
     }
 
-    const info = await this.telegramBots.connect(
-      userId,
-      parsed.data.botToken,
-    );
+    const info = await this.telegramBots.connect(userId, parsed.data.botToken);
 
     this.logger.log(
       JSON.stringify({
@@ -157,6 +187,15 @@ export class IntegrationsController {
   /** Отключает бота пользователя и удаляет привязки его чатов. */
   @Delete('telegram')
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Telegram-бота' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Бот отключён, привязки чатов удалены.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async disconnectTelegram(
     @Req() request: AuthenticatedRequest,
   ): Promise<{ disconnected: boolean }> {
@@ -174,6 +213,19 @@ export class IntegrationsController {
   @Post('ozon')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить ключи Ozon' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ключи Ozon сохранены.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается { clientId, apiKey }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async connectOzon(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -191,6 +243,15 @@ export class IntegrationsController {
   /** Удаляет ключи Ozon пользователя. */
   @Delete('ozon')
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Ozon' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ключи Ozon удалены.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async disconnectOzon(
     @Req() request: AuthenticatedRequest,
   ): Promise<{ disconnected: boolean }> {
@@ -206,6 +267,19 @@ export class IntegrationsController {
   @Post('wildberries')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить токен Wildberries' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Токен Wildberries сохранён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается { apiToken }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async connectWildberries(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -223,6 +297,15 @@ export class IntegrationsController {
   /** Удаляет токен Wildberries пользователя. */
   @Delete('wildberries')
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Wildberries' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Токен Wildberries удалён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async disconnectWildberries(
     @Req() request: AuthenticatedRequest,
   ): Promise<{ disconnected: boolean }> {
@@ -238,6 +321,19 @@ export class IntegrationsController {
   @Post('midjourney')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить ключ Midjourney (TTAPI)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ключ Midjourney сохранён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается { apiKey }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async connectMidjourney(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -255,6 +351,15 @@ export class IntegrationsController {
   /** Удаляет ключ Midjourney пользователя. */
   @Delete('midjourney')
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Midjourney' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ключ Midjourney удалён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async disconnectMidjourney(
     @Req() request: AuthenticatedRequest,
   ): Promise<{ disconnected: boolean }> {

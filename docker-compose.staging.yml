@@ -1,37 +1,49 @@
 # Staging: production-подобная конфигурация поверх базового docker-compose.yml.
 #
-# Запуск (все переменные ниже обязательны — в .env должны быть реальные ключи):
+# Базовый запуск (api, web, postgres, redis, воркеры — без Caddy и мониторинга):
 #
-#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-#     --profile production up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
 #
-# Мониторинг добавляется профилем monitoring:
+# Профили включаются отдельно и требуют своих переменных в .env:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-#     --profile production --profile monitoring up -d
+#   --profile production  Caddy на 80/443 (DOMAIN, ACME_EMAIL, MONITORING_*)
+#   --profile monitoring  OTel + Prometheus + Grafana (MONITORING_*, GRAFANA_*)
+#   --profile with-llm    локальная Ollama (только 127.0.0.1:11435)
 #
-# Отличия от dev:
-# * наружу открыты только 80/443 (Caddy); api, postgres и web слушают
-#   исключительно 127.0.0.1;
-# * критичные переменные объявлены через ${VAR:?}: без значения в .env
-#   compose падает ещё до запуска контейнеров;
-# * LLM и биллинг без mock-провайдеров: пустые ключи не превращаются в
-#   заглушку;
-# * Caddy получает сертификат Let's Encrypt; по умолчанию используется
-#   staging-CA, чтобы не расходовать лимиты production-CA.
+# Правила, которые здесь зафиксированы:
+# * наружу не смотрит ничего, кроме Caddy (и он включается профилем);
+# * API, web, postgres, ollama отдаются только на 127.0.0.1 — для отладки
+#   с хоста и через SSH-туннель;
+# * restart: always у всех долгоживущих сервисов; у one-shot db-migrate — "no";
+# * воркеры ограничены по CPU/RAM, чтобы sandbox не положил хост.
 services:
   postgres:
+    restart: always
     ports:
-      # Наружу БД не публикуется, только localhost для отладки.
+      # Только localhost: нужен для отладки с хоста, наружу не публикуется.
       - "127.0.0.1:5435:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required in .env}
 
+  redis:
+    restart: always
+
+  llm-worker:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          # Воркер держит LLM-стримы и BullMQ; без лимита при утечке он
+          # забирает всю память WSL2-дистрибутива.
+          cpus: "2.0"
+          memory: 2G
+
   api:
+    restart: always
     ports:
-      # API доступен только через Caddy и с localhost для диагностики.
+      # API доступен только через Caddy и с localhost (для отладки и тестов).
       - "127.0.0.1:3001:3000"
     environment:
       NODE_ENV: production
@@ -40,63 +52,78 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:?LLM_BASE_URL is required in .env}
       LLM_MODEL: ${LLM_MODEL:?LLM_MODEL is required in .env}
       LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required in .env}
-      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:?YOOKASSA_SHOP_ID is required in .env}
-      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:?YOOKASSA_SECRET_KEY is required in .env}
-      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:?YOOKASSA_RETURN_URL is required in .env}
-      # Без mock_key/mock_token: ключи навыков должны быть реальными.
-      TAVILY_API_KEY: ${TAVILY_API_KEY:?TAVILY_API_KEY is required in .env}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN is required in .env}
+      # Платёжка и внешние API опциональны: без них стенд поднимается и
+      # принимает /billing/topup, а навыки, которым нужен ключ, просто
+      # откажут в рантайме. Для реального прогона заполнить в .env.
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:-http://localhost:8080/billing/return}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       SANDBOX_WORKER_URL: http://sandbox-worker:4000
 
   sandbox-worker:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          # Песочница исполняет чужой код: жёсткий лимит обязателен.
+          cpus: "1.0"
+          memory: 1G
     environment:
       # Egress задаётся egress_allowlist в манифесте навыка (deny by default);
-      # глобального флага включения сети нет.
-      # В staging профиль обязателен: без него worker не запустится (fail
-      # closed), а файл смонтирован в базовом docker-compose.yml.
+      # глобально флаг не ослабляется. В staging профиль закрыт по умолчанию:
+      # без файла политик worker не стартует (fail closed), а файл монтируется
+      # из базового docker-compose.yml.
       SANDBOX_SECCOMP_PROFILE: /etc/sandbox/seccomp-profile.json
 
   db-migrate:
+    # One-shot: должен завершиться и не перезапускаться.
+    restart: "no"
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required in .env}?schema=public
 
   web:
+    restart: always
     build:
       args:
-        # Staging собирает статику с тем же дефолтом, что и базовый compose;
-        # флаг можно включить в .env без правки compose-файлов.
+        # Staging собирается из текущего дерева, а не из готового образа.
         VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
     ports:
-      # Web доступен только через Caddy и с localhost для диагностики.
       - "127.0.0.1:8080:80"
 
+  ollama:
+    # Профиль with-llm; публикуется только на localhost, иначе порт открыт
+    # всей сети (базовая конфигурация публиковала 11435 на 0.0.0.0).
+    restart: always
+    ports:
+      - "127.0.0.1:11435:11434"
+
+  # Мониторинг остаётся в профиле monitoring. Переменные ниже намеренно
+  # опциональны: без профиля они не нужны, а `${VAR:?}` в compose падает на
+  # интерполяции даже для незапускаемого сервиса.
   prometheus:
     environment:
-      # Без этих значений мониторинг не стартует: пароль и bcrypt-хэш
-      # задаются только в .env, в git их нет.
-      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
-      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:?MONITORING_BASIC_AUTH_PASSWORD is required in .env}
-      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:?MONITORING_BASIC_AUTH_HASH is required in .env}
-      # Публичный URL нужен Prometheus для корректных ссылок за Caddy.
-      PROMETHEUS_EXTERNAL_URL: https://${DOMAIN:?DOMAIN is required in .env}/prometheus/
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:-}
+      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:-}
+      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:-}
+      PROMETHEUS_EXTERNAL_URL: https://${DOMAIN:-localhost}/prometheus/
 
   grafana:
     environment:
-      # Grafana доступна через Caddy по /grafana/; admin-пароль не admin.
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER is required in .env}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required in .env}
-      GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required in .env}/grafana/
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_SERVER_ROOT_URL: https://${DOMAIN:-localhost}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      # Datasource Grafana → Prometheus использует нативную Basic Auth.
-      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
-      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:?MONITORING_BASIC_AUTH_PASSWORD is required in .env}
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:-}
+      MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:-}
 
   caddy:
-    # Для голого IP нужен self-signed сертификат: Let's Encrypt не выпускает
-    # сертификаты на IP. Если задан домен, замените Caddyfile.staging на
-    # deploy/Caddyfile и уберите command ниже.
+    # Профиль production. Для WSL2 без публичного домена не нужен: web и api
+    # отдаются на localhost напрямую (см. docs/operations/STAGING-DEPLOY.md).
+    restart: always
     command:
       - caddy
       - run
@@ -105,13 +132,12 @@ services:
       - --adapter
       - caddyfile
     environment:
-      DOMAIN: ${DOMAIN:?DOMAIN is required in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required in .env}
-      # Let's Encrypt staging: сертификат недоверенный, лимиты не расходуются.
-      # Для боевого домена задайте https://acme-v02.api.letsencrypt.org/directory.
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Let's Encrypt staging: сертификат непроверенный, но и не попадает
+      # в production-CA. Для боевого домена — https://acme-v02.api.letsencrypt.org/directory.
       ACME_CA: ${ACME_CA:-https://acme-staging-v02.api.letsencrypt.org/directory}
-      # Basic Auth для /grafana/ и /prometheus/ на edge.
-      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required in .env}
-      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:?MONITORING_BASIC_AUTH_HASH is required in .env}
+      MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:-}
+      MONITORING_BASIC_AUTH_HASH: ${MONITORING_BASIC_AUTH_HASH:-}
     volumes:
       - ./deploy/Caddyfile.staging:/etc/caddy/Caddyfile.staging:ro

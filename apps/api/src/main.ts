@@ -9,6 +9,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { MetricsService } from './metrics/metrics.service.js';
 import { isSentryEnabled } from './observability/sentry.js';
+import { setupOpenApi } from './openapi/openapi.js';
 import { shutdownTracing } from './observability/tracing.js';
 
 async function bootstrap() {
@@ -21,7 +22,6 @@ async function bootstrap() {
       new SentryGlobalFilter(app.get(HttpAdapterHost).httpAdapter),
     );
   }
-
 
   // За Caddy реальный IP приходит в X-Forwarded-For; без этого throttler
   // считал бы все запросы с одного IP reverse-proxy.
@@ -55,6 +55,10 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Документация вне `/api/v1`: `/api/docs` и JSON `/api/docs-json`.
+  // Swagger строится из метаданных контроллеров и не обращается к БД.
+  setupOpenApi(app);
 
   // Даём OTel SDK экспортировать буфер при штатном завершении контейнера.
   process.once('SIGTERM', () => {

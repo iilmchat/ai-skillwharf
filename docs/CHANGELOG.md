@@ -6,23 +6,27 @@
 
 ### Sprint 20: Real Documents, OCR, HR & Content
 
-**Documents API & Tools**
+#### Documents API & Tools
+
 - `POST /api/v1/documents` (multipart, JWT, лимит 15 МБ, PDF/PNG/JPEG/WebP). Закрывает KI-065.
-- Собственный парсер `extract_pdf` (поддержка PDF 1.5+, object streams, кириллица через ToUnicode). 
+- Собственный парсер `extract_pdf` (поддержка PDF 1.5+, object streams, кириллица через ToUnicode).
 - `write_docx` — генерация валидного OOXML (заголовки, списки, таблицы) через `adm-zip`.
 - `document-analyzer` — извлечение реквизитов договоров (суммы, даты, стороны, ИНН) из PDF/DOCX/сканов.
 
-**OCR & Sandbox**
+#### OCR & Sandbox
+
 - `sandbox/Dockerfile` расширен утилитами `tesseract-ocr`, `poppler-utils` (pdftotext) и `pandoc` для генерации DOCX.
 - `ocr-smart-engine` — реальный вызов SDE-совместимого API с fallback на локальный Tesseract.
 - Egress allowlist расширен для `ocr.api.cloud.yandex.net` и `api.tavily.com`.
 
-**Content & HR**
+#### Content & HR
+
 - `check_facts` (Трек F) — реальный поиск через Tavily, сравнение источников, выявление противоречий.
 - `screen_resume` (Трек G) — реальный парсинг навыков, опыта и образования, расчет скоринга под требования.
 - `dzen-article` — HITL (Human-in-the-Loop) и Pay-per-Outcome закреплены тестами.
 
-**Web UI**
+#### Web UI: загрузка документов
+
 - Панель загрузки документов (`DocumentUploader`): drag-and-drop, прогресс, отмена, обработка лимитов и типов.
 - Визуализация результатов: Markdown-таблицы рендерятся как `<table>`, JSON-резюме — как карточки кандидатов.
 - Карточка HITL-одобрения «Одобрить публикацию» / «Отклонить» для `dzen-article` в чате и AI-Офисе.

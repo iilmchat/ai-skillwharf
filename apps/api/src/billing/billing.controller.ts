@@ -13,6 +13,12 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
@@ -49,6 +55,7 @@ export interface PaymentLink {
 /** Дефолтный URL возврата после оплаты. */
 const DEFAULT_RETURN_URL = 'http://localhost:8080/app/chat?payment=success';
 
+@ApiTags('Billing')
 @Controller('billing')
 export class BillingController {
   private readonly logger = new Logger(BillingController.name);
@@ -60,6 +67,16 @@ export class BillingController {
 
   @Get('balance')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Баланс кошелька текущего пользователя' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Баланс и текущий Freemium-лимит.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   getBalance(@Req() request: AuthenticatedRequest): Promise<WalletBalance> {
     const userId = request.user?.userId;
 
@@ -80,6 +97,20 @@ export class BillingController {
    */
   @Get('ledger')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'История операций по кошельку' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Страница операций с курсором для следующей страницы.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректные limit, offset или cursor.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async getLedger(
     @Req() request: AuthenticatedRequest,
     @Query() query: unknown,
@@ -126,6 +157,20 @@ export class BillingController {
   @Post('create-payment')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Создать платёж в ЮKassa' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ссылка на страницу оплаты.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректная сумма или returnUrl.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async createPayment(
     @Req() request: AuthenticatedRequest,
     @Body() dto: CreatePaymentDto,
@@ -156,6 +201,19 @@ export class BillingController {
    */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Webhook ЮKassa',
+    description:
+      'Публичный маршрут: сумма и платёж перепроверяются запросом к API ЮKassa.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Уведомление принято или намеренно пропущено.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Уведомление не подтверждено ЮKassa.',
+  })
   async webhook(
     @Body() payload: YooKassaWebhookPayload,
   ): Promise<{ ok: boolean }> {
@@ -207,6 +265,27 @@ export class BillingController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Прямое пополнение кошелька',
+    description: 'Доступно только администратору (dev/тестовые сценарии).',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Операция пополнения применена.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректная сумма или idempotencyKey.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Недостаточно прав: требуется роль admin.',
+  })
   topup(
     @Req() request: AuthenticatedRequest,
     @Body() dto: TopUpDto,
@@ -232,6 +311,27 @@ export class BillingController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Списать стоимость вызова Skill',
+    description: 'Доступно только администратору.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Списание применено.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Некорректная сумма или idempotencyKey.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Недостаточно прав: требуется роль admin.',
+  })
   charge(@Body() dto: ChargeDto): Promise<LedgerOperationResult> {
     return this.billingService.chargeForSkill(
       dto.userId,

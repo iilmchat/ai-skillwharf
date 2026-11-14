@@ -1178,6 +1178,12 @@ MCP-инструмента из `tools/list`:
 
 ## 16. Мониторинг и staging
 
+### Локальный staging на WSL2
+
+Пошаговый запуск без публичного домена (api + web + postgres + redis + воркеры,
+без Caddy и мониторинга), сидинг тестовых пользователей и pre-flight проверка —
+в отдельном документе: [STAGING-DEPLOY.md](STAGING-DEPLOY.md).
+
 ### Prometheus и Grafana
 
 API отдаёт метрики на `GET /metrics` (вне префикса `api/v1`). Prometheus

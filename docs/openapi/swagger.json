@@ -1,0 +1,2056 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1": {
+      "get": {
+        "operationId": "AppController_getHello",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "App"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "MetricsController_getMetrics",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
+    "/api/v1/billing/balance": {
+      "get": {
+        "operationId": "BillingController_getBalance",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Баланс и текущий Freemium-лимит."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Баланс кошелька текущего пользователя",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/ledger": {
+      "get": {
+        "operationId": "BillingController_getLedger",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Страница операций с курсором для следующей страницы."
+          },
+          "400": {
+            "description": "Некорректные limit, offset или cursor."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "История операций по кошельку",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/create-payment": {
+      "post": {
+        "operationId": "BillingController_createPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ссылка на страницу оплаты."
+          },
+          "400": {
+            "description": "Некорректная сумма или returnUrl."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Создать платёж в ЮKassa",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/webhook": {
+      "post": {
+        "description": "Публичный маршрут: сумма и платёж перепроверяются запросом к API ЮKassa.",
+        "operationId": "BillingController_webhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Уведомление принято или намеренно пропущено."
+          },
+          "400": {
+            "description": "Уведомление не подтверждено ЮKassa."
+          }
+        },
+        "summary": "Webhook ЮKassa",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/topup": {
+      "post": {
+        "description": "Доступно только администратору (dev/тестовые сценарии).",
+        "operationId": "BillingController_topup",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopUpDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Операция пополнения применена."
+          },
+          "400": {
+            "description": "Некорректная сумма или idempotencyKey."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          },
+          "403": {
+            "description": "Недостаточно прав: требуется роль admin."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Прямое пополнение кошелька",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/charge": {
+      "post": {
+        "description": "Доступно только администратору.",
+        "operationId": "BillingController_charge",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Списание применено."
+          },
+          "400": {
+            "description": "Некорректная сумма или idempotencyKey."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          },
+          "403": {
+            "description": "Недостаточно прав: требуется роль admin."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Списать стоимость вызова Skill",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Пользователь создан, возвращены id и email."
+          },
+          "400": {
+            "description": "Тело запроса не прошло валидацию."
+          },
+          "409": {
+            "description": "Пользователь с таким email уже существует."
+          },
+          "429": {
+            "description": "Превышен лимит регистраций."
+          }
+        },
+        "summary": "Регистрация пользователя",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Пара access/refresh токенов."
+          },
+          "401": {
+            "description": "Неверный email или пароль."
+          },
+          "429": {
+            "description": "Превышен лимит попыток входа."
+          }
+        },
+        "summary": "Вход по email и паролю",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Новые access и refresh токены."
+          },
+          "401": {
+            "description": "Refresh-токен недействителен или истёк."
+          }
+        },
+        "summary": "Обновление пары токенов",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Профиль и дневной лимит токенов."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Профиль текущего пользователя",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The Health Check is successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ],
+                      "example": "ok"
+                    },
+                    "info": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "example": {},
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The Health Check is not successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "error",
+                        "shutting_down"
+                      ],
+                      "example": "error"
+                    },
+                    "info": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "example": {
+                        "redis": {
+                          "status": "down",
+                          "message": "Could not connect",
+                          "responseTime": 3005
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        },
+                        "redis": {
+                          "status": "down",
+                          "message": "Could not connect",
+                          "responseTime": 3005
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The Health Check is successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ],
+                      "example": "ok"
+                    },
+                    "info": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "example": {},
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The Health Check is not successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "error",
+                        "shutting_down"
+                      ],
+                      "example": "error"
+                    },
+                    "info": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "example": {
+                        "redis": {
+                          "status": "down",
+                          "message": "Could not connect",
+                          "responseTime": 3005
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up",
+                          "responseTime": 12
+                        },
+                        "redis": {
+                          "status": "down",
+                          "message": "Could not connect",
+                          "responseTime": 3005
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "up",
+                              "degraded",
+                              "down"
+                            ]
+                          },
+                          "responseTime": {
+                            "type": "number",
+                            "description": "Time the health indicator took to respond, in ms"
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/chat/conversations": {
+      "post": {
+        "operationId": "ChatController_createConversation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Диалог создан, возвращён его id."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Создать диалог",
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/api/v1/chat/memory": {
+      "delete": {
+        "operationId": "ChatController_clearMemory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Количество удалённых записей памяти."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Удалить долговременную память пользователя",
+        "tags": [
+          "Chat"
+        ]
+      },
+      "get": {
+        "operationId": "MemoryController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Memory"
+        ]
+      }
+    },
+    "/api/v1/chat/pending": {
+      "get": {
+        "operationId": "ChatController_listPendingApprovals",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Список ожидающих HITL-подтверждений."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Диалоги, ожидающие подтверждения действия",
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/tools/execute": {
+      "post": {
+        "operationId": "AgentInternalController_executeTools",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/approvals/prepare": {
+      "post": {
+        "operationId": "AgentInternalController_prepareApproval",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/approvals/resolve": {
+      "post": {
+        "operationId": "AgentInternalController_resolveApproval",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/llm/budget/reserve": {
+      "post": {
+        "operationId": "AgentInternalController_reserveBudget",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/llm/budget/settle": {
+      "post": {
+        "operationId": "AgentInternalController_settleBudget",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/llm/budget/refund": {
+      "post": {
+        "operationId": "AgentInternalController_refundBudget",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/checkpoints/get": {
+      "post": {
+        "operationId": "AgentInternalController_getCheckpoint",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/checkpoints/put": {
+      "post": {
+        "operationId": "AgentInternalController_putCheckpoint",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/checkpoints/writes": {
+      "post": {
+        "operationId": "AgentInternalController_putWrites",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/checkpoints/delete": {
+      "post": {
+        "operationId": "AgentInternalController_deleteThread",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/internal/agent/checkpoints/list": {
+      "post": {
+        "operationId": "AgentInternalController_listCheckpoints",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AgentInternal"
+        ]
+      }
+    },
+    "/api/v1/admin/audit": {
+      "get": {
+        "operationId": "AuditController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/sandbox/execute": {
+      "post": {
+        "operationId": "SandboxController_execute",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteSandboxDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Sandbox"
+        ]
+      }
+    },
+    "/api/v1/documents": {
+      "post": {
+        "operationId": "DocumentsController_upload",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/admin/llm-routes": {
+      "get": {
+        "operationId": "LlmRouterController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmRouter"
+        ]
+      },
+      "post": {
+        "operationId": "LlmRouterController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLlmRouteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmRouter"
+        ]
+      }
+    },
+    "/api/v1/admin/llm-routes/{id}": {
+      "get": {
+        "operationId": "LlmRouterController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmRouter"
+        ]
+      },
+      "patch": {
+        "operationId": "LlmRouterController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLlmRouteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmRouter"
+        ]
+      },
+      "delete": {
+        "operationId": "LlmRouterController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmRouter"
+        ]
+      }
+    },
+    "/api/v1/llm/active": {
+      "get": {
+        "operationId": "LlmActiveController_active",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "LlmActive"
+        ]
+      }
+    },
+    "/api/v1/skills/validate": {
+      "post": {
+        "operationId": "SkillsController_validate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateSkillDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Skills"
+        ]
+      }
+    },
+    "/api/v1/skills/install": {
+      "post": {
+        "operationId": "SkillsController_install",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallSkillDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Skills"
+        ]
+      }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "operationId": "SkillsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Skills"
+        ]
+      }
+    },
+    "/api/v1/skills/{id}/toggle": {
+      "patch": {
+        "operationId": "SkillsController_toggle",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleSkillDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Skills"
+        ]
+      }
+    },
+    "/api/v1/skills/{id}": {
+      "delete": {
+        "operationId": "SkillsController_uninstall",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Skills"
+        ]
+      }
+    },
+    "/api/v1/admin/skills/import": {
+      "post": {
+        "operationId": "AdminSkillsController_import",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AdminSkills"
+        ]
+      }
+    },
+    "/api/v1/prompts": {
+      "get": {
+        "operationId": "PromptsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Prompts"
+        ]
+      }
+    },
+    "/api/v1/prompts/{id}/versions": {
+      "get": {
+        "operationId": "PromptsController_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Prompts"
+        ]
+      },
+      "post": {
+        "operationId": "PromptsController_createVersion",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptVersionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Prompts"
+        ]
+      }
+    },
+    "/api/v1/registry/skills": {
+      "get": {
+        "operationId": "RegistryController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Registry"
+        ]
+      }
+    },
+    "/api/v1/integrations": {
+      "get": {
+        "operationId": "IntegrationsController_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Статусы Telegram, Google, Ozon, WB и Midjourney."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Состояние всех интеграций пользователя",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram": {
+      "post": {
+        "operationId": "IntegrationsController_connectTelegram",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Бот подключён, токен сохранён в зашифрованном виде."
+          },
+          "400": {
+            "description": "Ожидается { botToken }."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Подключить Telegram-бота",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "delete": {
+        "operationId": "IntegrationsController_disconnectTelegram",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Бот отключён, привязки чатов удалены."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Отключить Telegram-бота",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/ozon": {
+      "post": {
+        "operationId": "IntegrationsController_connectOzon",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ключи Ozon сохранены."
+          },
+          "400": {
+            "description": "Ожидается { clientId, apiKey }."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Подключить ключи Ozon",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "delete": {
+        "operationId": "IntegrationsController_disconnectOzon",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ключи Ozon удалены."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Отключить Ozon",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/wildberries": {
+      "post": {
+        "operationId": "IntegrationsController_connectWildberries",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Токен Wildberries сохранён."
+          },
+          "400": {
+            "description": "Ожидается { apiToken }."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Подключить токен Wildberries",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "delete": {
+        "operationId": "IntegrationsController_disconnectWildberries",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Токен Wildberries удалён."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Отключить Wildberries",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/midjourney": {
+      "post": {
+        "operationId": "IntegrationsController_connectMidjourney",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ключ Midjourney сохранён."
+          },
+          "400": {
+            "description": "Ожидается { apiKey }."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Подключить ключ Midjourney (TTAPI)",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "delete": {
+        "operationId": "IntegrationsController_disconnectMidjourney",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ключ Midjourney удалён."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Отключить Midjourney",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram/webhook": {
+      "post": {
+        "operationId": "TelegramController_webhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram/link": {
+      "post": {
+        "operationId": "TelegramController_link",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      },
+      "get": {
+        "operationId": "TelegramController_listLinks",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram/link/{chatId}": {
+      "delete": {
+        "operationId": "TelegramController_unlink",
+        "parameters": [
+          {
+            "name": "chatId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram/webhook/register": {
+      "post": {
+        "operationId": "TelegramController_registerWebhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      }
+    },
+    "/api/v1/integrations/telegram/status": {
+      "get": {
+        "operationId": "TelegramController_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Telegram"
+        ]
+      }
+    },
+    "/api/v1/webhooks/telegram": {
+      "post": {
+        "operationId": "TelegramPublicWebhookController_telegram",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "TelegramPublicWebhook"
+        ]
+      }
+    },
+    "/api/v1/integrations/google/authorize": {
+      "get": {
+        "operationId": "GoogleController_authorize",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/integrations/google/authorization-url": {
+      "get": {
+        "operationId": "GoogleController_authorizationUrl",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/integrations/google/callback": {
+      "get": {
+        "operationId": "GoogleController_callback",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/integrations/google/status": {
+      "get": {
+        "operationId": "GoogleController_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/integrations/google": {
+      "delete": {
+        "operationId": "GoogleController_disconnect",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/integrations/google/exchange": {
+      "post": {
+        "operationId": "GoogleController_exchange",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Google"
+        ]
+      }
+    },
+    "/api/v1/finance/overview": {
+      "get": {
+        "operationId": "FinanceController_overview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Последние unit-economics, profit leaks и fraud shield."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          },
+          "500": {
+            "description": "Ответ сервиса разошёлся с контрактом UI."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Сводка финансового дашборда",
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/api/v1/finance/unit-economics": {
+      "get": {
+        "operationId": "FinanceController_unitEconomics",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Список сохранённых расчётов."
+          },
+          "400": {
+            "description": "Некорректные фильтры запроса."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Результаты unit-economics по маркетплейсам",
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/api/v1/finance/profit-leaks": {
+      "get": {
+        "operationId": "FinanceController_profitLeaks",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Список сохранённых утечек."
+          },
+          "400": {
+            "description": "Некорректные фильтры запроса."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Найденные утечки прибыли",
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/api/v1/finance/fraud-shield": {
+      "get": {
+        "operationId": "FinanceController_fraudShield",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Список сохранённых аудитов."
+          },
+          "400": {
+            "description": "Некорректные фильтры запроса."
+          },
+          "401": {
+            "description": "JWT отсутствует или недействителен."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Результаты fraud-shield аудита",
+        "tags": [
+          "Finance"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "SkillWharf API",
+    "description": "REST API SkillWharf: аутентификация, чат с агентом, биллинг,\nинтеграции с внешними провайдерами и финансовый дашборд.\n\nЗащищённые методы принимают access token из `POST /api/v1/auth/login`\nв заголовке `Authorization: Bearer <token>`.",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Регистрация, вход, обновление токенов и профиль"
+    },
+    {
+      "name": "Chat",
+      "description": "Диалоги, память, HITL-подтверждения"
+    },
+    {
+      "name": "Billing",
+      "description": "Баланс, история операций и платежи"
+    },
+    {
+      "name": "Integrations",
+      "description": "Telegram, Google, Ozon, Wildberries, Midjourney"
+    },
+    {
+      "name": "Finance",
+      "description": "Финансовый дашборд и результаты инструментов"
+    }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Access token из POST /api/v1/auth/login"
+      }
+    },
+    "schemas": {
+      "CreatePaymentDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "TopUpDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ChargeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "RegisterDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "RefreshDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateConversationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ExecuteSandboxDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateLlmRouteDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateLlmRouteDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ValidateSkillDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "InstallSkillDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ToggleSkillDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreatePromptVersionDto": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

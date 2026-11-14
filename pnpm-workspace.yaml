@@ -18,8 +18,11 @@ allowBuilds:
   # msgpackr-extract — опциональный native-ускоритель BullMQ; без него
   # используется JS-реализация, сборка не нужна.
   msgpackr-extract: false
+  # @scarf/scarf — postinstall-телеметрия swagger-ui-express; не нужна.
+  '@scarf/scarf': false
 
 minimumReleaseAgeExclude:
   - '@langchain/core@1.4.0'
   - '@langchain/openai@1.8.4'
   - bullmq@6.7.6
+  - '@nestjs/swagger@12.1.2'

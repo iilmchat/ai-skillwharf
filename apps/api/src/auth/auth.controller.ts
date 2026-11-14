@@ -9,6 +9,12 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -45,12 +51,30 @@ function limitFromEnv(name: string, fallback: number): number {
 const LOGIN_LIMIT = limitFromEnv('AUTH_LOGIN_LIMIT', 5);
 const REGISTER_LIMIT = limitFromEnv('AUTH_REGISTER_LIMIT', 10);
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
   @Throttle({ default: { limit: REGISTER_LIMIT, ttl: 3_600_000 } })
+  @ApiOperation({ summary: 'Регистрация пользователя' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Пользователь создан, возвращены id и email.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Тело запроса не прошло валидацию.',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description: 'Пользователь с таким email уже существует.',
+  })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description: 'Превышен лимит регистраций.',
+  })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
@@ -58,12 +82,34 @@ export class AuthController {
   @Post('login')
   @Throttle({ default: { limit: LOGIN_LIMIT, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Вход по email и паролю' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Пара access/refresh токенов.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Неверный email или пароль.',
+  })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description: 'Превышен лимит попыток входа.',
+  })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Обновление пары токенов' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Новые access и refresh токены.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Refresh-токен недействителен или истёк.',
+  })
   async refresh(@Body() dto: RefreshDto): Promise<AuthTokens> {
     const payload = await this.authService.verifyRefreshToken(dto.refreshToken);
 
@@ -73,6 +119,16 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('user', 'admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Профиль текущего пользователя' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Профиль и дневной лимит токенов.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
   async me(@Req() request: AuthenticatedRequest): Promise<UserProfile> {
     const user = request.user;
 

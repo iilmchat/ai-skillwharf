@@ -11,3 +11,6 @@ blob-report/
 /documents/
 /docx-output/
 /backups/
+
+# пароли staging-стенда, генерируются scripts/seed-staging.ts
+staging-credentials.txt
