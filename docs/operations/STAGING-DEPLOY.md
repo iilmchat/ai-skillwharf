@@ -105,6 +105,36 @@ pnpm seed:staging
 STAGING_ALLOW_REPEAT_TOPUP=1 pnpm seed:staging
 ```
 
+### Порты и общий сетевой namespace WSL
+
+WSL 3.0 держит дистрибутивы в общем сетевом namespace с Windows: порт,
+занятый на хосте, ломает старт контейнера (`failed to bind host port
+127.0.0.1:5435`), даже если внутри дистрибутива он свободен. Поэтому порты
+вынесены в `.env`, править compose не нужно:
+
+```dotenv
+STAGING_API_PORT=13001
+STAGING_WEB_PORT=18080
+STAGING_POSTGRES_PORT=5436
+STAGING_OLLAMA_PORT=11436
+```
+
+Проверить, что занято на хосте: `netstat -ano | findstr :8080` (Windows) или
+`ss -ltn` (внутри дистрибутива).
+
+### Дистрибутив засыпает без клиента
+
+WSL гасит дистрибутив через 15–20 секунд после выхода последнего клиента, и
+стенд перезапускается (`restart: always` поднимает контейнеры заново, но с
+задержкой на прогрев). Чтобы стенд жил постоянно, нужен keep-alive — задача
+планировщика при входе в Windows:
+
+```powershell
+# wscript.exe со скрытым окном: wsl.exe -d Ubuntu-22.04 --exec sleep infinity
+schtasks /create /tn "SkillWharf WSL Keepalive" `
+  /tr "wscript.exe \"C:\path\to\keepalive.vbs\"" /sc onlogon /f
+```
+
 ## 6. Pre-flight перед передачей тестировщикам
 
 ```bash

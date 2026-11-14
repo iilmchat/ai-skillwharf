@@ -16,12 +16,20 @@
 #   с хоста и через SSH-туннель;
 # * restart: always у всех долгоживущих сервисов; у one-shot db-migrate — "no";
 # * воркеры ограничены по CPU/RAM, чтобы sandbox не положил хост.
+#
+# Порты на хосте можно сдвинуть, не трогая файл: WSL 3.0 делит сетевой
+# namespace между дистрибутивами и Windows, поэтому занятый на хосте порт
+# ломает запуск. Переопределение через .env:
+#   STAGING_API_PORT=13001
+#   STAGING_WEB_PORT=18080
+#   STAGING_POSTGRES_PORT=5436
+#   STAGING_OLLAMA_PORT=11436
 services:
   postgres:
     restart: always
     ports:
       # Только localhost: нужен для отладки с хоста, наружу не публикуется.
-      - "127.0.0.1:5435:5432"
+      - "127.0.0.1:${STAGING_POSTGRES_PORT:-5435}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
@@ -44,7 +52,7 @@ services:
     restart: always
     ports:
       # API доступен только через Caddy и с localhost (для отладки и тестов).
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${STAGING_API_PORT:-3001}:3000"
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required in .env}?schema=public
@@ -91,14 +99,14 @@ services:
         # Staging собирается из текущего дерева, а не из готового образа.
         VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:${STAGING_WEB_PORT:-8080}:80"
 
   ollama:
     # Профиль with-llm; публикуется только на localhost, иначе порт открыт
     # всей сети (базовая конфигурация публиковала 11435 на 0.0.0.0).
     restart: always
     ports:
-      - "127.0.0.1:11435:11434"
+      - "127.0.0.1:${STAGING_OLLAMA_PORT:-11435}:11434"
 
   # Мониторинг остаётся в профиле monitoring. Переменные ниже намеренно
   # опциональны: без профиля они не нужны, а `${VAR:?}` в compose падает на
