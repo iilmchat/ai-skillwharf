@@ -426,7 +426,7 @@ test.describe('Дымовые сценарии UI', () => {
     await page.goto('/');
 
     await expect(page.getByRole('heading', { level: 1 })).toContainText(
-      /Автономные|Autonomous/,
+      /Управляемый|Managed/,
     );
 
     await page

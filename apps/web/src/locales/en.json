@@ -205,23 +205,25 @@
   },
   "landing": {
     "nav": {
-      "features": "Features",
+      "why": "Why an AI Office",
       "tracks": "Scenarios",
+      "ecosystem": "Integrations",
+      "marketplace": "Marketplace",
       "office": "AI office"
     },
     "login": "Sign in",
     "goToChat": "Go to chat",
-    "badge": "Autonomous AI agent platform",
-    "titleLead": "Autonomous",
-    "titleAccent": "AI agents",
+    "badge": "Enterprise pilot",
+    "titleLead": "A managed",
+    "titleAccent": "AI Office",
     "titleTail": "for your business",
-    "subtitle": "Launch tasks, connect skills, and watch the team work. Manage agents visually in a live AI office. SkillWharf takes care of the sandbox, billing, and access control.",
-    "primaryCta": "Sign in",
-    "secondaryCta": "See the AI office",
+    "subtitle": "10 ready-made business scenarios. Pay only for results. Your data stays on your server.",
+    "primaryCta": "Request a pilot",
+    "secondaryCta": "Watch demo",
     "meta": {
-      "sandbox": "Sandbox",
-      "billing": "Billing",
-      "skills": "Skills"
+      "tracks": "10 tracks",
+      "outcome": "Pay per outcome",
+      "hosted": "Self-Hosted"
     },
     "preview": {
       "title": "AI office",
@@ -231,96 +233,104 @@
       "approval": "Your decision is needed",
       "openOffice": "Open office"
     },
-    "tracks": {
-      "eyebrow": "Two scenarios",
-      "title": "One office, two scenarios",
-      "subtitle": "The platform adapts to the business: pickup points and Dev teams get their own agents, tasks, and transparent pricing.",
-      "agentsLabel": "Five office employees",
-      "pricingLabel": "Monetization",
-      "openOffice": "Open the AI office",
-      "pvz": {
-        "badge": "Track A",
-        "title": "AI office for pickup points",
-        "subtitle": "Intake, handover, returns, and reporting — without an in-house IT team.",
-        "pain": "An owner of 1–3 pickup points spends 4–6 hours a day on routine.",
-        "agents": {
-          "storekeeper": "Warehouse keeper — intake and stock reconciliation",
-          "operator": "Handover operator — customer notifications",
-          "returns": "Returns — claims and disputed cases",
-          "reporting": "Reporting — the daily summary",
-          "support": "Support — FAQ answers"
-        },
-        "pricing": {
-          "free": "Free — 1 location, 2 agents",
-          "pro": "Pro — 2,490 ₽/month per location",
-          "payPerCall": "Pay-per-Call — 50 ₽ per return act"
-        }
-      },
-      "dev": {
-        "badge": "Track B",
-        "title": "AI office for Dev teams",
-        "subtitle": "Code review, incidents, tests, and documentation in one window.",
-        "pain": "Background agents are invisible, production deploys are stressful, context gets lost.",
-        "agents": {
-          "reviewer": "Reviewer — code review",
-          "oncall": "On-call — incident response",
-          "tester": "Tester — sandbox runs",
-          "documenter": "Documenter — README updates",
-          "security": "Security — scans and skill-vetter"
-        },
-        "pricing": {
-          "free": "Free — 3 agents, up to 5 developers",
-          "team": "Team — 990 ₽/month per developer",
-          "payPerCall": "Pay-per-Call — 100–500 ₽ per post-mortem"
-        }
-      }
-    },
-    "features": {
-      "eyebrow": "Features",
-      "title": "Infrastructure for agents, not another chat",
-      "subtitle": "Everything you need to run autonomous agents safely and predictably.",
-      "sandbox": {
-        "title": "Sandbox",
-        "description": "Isolated execution for code and tools: an agent never reaches the host."
-      },
-      "billing": {
-        "title": "Billing",
-        "description": "Transparent charges for skill calls, balance, and transaction history."
-      },
-      "skills": {
-        "title": "Skills",
-        "description": "Install ready-made skills from the store and manage team access."
-      }
-    },
     "why": {
-      "eyebrow": "Why an AI office",
-      "title": "Agents work — you see what happens",
-      "subtitle": "Not a black box, but a managed team: statuses, tools, and control points.",
-      "problem": {
-        "label": "Problem",
-        "title": "Agents work, but you cannot see what is happening",
-        "description": "The text chat shows the final answer but hides which tools and data the agent used."
-      },
-      "solution": {
-        "label": "Solution",
-        "title": "The AI office is a live window into your employees' work",
-        "description": "Desks, statuses, and current tasks update in real time over WebSocket."
-      },
+      "title": "Why an AI Office",
       "hitl": {
-        "label": "Human-in-the-Loop",
-        "title": "An agent cannot enter Production without your key",
-        "description": "Dangerous actions stop in waiting_approval and wait for confirmation in the side panel."
+        "title": "Human-in-the-Loop",
+        "description": "An agent will not take a dangerous step without your approval. Disputed returns, article publishing, and price changes wait for your team in the AI Office."
+      },
+      "outcome": {
+        "title": "Pay per outcome (Pay-per-Outcome)",
+        "description": "Forget subscriptions for thin air. Money is charged only after a task is completed successfully (for example, processing a contract or hiring a candidate)."
+      },
+      "selfHosted": {
+        "title": "Self-Hosted and Sandbox",
+        "description": "Full data isolation (152-FZ). Code runs in a secure sandbox, and secrets are unavailable to agents."
       }
     },
-    "cta": {
-      "badge": "Docker Compose · 15 minutes",
-      "title": "Deploy your office in 15 minutes",
-      "subtitle": "Docker Compose, one stack, and your first AI office. No infrastructure of your own.",
-      "secondary": "Open the AI office"
+    "tracks": {
+      "eyebrow": "Tracks",
+      "title": "10 ready-made scenarios",
+      "featureLabel": "Highlight",
+      "items": {
+        "pvz": {
+          "name": "Pickup points",
+          "description": "Automating intake, handovers, and returns.",
+          "feature": "Disputed returns wait for HITL."
+        },
+        "dev": {
+          "name": "Dev team",
+          "description": "Code review, incidents, tests.",
+          "feature": "Production deploys stay under control."
+        },
+        "ecommerce": {
+          "name": "E-commerce",
+          "description": "Managing Ozon/WB listings and orders.",
+          "feature": "Real MCP access to the APIs."
+        },
+        "marketing": {
+          "name": "Marketing",
+          "description": "Generating content and visuals (Midjourney).",
+          "feature": "Isolated client workspaces."
+        },
+        "education": {
+          "name": "Education",
+          "description": "Homework checks and lesson plans.",
+          "feature": "The teacher approves complex essays."
+        },
+        "content": {
+          "name": "Content pipeline",
+          "description": "Articles for Dzen and social media.",
+          "feature": "Pay per finished draft (Pay-per-Outcome)."
+        },
+        "hr": {
+          "name": "HR recruiting",
+          "description": "Screening hundreds of resumes.",
+          "feature": "Pay per candidate who reaches the interview."
+        },
+        "documents": {
+          "name": "Document workflow",
+          "description": "Analyzing PDF contracts and extracting amounts.",
+          "feature": "Pay per processed document."
+        },
+        "ocr": {
+          "name": "OCR & Documents",
+          "description": "Recognizing scans (Smart Document Engine).",
+          "feature": "Works even with poor scans."
+        },
+        "finance": {
+          "name": "Finance (Ozon/WB)",
+          "description": "Finding profit leaks and monitoring prices.",
+          "feature": "Real financial reports from marketplaces."
+        }
+      }
+    },
+    "ecosystem": {
+      "eyebrow": "Ecosystem and integrations",
+      "title": "SkillWharf connects easily to your business tools through the open MCP protocol.",
+      "note": "Secure egress, domain allowlist, audit of every call",
+      "items": {
+        "telegram": "Telegram",
+        "google": "Google Workspace",
+        "ozon": "Ozon",
+        "wildberries": "Wildberries",
+        "midjourney": "Midjourney",
+        "tavily": "Tavily (Search)",
+        "tesseract": "Tesseract (OCR)"
+      }
+    },
+    "marketplace": {
+      "eyebrow": "Skill marketplace",
+      "title": "Didn't find the function you need?",
+      "description": "Connect a ready-made skill from our store or write your own in TypeScript. Publish to the registry and earn 85% of sales.",
+      "cta": "Open the documentation"
     },
     "footer": {
-      "tagline": "A workspace for autonomous AI agents.",
-      "rights": "© {{year}} SkillWharf"
+      "rights": "© {{year}} SkillWharf. A workspace for autonomous AI agents.",
+      "linksLabel": "Links",
+      "github": "GitHub",
+      "docs": "Documentation",
+      "pilot": "Pilot: {{email}}"
     }
   },
   "office": {

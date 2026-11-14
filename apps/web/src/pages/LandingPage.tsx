@@ -7,14 +7,35 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Brand } from '../components/Brand';
+import {
+  IntegrationIcon,
+  type IntegrationLogoProvider,
+} from '../components/IntegrationIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuthStore } from '../store/auth.store';
 
-type FeatureId = 'sandbox' | 'billing' | 'skills';
 type PreviewStatus = 'idle' | 'working' | 'waiting_approval';
-type TrackId = 'pvz' | 'dev';
-type WhyKey = 'problem' | 'solution' | 'hitl';
+type WhyId = 'hitl' | 'outcome' | 'selfHosted';
+type TrackId =
+  | 'pvz'
+  | 'dev'
+  | 'ecommerce'
+  | 'marketing'
+  | 'education'
+  | 'content'
+  | 'hr'
+  | 'documents'
+  | 'ocr'
+  | 'finance';
+type PlatformId =
+  | 'telegram'
+  | 'google'
+  | 'ozon'
+  | 'wildberries'
+  | 'midjourney'
+  | 'tavily'
+  | 'tesseract';
 
 interface PreviewAgent {
   name: string;
@@ -24,81 +45,77 @@ interface PreviewAgent {
 
 interface LandingTrack {
   id: TrackId;
+  letter: string;
   icon: string;
-  agentKeys: readonly string[];
-  pricingKeys: readonly string[];
 }
 
-const FEATURE_IDS: readonly FeatureId[] = ['sandbox', 'billing', 'skills'];
+interface LandingPlatform {
+  id: PlatformId;
+  labelKey: string;
+}
+
+/**
+ * Ссылки лендинга. Документация живёт в репозитории, публичного docs-хоста у
+ * проекта нет, поэтому ссылки ведут в GitHub: SPA-роут `/docs` отдал бы
+ * index.html вместо документации.
+ */
+const GITHUB_URL = 'https://github.com/iilmchat/ai-skillwharf';
+const DOCS_URL = `${GITHUB_URL}/tree/main/docs`;
+const USE_CASES_GUIDE_URL = `${DOCS_URL}/ecosystem/USE-CASES-GUIDE.md`;
+const PILOT_EMAIL = 'hello@skillwharf.ru';
+const PILOT_MAILTO = `mailto:${PILOT_EMAIL}`;
+
+const WHY_IDS: readonly WhyId[] = ['hitl', 'outcome', 'selfHosted'];
+
+const WHY_ACCENT: Record<WhyId, { card: string; label: string; icon: string }> =
+  {
+    hitl: {
+      card: 'border-warning/30 bg-warning-container/40',
+      label: 'text-warning',
+      icon: 'bg-warning-container text-on-warning-container',
+    },
+    outcome: {
+      card: 'border-primary/25 bg-primary-container/35',
+      label: 'text-primary',
+      icon: 'bg-primary-container text-on-primary-container',
+    },
+    selfHosted: {
+      card: 'border-tertiary/25 bg-tertiary-container/40',
+      label: 'text-tertiary',
+      icon: 'bg-tertiary-container text-on-tertiary-container',
+    },
+  };
 
 const TRACKS: readonly LandingTrack[] = [
-  {
-    id: 'pvz',
-    icon: '📦',
-    agentKeys: [
-      'landing.tracks.pvz.agents.storekeeper',
-      'landing.tracks.pvz.agents.operator',
-      'landing.tracks.pvz.agents.returns',
-      'landing.tracks.pvz.agents.reporting',
-      'landing.tracks.pvz.agents.support',
-    ],
-    pricingKeys: [
-      'landing.tracks.pvz.pricing.free',
-      'landing.tracks.pvz.pricing.pro',
-      'landing.tracks.pvz.pricing.payPerCall',
-    ],
-  },
-  {
-    id: 'dev',
-    icon: '🛠️',
-    agentKeys: [
-      'landing.tracks.dev.agents.reviewer',
-      'landing.tracks.dev.agents.oncall',
-      'landing.tracks.dev.agents.tester',
-      'landing.tracks.dev.agents.documenter',
-      'landing.tracks.dev.agents.security',
-    ],
-    pricingKeys: [
-      'landing.tracks.dev.pricing.free',
-      'landing.tracks.dev.pricing.team',
-      'landing.tracks.dev.pricing.payPerCall',
-    ],
-  },
+  { id: 'pvz', letter: 'A', icon: '📦' },
+  { id: 'dev', letter: 'B', icon: '🛠️' },
+  { id: 'ecommerce', letter: 'C', icon: '🛒' },
+  { id: 'marketing', letter: 'D', icon: '🎨' },
+  { id: 'education', letter: 'E', icon: '🎓' },
+  { id: 'content', letter: 'F', icon: '📝' },
+  { id: 'hr', letter: 'G', icon: '👥' },
+  { id: 'documents', letter: 'H', icon: '📄' },
+  { id: 'ocr', letter: 'I', icon: '🔍' },
+  { id: 'finance', letter: 'J', icon: '📊' },
 ];
 
-const TRACK_ACCENT: Record<
-  TrackId,
-  { icon: string; gradient: string; badge: string }
-> = {
-  pvz: {
-    icon: 'bg-primary-container text-on-primary-container',
-    gradient: 'from-primary-container/70 via-surface to-surface',
-    badge: 'border-primary/30 bg-primary-container/60 text-on-primary-container',
-  },
-  dev: {
-    icon: 'bg-tertiary-container text-on-tertiary-container',
-    gradient: 'from-tertiary-container/70 via-surface to-surface',
-    badge:
-      'border-tertiary/30 bg-tertiary-container/60 text-on-tertiary-container',
-  },
-};
+const PLATFORMS: readonly LandingPlatform[] = [
+  { id: 'telegram', labelKey: 'landing.ecosystem.items.telegram' },
+  { id: 'google', labelKey: 'landing.ecosystem.items.google' },
+  { id: 'ozon', labelKey: 'landing.ecosystem.items.ozon' },
+  { id: 'wildberries', labelKey: 'landing.ecosystem.items.wildberries' },
+  { id: 'midjourney', labelKey: 'landing.ecosystem.items.midjourney' },
+  { id: 'tavily', labelKey: 'landing.ecosystem.items.tavily' },
+  { id: 'tesseract', labelKey: 'landing.ecosystem.items.tesseract' },
+];
 
-const WHY_KEYS: readonly WhyKey[] = ['problem', 'solution', 'hitl'];
-
-const WHY_ACCENT: Record<WhyKey, { card: string; label: string }> = {
-  problem: {
-    card: 'border-error/25 bg-error-container/30',
-    label: 'text-error',
-  },
-  solution: {
-    card: 'border-primary/25 bg-primary-container/35',
-    label: 'text-primary',
-  },
-  hitl: {
-    card: 'border-warning/30 bg-warning-container/40',
-    label: 'text-warning',
-  },
-};
+const KNOWN_PROVIDERS: readonly IntegrationLogoProvider[] = [
+  'telegram',
+  'google',
+  'ozon',
+  'wildberries',
+  'midjourney',
+];
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -148,8 +165,8 @@ const fadeUpVariants: Variants = {
   },
 };
 
-function FeatureIcon({ id }: { id: FeatureId }) {
-  if (id === 'sandbox') {
+function PillarIcon({ id }: { id: WhyId }) {
+  if (id === 'hitl') {
     return (
       <svg
         aria-hidden="true"
@@ -161,13 +178,14 @@ function FeatureIcon({ id }: { id: FeatureId }) {
         strokeLinejoin="round"
         className="size-5"
       >
-        <path d="M12 3 5 6v5c0 4 3 7.5 7 9 4-1.5 7-5 7-9V6l-7-3Z" />
-        <path d="m9.5 10.5 2 2-2 2M13.5 14.5H16" />
+        <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11" />
+        <path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11" />
+        <path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6v-2.5a1.5 1.5 0 0 1 3 0V13" />
       </svg>
     );
   }
 
-  if (id === 'billing') {
+  if (id === 'outcome') {
     return (
       <svg
         aria-hidden="true"
@@ -179,8 +197,8 @@ function FeatureIcon({ id }: { id: FeatureId }) {
         strokeLinejoin="round"
         className="size-5"
       >
-        <rect x="3" y="6" width="18" height="12" rx="2" />
-        <path d="M3 10h18M7 14h3" />
+        <path d="M5 4h14v13l-3-2-2 2-2-2-2 2-2-2-3 2V4Z" />
+        <path d="M9 9h6M9 13h3" />
       </svg>
     );
   }
@@ -196,11 +214,40 @@ function FeatureIcon({ id }: { id: FeatureId }) {
       strokeLinejoin="round"
       className="size-5"
     >
-      <rect x="4" y="4" width="6" height="6" rx="1" />
-      <rect x="14" y="4" width="6" height="6" rx="1" />
-      <rect x="4" y="14" width="6" height="6" rx="1" />
-      <path d="M14 17h6M17 14v6" />
+      <rect x="3" y="4" width="18" height="7" rx="2" />
+      <rect x="3" y="14" width="18" height="6" rx="2" />
+      <path d="M7 7.5h2M7 17h2" />
+      <path d="M15 7.5h2M15 17h2" />
     </svg>
+  );
+}
+
+function PlatformBadge({ id, label }: { id: PlatformId; label: string }) {
+  const isProvider = (KNOWN_PROVIDERS as readonly string[]).includes(id);
+
+  return (
+    <div className="flex h-full items-center gap-2.5 rounded-xl border border-outline-variant bg-surface px-3 py-2.5 shadow-sm">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-outline-variant bg-surface-container-high text-on-surface">
+        {isProvider ? (
+          <IntegrationIcon
+            provider={id as IntegrationLogoProvider}
+            className="size-4"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className={`inline-grid size-4 place-items-center rounded text-[7px] font-bold leading-none text-white ${
+              id === 'tavily' ? 'bg-[#0F766E]' : 'bg-[#374151]'
+            }`}
+          >
+            {id === 'tavily' ? 'TV' : 'TC'}
+          </span>
+        )}
+      </span>
+      <span className="text-xs font-medium leading-snug text-on-surface">
+        {label}
+      </span>
+    </div>
   );
 }
 
@@ -209,10 +256,7 @@ export function LandingPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const shouldReduceMotion = useReducedMotion();
   const isAuthenticated = accessToken !== null;
-  const primaryHref = isAuthenticated ? '/app/chat' : '/login';
-  const primaryLabel = isAuthenticated
-    ? t('landing.goToChat')
-    : t('landing.primaryCta');
+  const headerHref = isAuthenticated ? '/app/chat' : '/login';
   const headerLabel = isAuthenticated
     ? t('landing.goToChat')
     : t('landing.login');
@@ -241,16 +285,28 @@ export function LandingPage() {
                 className="hidden items-center gap-5 text-sm font-medium text-on-surface-variant md:flex"
               >
                 <a
+                  href="#why"
+                  className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('landing.nav.why')}
+                </a>
+                <a
                   href="#tracks"
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   {t('landing.nav.tracks')}
                 </a>
                 <a
-                  href="#features"
+                  href="#ecosystem"
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
-                  {t('landing.nav.features')}
+                  {t('landing.nav.ecosystem')}
+                </a>
+                <a
+                  href="#marketplace"
+                  className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('landing.nav.marketplace')}
                 </a>
                 <Link
                   to="/app/office"
@@ -265,7 +321,7 @@ export function LandingPage() {
               <LanguageSwitcher />
               <ThemeToggle />
               <Link
-                to={primaryHref}
+                to={headerHref}
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 {headerLabel}
@@ -332,11 +388,11 @@ export function LandingPage() {
                   variants={fadeUpVariants}
                   className="mt-9 flex flex-col gap-3 sm:flex-row"
                 >
-                  <Link
-                    to={primaryHref}
+                  <a
+                    href={PILOT_MAILTO}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-on-primary shadow-xl shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:brightness-95"
                   >
-                    {primaryLabel}
+                    {t('landing.primaryCta')}
                     <svg
                       aria-hidden="true"
                       viewBox="0 0 24 24"
@@ -349,7 +405,7 @@ export function LandingPage() {
                     >
                       <path d="M5 12h14M13 6l6 6-6 6" />
                     </svg>
-                  </Link>
+                  </a>
                   <Link
                     to="/app/office"
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface-container px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -379,7 +435,7 @@ export function LandingPage() {
                       aria-hidden="true"
                       className="size-1.5 rounded-full bg-primary"
                     />
-                    {t('landing.meta.sandbox')}
+                    {t('landing.meta.tracks')}
                   </span>
                   <span aria-hidden="true">·</span>
                   <span className="inline-flex items-center gap-1.5">
@@ -387,7 +443,7 @@ export function LandingPage() {
                       aria-hidden="true"
                       className="size-1.5 rounded-full bg-tertiary"
                     />
-                    {t('landing.meta.billing')}
+                    {t('landing.meta.outcome')}
                   </span>
                   <span aria-hidden="true">·</span>
                   <span className="inline-flex items-center gap-1.5">
@@ -395,7 +451,7 @@ export function LandingPage() {
                       aria-hidden="true"
                       className="size-1.5 rounded-full bg-success"
                     />
-                    {t('landing.meta.skills')}
+                    {t('landing.meta.hosted')}
                   </span>
                 </motion.p>
               </motion.div>
@@ -413,9 +469,7 @@ export function LandingPage() {
 
                 <motion.div
                   animate={
-                    shouldReduceMotion === true
-                      ? undefined
-                      : { y: [0, -10, 0] }
+                    shouldReduceMotion === true ? undefined : { y: [0, -10, 0] }
                   }
                   transition={{
                     duration: 7,
@@ -495,9 +549,7 @@ export function LandingPage() {
                     to="/app/office"
                     className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-primary-container/60 px-3 py-2.5 text-xs font-medium text-on-primary-container transition hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
-                    <span>
-                      {t('landing.preview.waiting', { count: 1 })}
-                    </span>
+                    <span>{t('landing.preview.waiting', { count: 1 })}</span>
                     <span className="inline-flex items-center gap-1 font-semibold">
                       {t('landing.preview.openOffice')}
                       <svg
@@ -518,9 +570,7 @@ export function LandingPage() {
 
                 <motion.div
                   animate={
-                    shouldReduceMotion === true
-                      ? undefined
-                      : { y: [0, 6, 0] }
+                    shouldReduceMotion === true ? undefined : { y: [0, 6, 0] }
                   }
                   transition={{
                     duration: 5.5,
@@ -537,9 +587,67 @@ export function LandingPage() {
           </section>
 
           <section
+            id="why"
+            aria-labelledby="landing-why-title"
+            className="relative"
+          >
+            <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
+              <motion.div
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="max-w-2xl"
+              >
+                <motion.h2
+                  id="landing-why-title"
+                  variants={fadeUpVariants}
+                  className="text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
+                >
+                  {t('landing.why.title')}
+                </motion.h2>
+              </motion.div>
+
+              <motion.ul
+                initial="hidden"
+                animate="show"
+                variants={staggerVariants}
+                className="mt-10 grid gap-4 md:grid-cols-3"
+              >
+                {WHY_IDS.map((whyId) => {
+                  const accent = WHY_ACCENT[whyId];
+
+                  return (
+                    <motion.li
+                      key={whyId}
+                      variants={fadeUpVariants}
+                      className="h-full"
+                    >
+                      <article
+                        className={`flex h-full flex-col rounded-2xl border p-6 ${accent.card}`}
+                      >
+                        <span
+                          className={`inline-flex self-start rounded-xl p-2.5 ${accent.icon}`}
+                        >
+                          <PillarIcon id={whyId} />
+                        </span>
+                        <h3 className="mt-4 font-display text-xl font-bold leading-snug text-on-surface">
+                          {t(`landing.why.${whyId}.title`)}
+                        </h3>
+                        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+                          {t(`landing.why.${whyId}.description`)}
+                        </p>
+                      </article>
+                    </motion.li>
+                  );
+                })}
+              </motion.ul>
+            </div>
+          </section>
+
+          <section
             id="tracks"
             aria-labelledby="landing-tracks-title"
-            className="relative"
+            className="relative border-y border-outline-variant/70 bg-surface-container/40"
           >
             <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
               <motion.div
@@ -561,172 +669,48 @@ export function LandingPage() {
                 >
                   {t('landing.tracks.title')}
                 </motion.h2>
-                <motion.p
-                  variants={fadeUpVariants}
-                  className="mt-3 text-base leading-relaxed text-on-surface-variant"
-                >
-                  {t('landing.tracks.subtitle')}
-                </motion.p>
               </motion.div>
 
               <motion.ul
                 initial="hidden"
                 animate="show"
                 variants={staggerVariants}
-                className="mt-10 grid gap-4 lg:grid-cols-2"
+                className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
               >
-                {TRACKS.map((track) => {
-                  const accent = TRACK_ACCENT[track.id];
-
-                  return (
-                    <motion.li
-                      key={track.id}
-                      variants={fadeUpVariants}
-                      className="h-full"
-                    >
-                      <article
-                        className={`flex h-full flex-col rounded-3xl border border-outline-variant bg-linear-to-br p-6 shadow-sm sm:p-8 ${accent.gradient}`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${accent.badge}`}
-                          >
-                            {t(`landing.tracks.${track.id}.badge`)}
-                          </span>
-                          <span
-                            aria-hidden="true"
-                            className={`grid size-11 place-items-center rounded-2xl text-xl ${accent.icon}`}
-                          >
-                            {track.icon}
-                          </span>
-                        </div>
-
-                        <h3 className="mt-5 font-display text-2xl font-bold tracking-tight text-on-surface">
-                          {t(`landing.tracks.${track.id}.title`)}
-                        </h3>
-                        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-                          {t(`landing.tracks.${track.id}.subtitle`)}
-                        </p>
-                        <p className="mt-4 rounded-xl border border-outline-variant/70 bg-surface/70 px-3 py-2 text-xs leading-relaxed text-on-surface-variant">
-                          {t(`landing.tracks.${track.id}.pain`)}
-                        </p>
-
-                        <div className="mt-6">
-                          <h4 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
-                            {t('landing.tracks.agentsLabel')}
-                          </h4>
-                          <ul className="mt-2 flex flex-wrap gap-1.5">
-                            {track.agentKeys.map((agentKey) => (
-                              <li
-                                key={agentKey}
-                                className="rounded-full border border-outline-variant bg-surface/80 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant"
-                              >
-                                {t(agentKey)}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="mt-5">
-                          <h4 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
-                            {t('landing.tracks.pricingLabel')}
-                          </h4>
-                          <ul className="mt-2 space-y-1.5">
-                            {track.pricingKeys.map((priceKey) => (
-                              <li
-                                key={priceKey}
-                                className="flex items-start gap-2 text-xs leading-relaxed text-on-surface-variant"
-                              >
-                                <span
-                                  aria-hidden="true"
-                                  className="mt-1.5 size-1 shrink-0 rounded-full bg-primary"
-                                />
-                                {t(priceKey)}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <Link
-                          to="/app/office"
-                          className="mt-auto inline-flex w-fit items-center gap-1.5 pt-6 text-sm font-semibold text-primary transition hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                        >
-                          {t('landing.tracks.openOffice')}
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="size-4"
-                          >
-                            <path d="M5 12h14M13 6l6 6-6 6" />
-                          </svg>
-                        </Link>
-                      </article>
-                    </motion.li>
-                  );
-                })}
-              </motion.ul>
-            </div>
-          </section>
-
-          <section
-            id="features"
-            aria-labelledby="landing-features-title"
-            className="relative border-y border-outline-variant/70 bg-surface-container/40"
-          >
-            <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
-              <motion.div
-                initial="hidden"
-                animate="show"
-                variants={staggerVariants}
-                className="max-w-2xl"
-              >
-                <motion.p
-                  variants={fadeUpVariants}
-                  className="text-xs font-semibold uppercase tracking-[0.18em] text-primary"
-                >
-                  {t('landing.features.eyebrow')}
-                </motion.p>
-                <motion.h2
-                  id="landing-features-title"
-                  variants={fadeUpVariants}
-                  className="mt-3 font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
-                >
-                  {t('landing.features.title')}
-                </motion.h2>
-                <motion.p
-                  variants={fadeUpVariants}
-                  className="mt-3 text-base leading-relaxed text-on-surface-variant"
-                >
-                  {t('landing.features.subtitle')}
-                </motion.p>
-              </motion.div>
-
-              <motion.ul
-                initial="hidden"
-                animate="show"
-                variants={staggerVariants}
-                className="mt-10 grid gap-4 md:grid-cols-3"
-              >
-                {FEATURE_IDS.map((featureId) => (
+                {TRACKS.map((track) => (
                   <motion.li
-                    key={featureId}
+                    key={track.id}
                     variants={fadeUpVariants}
                     className="h-full"
                   >
-                    <article className="group flex h-full flex-col rounded-2xl border border-outline-variant bg-surface p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5">
-                      <span className="grid size-11 place-items-center rounded-xl bg-primary-container text-on-primary-container transition group-hover:bg-primary group-hover:text-on-primary">
-                        <FeatureIcon id={featureId} />
-                      </span>
-                      <h3 className="mt-5 font-display text-lg font-bold text-on-surface">
-                        {t(`landing.features.${featureId}.title`)}
+                    <article className="group flex h-full flex-col rounded-2xl border border-outline-variant bg-surface p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5">
+                      <div className="flex items-start justify-between gap-3">
+                        <span
+                          aria-hidden="true"
+                          className="grid size-10 place-items-center rounded-xl bg-primary-container text-lg text-on-primary-container transition group-hover:bg-primary group-hover:text-on-primary"
+                        >
+                          {track.icon}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="inline-grid size-6 place-items-center rounded-full border border-outline-variant bg-surface-container-high text-[11px] font-semibold text-on-surface-variant"
+                        >
+                          {track.letter}
+                        </span>
+                      </div>
+
+                      <h3 className="mt-4 font-display text-lg font-bold text-on-surface">
+                        {t(`landing.tracks.items.${track.id}.name`)}
                       </h3>
-                      <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-                        {t(`landing.features.${featureId}.description`)}
+                      <p className="mt-1.5 text-sm leading-relaxed text-on-surface-variant">
+                        {t(`landing.tracks.items.${track.id}.description`)}
+                      </p>
+
+                      <p className="mt-auto flex flex-wrap items-baseline gap-x-1.5 gap-y-1 pt-4 text-xs leading-relaxed text-on-surface-variant">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
+                          {t('landing.tracks.featureLabel')}
+                        </span>
+                        {t(`landing.tracks.items.${track.id}.feature`)}
                       </p>
                     </article>
                   </motion.li>
@@ -736,78 +720,82 @@ export function LandingPage() {
           </section>
 
           <section
-            id="why"
-            aria-labelledby="landing-why-title"
-            className="relative bg-surface-container/30"
+            id="ecosystem"
+            aria-labelledby="landing-ecosystem-title"
+            className="relative"
           >
             <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
-              <motion.div
-                initial="hidden"
-                animate="show"
-                variants={staggerVariants}
-                className="max-w-2xl"
-              >
-                <motion.p
-                  variants={fadeUpVariants}
-                  className="text-xs font-semibold uppercase tracking-[0.18em] text-primary"
+              <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+                <motion.div
+                  initial="hidden"
+                  animate="show"
+                  variants={staggerVariants}
+                  className="max-w-xl"
                 >
-                  {t('landing.why.eyebrow')}
-                </motion.p>
-                <motion.h2
-                  id="landing-why-title"
-                  variants={fadeUpVariants}
-                  className="mt-3 text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
-                >
-                  {t('landing.why.title')}
-                </motion.h2>
-                <motion.p
-                  variants={fadeUpVariants}
-                  className="mt-3 text-base leading-relaxed text-on-surface-variant"
-                >
-                  {t('landing.why.subtitle')}
-                </motion.p>
-              </motion.div>
+                  <motion.p
+                    variants={fadeUpVariants}
+                    className="text-xs font-semibold uppercase tracking-[0.18em] text-primary"
+                  >
+                    {t('landing.ecosystem.eyebrow')}
+                  </motion.p>
+                  <motion.h2
+                    id="landing-ecosystem-title"
+                    variants={fadeUpVariants}
+                    className="mt-3 text-balance font-display text-2xl font-bold tracking-tight text-on-surface sm:text-3xl"
+                  >
+                    {t('landing.ecosystem.title')}
+                  </motion.h2>
+                  <motion.p
+                    variants={fadeUpVariants}
+                    className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-on-surface-variant"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="mt-0.5 size-4 shrink-0 text-primary"
+                    >
+                      <rect x="4" y="10" width="16" height="10" rx="2" />
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                    </svg>
+                    {t('landing.ecosystem.note')}
+                  </motion.p>
+                </motion.div>
 
-              <motion.ul
-                initial="hidden"
-                animate="show"
-                variants={staggerVariants}
-                className="mt-10 grid gap-4 md:grid-cols-3"
-              >
-                {WHY_KEYS.map((whyKey) => {
-                  const accent = WHY_ACCENT[whyKey];
-
-                  return (
+                <motion.ul
+                  initial="hidden"
+                  animate="show"
+                  variants={staggerVariants}
+                  className="grid grid-cols-2 gap-3 sm:grid-cols-3"
+                >
+                  {PLATFORMS.map((platform) => (
                     <motion.li
-                      key={whyKey}
+                      key={platform.id}
                       variants={fadeUpVariants}
                       className="h-full"
                     >
-                      <article
-                        className={`flex h-full flex-col rounded-2xl border p-6 ${accent.card}`}
-                      >
-                        <span
-                          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${accent.label}`}
-                        >
-                          {t(`landing.why.${whyKey}.label`)}
-                        </span>
-                        <h3 className="mt-3 font-display text-xl font-bold leading-snug text-on-surface">
-                          {t(`landing.why.${whyKey}.title`)}
-                        </h3>
-                        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-                          {t(`landing.why.${whyKey}.description`)}
-                        </p>
-                      </article>
+                      <PlatformBadge
+                        id={platform.id}
+                        label={t(platform.labelKey)}
+                      />
                     </motion.li>
-                  );
-                })}
-              </motion.ul>
+                  ))}
+                </motion.ul>
+              </div>
             </div>
           </section>
 
-          <section aria-labelledby="landing-cta-title">
-            <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-              <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-linear-to-br from-primary-container via-surface-container to-tertiary-container px-6 py-12 text-center shadow-xl shadow-primary/5 sm:px-12">
+          <section
+            id="marketplace"
+            aria-labelledby="landing-marketplace-title"
+            className="relative"
+          >
+            <div className="mx-auto max-w-6xl px-4 pb-20 sm:px-6 lg:pb-24">
+              <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-linear-to-br from-primary-container via-surface-container to-tertiary-container px-6 py-12 shadow-xl shadow-primary/5 sm:px-12">
                 <div
                   aria-hidden="true"
                   className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
@@ -817,37 +805,43 @@ export function LandingPage() {
                   className="pointer-events-none absolute -bottom-24 right-0 size-64 rounded-full bg-tertiary/20 blur-3xl"
                 />
 
-                <div className="relative">
+                <div className="relative max-w-2xl">
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-surface/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
                     <span
                       aria-hidden="true"
                       className="size-1.5 rounded-full bg-primary"
                     />
-                    {t('landing.cta.badge')}
+                    {t('landing.marketplace.eyebrow')}
                   </span>
                   <h2
-                    id="landing-cta-title"
+                    id="landing-marketplace-title"
                     className="mt-4 text-balance font-display text-3xl font-bold tracking-tight text-on-surface sm:text-4xl"
                   >
-                    {t('landing.cta.title')}
+                    {t('landing.marketplace.title')}
                   </h2>
-                  <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-on-surface-variant sm:text-base">
-                    {t('landing.cta.subtitle')}
+                  <p className="mt-3 text-sm leading-relaxed text-on-surface-variant sm:text-base">
+                    {t('landing.marketplace.description')}
                   </p>
-                  <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-                    <Link
-                      to={primaryHref}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  <a
+                    href={USE_CASES_GUIDE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-7 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    {t('landing.marketplace.cta')}
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-4"
                     >
-                      {primaryLabel}
-                    </Link>
-                    <Link
-                      to="/app/office"
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface/80 px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    >
-                      {t('landing.cta.secondary')}
-                    </Link>
-                  </div>
+                      <path d="M7 17 17 7M9 7h8v8" />
+                    </svg>
+                  </a>
                 </div>
               </div>
             </div>
@@ -855,16 +849,40 @@ export function LandingPage() {
         </main>
 
         <footer className="border-t border-outline-variant/70">
-          <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div className="flex items-center gap-3">
               <Brand compact />
-              <p className="text-xs text-on-surface-variant">
-                {t('landing.footer.tagline')}
+              <p className="text-xs leading-relaxed text-on-surface-variant">
+                {t('landing.footer.rights', { year: CURRENT_YEAR })}
               </p>
             </div>
-            <p className="text-xs text-on-surface-variant">
-              {t('landing.footer.rights', { year: CURRENT_YEAR })}
-            </p>
+            <nav
+              aria-label={t('landing.footer.linksLabel')}
+              className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-on-surface-variant"
+            >
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {t('landing.footer.github')}
+              </a>
+              <a
+                href={DOCS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {t('landing.footer.docs')}
+              </a>
+              <a
+                href={PILOT_MAILTO}
+                className="transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {t('landing.footer.pilot', { email: PILOT_EMAIL })}
+              </a>
+            </nav>
           </div>
         </footer>
       </div>
