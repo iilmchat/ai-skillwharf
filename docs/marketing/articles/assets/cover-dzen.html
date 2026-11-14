@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>SkillWharf — обложка для Дзена (1200×630)</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #05070f;
+      }
+
+      .cover {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        background:
+          radial-gradient(860px 600px at 76% 42%, rgba(107, 56, 212, 0.40), transparent 66%),
+          radial-gradient(680px 520px at 14% 94%, rgba(14, 165, 233, 0.16), transparent 68%),
+          linear-gradient(158deg, #0c1222 0%, #080b16 58%, #05070f 100%);
+      }
+
+      .scene,
+      .grain,
+      .vignette {
+        position: absolute;
+        inset: 0;
+      }
+
+      .grain {
+        opacity: 0.05;
+        mix-blend-mode: overlay;
+      }
+
+      .vignette {
+        background: radial-gradient(120% 122% at 52% 44%, transparent 36%, rgba(2, 4, 9, 0.72) 100%);
+      }
+
+      .brand {
+        position: absolute;
+        left: 72px;
+        bottom: 58px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .brand-mark {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        background: linear-gradient(140deg, #6b38d4 0%, #0ea5e9 100%);
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+          0 6px 24px rgba(107, 56, 212, 0.6);
+      }
+
+      .brand-name {
+        font-size: 44px;
+        font-weight: 800;
+        letter-spacing: -1.4px;
+        color: #f1f5f9;
+        line-height: 1;
+        text-shadow: 0 10px 40px rgba(5, 7, 15, 0.9);
+      }
+
+      .brand-rule {
+        position: absolute;
+        left: 108px;
+        bottom: 42px;
+        width: 232px;
+        height: 2px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, rgba(107, 56, 212, 0.9), rgba(14, 165, 233, 0));
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <svg class="scene" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+        <defs>
+          <linearGradient id="edge" x1="806" y1="110" x2="1058" y2="470" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#6B38D4" stop-opacity="0.85" />
+            <stop offset="0.5" stop-color="#8B5CF6" stop-opacity="0.5" />
+            <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.95" />
+          </linearGradient>
+
+          <linearGradient id="doorInner" x1="925" y1="126" x2="925" y2="456" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#6B38D4" stop-opacity="0.32" />
+            <stop offset="0.62" stop-color="#3B2C7A" stop-opacity="0.16" />
+            <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.10" />
+          </linearGradient>
+
+          <radialGradient id="doorGlow" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#7C4DEE" stop-opacity="0.52" />
+            <stop offset="0.55" stop-color="#6B38D4" stop-opacity="0.16" />
+            <stop offset="1" stop-color="#6B38D4" stop-opacity="0" />
+          </radialGradient>
+
+          <linearGradient id="spill" x1="925" y1="470" x2="925" y2="630" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.24" />
+            <stop offset="1" stop-color="#0EA5E9" stop-opacity="0" />
+          </linearGradient>
+
+          <linearGradient id="floorLine" x1="0" y1="470" x2="0" y2="630" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0EA5E9" stop-opacity="0.14" />
+            <stop offset="1" stop-color="#0EA5E9" stop-opacity="0" />
+          </linearGradient>
+
+          <linearGradient id="rim" x1="520" y1="200" x2="700" y2="470" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.9" />
+            <stop offset="0.55" stop-color="#6B38D4" stop-opacity="0.5" />
+            <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.75" />
+          </linearGradient>
+
+          <linearGradient id="keyGlow" x1="925" y1="286" x2="925" y2="352" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#67E8F9" />
+            <stop offset="1" stop-color="#0EA5E9" />
+          </linearGradient>
+
+          <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="14" />
+          </filter>
+
+          <filter id="softSpill" x="-25%" y="-25%" width="150%" height="150%">
+            <feGaussianBlur stdDeviation="10" />
+          </filter>
+
+          <filter id="tight" x="-90%" y="-90%" width="280%" height="280%">
+            <feGaussianBlur stdDeviation="4" />
+          </filter>
+
+          <filter id="noise">
+            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch" />
+            <feColorMatrix type="saturate" values="0" />
+          </filter>
+
+          <!-- силуэт агента: базовая форма, используется для рим-лайта -->
+          <g id="agent">
+            <rect x="46" y="-10" width="42" height="10" rx="4" />
+            <rect x="108" y="-10" width="42" height="10" rx="4" />
+            <rect x="52" y="-96" width="32" height="88" rx="5" />
+            <rect x="106" y="-96" width="32" height="88" rx="5" />
+            <path d="M52 -210 H148 Q160 -210 158 -196 L150 -100 Q149 -92 140 -92 H60 Q51 -92 50 -100 L42 -196 Q40 -210 52 -210 Z" />
+            <rect x="26" y="-200" width="28" height="98" rx="14" />
+            <rect x="146" y="-200" width="28" height="98" rx="14" />
+            <rect x="90" y="-222" width="16" height="12" rx="4" />
+            <rect x="70" y="-276" width="56" height="58" rx="12" />
+          </g>
+        </defs>
+
+        <!-- ореол двери -->
+        <ellipse cx="930" cy="320" rx="230" ry="255" fill="url(#doorGlow)" />
+
+        <!-- пол в перспективе -->
+        <g stroke="url(#floorLine)" stroke-width="1">
+          <line x1="925" y1="470" x2="925" y2="630" />
+          <line x1="925" y1="470" x2="715" y2="630" />
+          <line x1="925" y1="470" x2="1135" y2="630" />
+          <line x1="925" y1="470" x2="505" y2="630" />
+          <line x1="925" y1="470" x2="1345" y2="630" />
+          <line x1="925" y1="470" x2="295" y2="630" />
+          <line x1="925" y1="470" x2="1555" y2="630" />
+        </g>
+        <g stroke="#0EA5E9" stroke-linecap="round">
+          <line x1="0" y1="470" x2="1200" y2="470" stroke-opacity="0.10" />
+          <line x1="0" y1="492" x2="1200" y2="492" stroke-opacity="0.07" />
+          <line x1="0" y1="522" x2="1200" y2="522" stroke-opacity="0.05" />
+          <line x1="0" y1="562" x2="1200" y2="562" stroke-opacity="0.04" />
+          <line x1="0" y1="612" x2="1200" y2="612" stroke-opacity="0.02" />
+        </g>
+
+        <!-- блик на полу -->
+        <path d="M806 470 H1050 L1180 630 H660 Z" fill="url(#spill)" filter="url(#softSpill)" />
+
+        <!-- дверь -->
+        <g>
+          <rect x="806" y="110" width="252" height="360" rx="9" fill="#0E1526" stroke="url(#edge)" stroke-width="2" />
+          <rect x="822" y="126" width="220" height="328" rx="6" fill="url(#doorInner)" />
+          <rect x="822" y="126" width="220" height="328" rx="6" stroke="rgba(255,255,255,0.10)" />
+
+          <g opacity="0.55">
+            <rect x="852" y="140" width="2" height="300" rx="1" fill="#0EA5E9" opacity="0.14" />
+            <rect x="918" y="140" width="2" height="300" rx="1" fill="#A78BFA" opacity="0.12" />
+            <rect x="996" y="140" width="2" height="300" rx="1" fill="#0EA5E9" opacity="0.09" />
+          </g>
+
+          <!-- ручка -->
+          <rect x="830" y="298" width="6" height="46" rx="3" fill="#22D3EE" opacity="0.75" />
+          <rect x="830" y="298" width="6" height="46" rx="3" fill="#22D3EE" filter="url(#tight)" opacity="0.35" />
+
+          <!-- замок с скважиной -->
+          <g style="filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.28))">
+            <rect x="900" y="296" width="50" height="76" rx="10" fill="#0A1120" stroke="rgba(148, 163, 184, 0.55)" stroke-width="2" />
+            <circle cx="925" cy="322" r="7.5" fill="#05070F" stroke="url(#keyGlow)" stroke-width="2.2" />
+            <path d="M921.5 329 h7 l-1.6 16 a1.9 1.9 0 0 1 -3.8 0 Z" fill="#05070F" stroke="url(#keyGlow)" stroke-width="2.2" />
+          </g>
+
+          <!-- порог -->
+          <line x1="800" y1="470" x2="1064" y2="470" stroke="#22D3EE" stroke-width="2" opacity="0.40" />
+          <line x1="800" y1="470" x2="1064" y2="470" stroke="#22D3EE" stroke-width="8" opacity="0.22" filter="url(#softSpill)" />
+        </g>
+
+        <!-- агент -->
+        <g transform="translate(470 470)">
+          <ellipse cx="99" cy="6" rx="98" ry="12" fill="#02040A" opacity="0.65" filter="url(#soft)" />
+
+          <!-- рим-лайт: сдвинутая копия силуэта под глухой формой -->
+          <g transform="translate(5 0)" fill="url(#rim)" opacity="0.42">
+            <use href="#agent" />
+          </g>
+
+          <g fill="#06090F" stroke="rgba(148, 163, 184, 0.14)" stroke-width="1.2">
+            <use href="#agent" />
+          </g>
+
+          <g fill="#22D3EE">
+            <rect x="78" y="-176" width="44" height="4" rx="2" opacity="0.5" />
+            <rect x="86" y="-164" width="28" height="4" rx="2" opacity="0.22" />
+            <rect x="78" y="-258" width="40" height="11" rx="3" opacity="0.9" />
+            <rect x="78" y="-258" width="40" height="11" rx="3" opacity="0.5" filter="url(#tight)" />
+          </g>
+
+          <line x1="98" y1="-278" x2="98" y2="-292" stroke="rgba(148, 163, 184, 0.45)" stroke-width="2" stroke-linecap="round" />
+          <circle cx="98" cy="-294" r="4" fill="#8B5CF6" style="filter: drop-shadow(0 0 9px rgba(139, 92, 246, 0.9))" />
+        </g>
+      </svg>
+
+      <svg class="grain" width="1200" height="630">
+        <rect width="1200" height="630" filter="url(#noise)" opacity="0.5" />
+      </svg>
+
+      <div class="vignette"></div>
+
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div class="brand-name">SkillWharf</div>
+      </div>
+      <div class="brand-rule"></div>
+    </div>
+  </body>
+</html>

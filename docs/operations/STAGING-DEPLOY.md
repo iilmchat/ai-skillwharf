@@ -148,11 +148,68 @@ egress в `api.telegram.org` из контейнера `api`. Exit code `1` пр
 
 ## 7. Доступ с Windows
 
-WSL2 пробрасывает `127.0.0.1` дистрибутива на localhost Windows:
+WSL2 пробрасывает `127.0.0.1` дистрибутива на localhost Windows, порты берутся
+из `.env` (`STAGING_*_PORT`, см. §5):
 
-- UI — <http://localhost:8080>
-- API — <http://localhost:3001/api/v1>
+- UI — <http://localhost:18080>
+- API — <http://localhost:13001/api/v1>
+- Postgres — `127.0.0.1:5436`
 - Grafana (если включена) — <http://localhost:3003>
+
+`host.docker.internal` из контейнеров заблокирован firewall Windows: внешние
+сервисы на хосте (например, LM Studio) адресуются по LAN-IP `192.168.1.121`,
+а не через `host.docker.internal`.
+
+### Публикация в интернет: Cloudflare Tunnel
+
+Публичный HTTPS нужен для двух вещей: лендинга на `https://skillwharf.ru` и
+webhook ЮKassa (`/api/v1/billing/webhook` — баланс зачисляется только им).
+Порты на роутере при этом не открываются: `cloudflared` сам открывает
+исходящее соединение к Cloudflare.
+
+Схема: `интернет → Cloudflare (TLS) → tunnel → 127.0.0.1:18080 (Caddy web)`,
+Caddy уже проксирует `/api/*` и `/socket.io/*` в `api:3000`, поэтому одного
+hostname достаточно.
+
+**Один раз, в панели Cloudflare (Free):** добавить сайт `skillwharf.ru`,
+получить два NS и прописать их у регистратора (reg.ru → домен → «Изменить
+DNS-серверы»). Дождаться статуса Active.
+
+**Один раз, в дистрибутиве:**
+
+```bash
+# 1. Авторизация (откроет браузер; cert.pem ляжет в /root/.cloudflared)
+cloudflared tunnel login
+
+# 2. Туннель и DNS-запись
+cloudflared tunnel create skillwharf          # запомнить UUID из вывода
+cloudflared tunnel route dns skillwharf skillwharf.ru
+
+# 3. Конфиг и служба
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml >/dev/null <<'EOF'
+tunnel: <UUID>
+credentials-file: /root/.cloudflared/<UUID>.json
+ingress:
+  - hostname: skillwharf.ru
+    service: http://127.0.0.1:18080
+  - service: http_status:404
+EOF
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+```
+
+Проверка: `cloudflared tunnel info skillwharf` (два коннектора), затем
+`curl -sI https://skillwharf.ru` → `200`. Логи — `journalctl -u cloudflared -f`.
+
+**ЮKassa:** в кабинете (Интеграция → HTTP-уведомления) указать
+`https://skillwharf.ru/api/v1/billing/webhook`, события `payment.succeeded` и
+`payment.canceled`. Обработчик сам перепроверяет платёж запросом в API ЮKassa,
+поэтому подделка уведомления не зачислит деньги; повторная доставка
+идемпотентна. Локально `YOOKASSA_RETURN_URL` — `https://skillwharf.ru/app/chat`.
+
+Туннель зависит от живого дистрибутива: если WSL выгружен или Windows
+перезагружен без keep-alive (§5), сайт и webhook недоступны.
 
 ## 8. Остановка и очистка
 
