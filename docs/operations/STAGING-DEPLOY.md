@@ -181,17 +181,21 @@ DNS-серверы»). Дождаться статуса Active.
 # 1. Авторизация (откроет браузер; cert.pem ляжет в /root/.cloudflared)
 cloudflared tunnel login
 
-# 2. Туннель и DNS-запись
+# 2. Туннель и DNS-записи (apex + www)
 cloudflared tunnel create skillwharf          # запомнить UUID из вывода
 cloudflared tunnel route dns skillwharf skillwharf.ru
+cloudflared tunnel route dns skillwharf www.skillwharf.ru
 
 # 3. Конфиг и служба
 sudo mkdir -p /etc/cloudflared
 sudo tee /etc/cloudflared/config.yml >/dev/null <<'EOF'
 tunnel: <UUID>
 credentials-file: /root/.cloudflared/<UUID>.json
+no-autoupdate: true
 ingress:
   - hostname: skillwharf.ru
+    service: http://127.0.0.1:18080
+  - hostname: www.skillwharf.ru
     service: http://127.0.0.1:18080
   - service: http_status:404
 EOF
@@ -199,12 +203,26 @@ sudo cloudflared service install
 sudo systemctl enable --now cloudflared
 ```
 
-Проверка: `cloudflared tunnel info skillwharf` (два коннектора), затем
-`curl -sI https://skillwharf.ru` → `200`. Логи — `journalctl -u cloudflared -f`.
+Проверка: `cloudflared tunnel info skillwharf` (коннекторы `dme05`/`dme06`),
+`cloudflared tunnel ingress validate`, затем `curl -sS -o /dev/null -w '%{http_code}' https://skillwharf.ru/`
+→ `200`. Логи — `journalctl -u cloudflared -f`.
+
+**Текущая конфигурация стенда (15.11.2026):** зона `skillwharf.ru` в Cloudflare
+(Free), NS `dolly.ns.cloudflare.com` и `piers.ns.cloudflare.com`; туннель
+`skillwharf`, UUID `c9f128f4-146d-4cad-bdf0-4bb5aebc0270`; служба `cloudflared`
+в systemd, конфиг `/etc/cloudflared/config.yml`; apex и `www` проксируются на
+`127.0.0.1:18080`.
+
+**CSP и аналитика Cloudflare.** Для проксируемых сайтов Cloudflare автоматически
+вставляет маячок `static.cloudflareinsights.com/beacon.min.js`. Он разрешён в
+`apps/web/Caddyfile` (`script-src`), иначе в консоли появляется CSP-ошибка.
+После правки CSP нужно пересобрать образ `web` — заголовок отдаёт Caddy.
 
 **ЮKassa:** в кабинете (Интеграция → HTTP-уведомления) указать
 `https://skillwharf.ru/api/v1/billing/webhook`, события `payment.succeeded` и
-`payment.canceled`. Обработчик сам перепроверяет платёж запросом в API ЮKassa,
+`payment.canceled`. Через API это не настраивается: `POST /v3/webhooks` с ключом
+магазина отвечает `401` («Authentication type is not allowed») — нужен
+OAuth-токен партнёра. Обработчик сам перепроверяет платёж запросом в API ЮKassa,
 поэтому подделка уведомления не зачислит деньги; повторная доставка
 идемпотентна. Локально `YOOKASSA_RETURN_URL` — `https://skillwharf.ru/app/chat`.
 

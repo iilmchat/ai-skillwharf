@@ -5,13 +5,17 @@
 	encode zstd gzip
 	root * /usr/share/caddy
 
-	# CSP. Скрипты — только свои: для inline-скрипта темы в index.html разрешён
+	# CSP. Скрипты — свои: для inline-скрипта темы в index.html разрешён
 	# конкретный SHA-256. Inline-стили нужны Tailwind и Framer Motion, шрифты
 	# подключаются напрямую с Google Fonts (см. apps/web/index.html).
 	# Если меняете inline-скрипт темы, пересчитайте хеш из собранного
 	# dist/index.html и обновите значение ниже.
+	#
+	# static.cloudflareinsights.com — маячок Web-аналитики, который Cloudflare
+	# вставляет автоматически, когда сайт отдаётся через его прокси (стенд за
+	# Cloudflare Tunnel). Без него браузер пишет CSP-ошибку в консоль.
 	header {
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-iz/bF5fKtrglaZ55SsnG7SlzwL45/hNvOxuZz7sc+iw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://static.cloudflareinsights.com 'sha256-iz/bF5fKtrglaZ55SsnG7SlzwL45/hNvOxuZz7sc+iw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com; media-src 'self' blob:"
 	}
 
 	# Socket.IO: и polling, и WebSocket. reverse_proxy сам пробрасывает
