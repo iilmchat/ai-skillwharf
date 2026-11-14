@@ -54,6 +54,19 @@ describe('provider egress', () => {
     );
   });
 
+  it('разрешает облачный OCR из default allowlist', () => {
+    vi.stubEnv('OUTBOUND_ALLOWLIST', '');
+
+    expect(() =>
+      assertProviderEgress(
+        'https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText',
+      ),
+    ).not.toThrow();
+    expect(() => assertProviderEgress('https://ocr.example.com/recognize')).toThrow(
+      ApiException,
+    );
+  });
+
   it('разрешает локальный Telegram API для тестов/self-hosted', () => {
     vi.stubEnv('OUTBOUND_ALLOWLIST', 'api.telegram.org');
 

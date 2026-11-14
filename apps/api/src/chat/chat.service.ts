@@ -93,7 +93,7 @@ export function normalizeUserRole(role: string | undefined): UserRole {
 }
 
 /** Инструменты, требующие подтверждения по манифестам навыков. */
-function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[] {
+export function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[] {
   const tools = new Set<string>();
 
   for (const skill of skills) {
@@ -112,7 +112,7 @@ function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[] {
 }
 
 /** Цены Pay-per-Outcome по инструментам из манифестов навыков. */
-function resolveOutcomePrices(
+export function resolveOutcomePrices(
   skills: readonly SkillSnapshot[],
 ): Record<string, OutcomePrice> {
   const prices: Record<string, OutcomePrice> = {};

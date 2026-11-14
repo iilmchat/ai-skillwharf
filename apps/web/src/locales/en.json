@@ -342,6 +342,8 @@
     },
     "approval": {
       "title": "Approval pending",
+      "publishTitle": "Publishing an article to Zen",
+      "publish": "Approve publication",
       "body": "The agent paused before an action and is waiting for your confirmation."
     },
     "pending": {
@@ -351,6 +353,8 @@
       "approval": "Approval required",
       "payment": "Payment approval",
       "tools": "Tools: {{tools}}",
+      "approve": "Approve",
+      "approvePublish": "Approve publication",
       "expiresInHours": "{{hours}} h left",
       "expiresInMinutes": "{{minutes}} min left",
       "expired": "The waiting time has expired"
@@ -597,7 +601,72 @@
     "inputWaiting": "Waiting for connection…",
     "send": "Send message",
     "sending": "Sending message",
-    "inputHint": "Press Enter to send.",
+    "inputHint": "Press Enter to send. Attach a document with the button on the left.",
+    "results": {
+      "table": "Table from the agent",
+      "code": "Code block from the agent",
+      "resume": "resume-screener candidate",
+      "summary": "Summary",
+      "skills": "Skills",
+      "experience": "Experience",
+      "education": "Education",
+      "verdict": "Verdict",
+      "match": "Match",
+      "years": "yrs",
+      "score": "Score"
+    },
+    "upload": {
+      "open": "Attach document",
+      "title": "Upload a document",
+      "subtitle": "PDF, PNG, JPEG or WebP up to {{size}} MB.",
+      "dropzone": "Drop a file here or pick one from disk",
+      "choose": "Choose file",
+      "hint": "The file goes to OCR/parser; you can send the result to chat.",
+      "uploading": "Uploading “{{name}}”…",
+      "uploadingPercent": "Uploading “{{name}}” — {{percent}}%",
+      "progressLabel": "Document upload progress",
+      "cancel": "Cancel upload",
+      "close": "Close upload",
+      "another": "Upload another file",
+      "textTitle": "Extracted text",
+      "tablesTitle": "Tables",
+      "emptyText": "No text recognised",
+      "warningsTitle": "Parser warnings",
+      "sendToChat": "Send text to chat",
+      "kinds": {
+        "pdf": "PDF",
+        "image": "Image"
+      },
+      "units": {
+        "byte": "B",
+        "kilobyte": "KB",
+        "megabyte": "MB"
+      },
+      "errors": {
+        "type": "Only PDF, PNG, JPEG and WebP are supported.",
+        "size": "The file is larger than allowed.",
+        "empty": "The file is empty.",
+        "network": "Could not reach the upload server.",
+        "unavailable": "Document upload is not available yet: the POST /documents endpoint is not deployed.",
+        "tooLarge": "The server rejected the file: it is larger than allowed.",
+        "unsupportedType": "The server does not support this file type.",
+        "failed": "Could not upload the document."
+      }
+    },
+    "approval": {
+      "title": "The agent is waiting for approval",
+      "paymentTitle": "The agent is waiting for payment",
+      "body": "Review the result and confirm the action so the agent can continue.",
+      "paymentBody": "The action charges your balance after confirmation.",
+      "toolsLabel": "Tools",
+      "approve": "Approve action",
+      "approveDzen": "Approve publication",
+      "reject": "Reject",
+      "submitting": "Sending decision…",
+      "tools": {
+        "publishToDzen": "Publish an article to Zen"
+      }
+    },
     "tokens": {
       "label": "Tokens",
       "usage": "{{used}} / {{limit}}",

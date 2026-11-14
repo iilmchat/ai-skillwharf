@@ -18,7 +18,12 @@ import {
 } from '../common/api-error.js';
 
 /** Внешний провайдер, к которому относится вызов. */
-export type ProviderName = 'telegram' | 'google' | 'midjourney';
+export type ProviderName =
+  | 'telegram'
+  | 'google'
+  | 'midjourney'
+  | 'ocr'
+  | 'tavily';
 
 /** Политика повторов при 429/5xx/сетевых сбоях. */
 export interface ProviderRetryPolicy {
@@ -243,6 +248,10 @@ function providerLabel(provider: ProviderName): string {
       return 'Telegram';
     case 'midjourney':
       return 'Midjourney';
+    case 'ocr':
+      return 'OCR';
+    case 'tavily':
+      return 'Tavily';
     default:
       return 'Google API';
   }

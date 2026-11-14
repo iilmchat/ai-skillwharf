@@ -7,6 +7,7 @@ import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { ChatModule } from './chat/chat.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
 import { HealthModule } from './health/health.module.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
 import { FinanceModule } from './finance/finance.module.js';
@@ -38,6 +39,7 @@ import { SkillsModule } from './skills/skills.module.js';
     BillingModule,
     IntegrationsModule,
     FinanceModule,
+    DocumentsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -7,19 +7,19 @@ import {
   type FormEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Link,
-  NavLink,
-  useNavigate,
-  useSearchParams,
-} from 'react-router-dom';
+import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
+import { ApprovalPrompt } from '../components/ApprovalPrompt';
+import { DocumentUploader } from '../components/DocumentUploader';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { LedgerHistoryModal } from '../components/LedgerHistoryModal';
 import { LlmProviderBadge } from '../components/LlmProviderBadge';
-import { MessageContent } from '../components/MessageContent';
+import {
+  MessageContent,
+  type MessageContentLabels,
+} from '../components/MessageContent';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TokenUsageWidget } from '../components/TokenUsageWidget';
@@ -31,9 +31,11 @@ import {
 } from '../hooks/useChatSession';
 import { useBalance } from '../hooks/useBalance';
 import { useActiveLlm } from '../hooks/useActiveLlm';
+import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import { useTokenQuota } from '../hooks/useTokenQuota';
 import { ledgerQueryKey } from '../lib/ledger';
 import { normalizeProvider } from '../lib/llm';
+import { pendingApprovalsQueryKey } from '../lib/pending-approvals';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
 
@@ -67,9 +69,11 @@ function getInitial(email: string): string {
 function MessageBubble({
   message,
   isStreaming,
+  labels,
 }: {
   message: ChatMessage;
   isStreaming: boolean;
+  labels: MessageContentLabels;
 }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
@@ -90,6 +94,7 @@ function MessageBubble({
           content={message.content}
           isStreaming={isStreaming}
           imageAltFallback={t('chat.imageAlt')}
+          labels={labels}
         />
       </div>
     </li>
@@ -164,10 +169,14 @@ export function ChatPage() {
     setupError,
     notice,
     noticeTopUp,
+    approval,
     sendMessage,
+    approveAction,
     clearNotice,
     retry,
   } = useChatSession();
+
+  const pendingQuery = usePendingApprovals();
 
   const balanceQuery = useBalance();
   const tokenQuotaQuery = useTokenQuota();
@@ -178,6 +187,7 @@ export function ChatPage() {
   const [draft, setDraft] = useState('');
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [paymentNotice, setPaymentNotice] = useState<
     'success' | 'cancel' | null
   >(() => {
@@ -227,6 +237,15 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages, isSending, isStreaming]);
 
+  // Живое событие HITL не содержит инструментов — за ними идём в REST.
+  useEffect(() => {
+    if (approval !== null) {
+      void queryClient.invalidateQueries({
+        queryKey: pendingApprovalsQueryKey,
+      });
+    }
+  }, [approval, queryClient]);
+
   const status: ConnectionState = isReady
     ? 'online'
     : setupError !== null
@@ -237,6 +256,32 @@ export function ChatPage() {
     conversationId === null
       ? '/app/office'
       : `/app/office?conversationId=${encodeURIComponent(conversationId)}`;
+
+  // Ожидание HITL: список инструментов приходит из REST, причина — ещё и
+  // событием `office_event`, поэтому карточка не мигает между запросами.
+  const activePending = pendingQuery.data?.items.find(
+    (item) => item.conversationId === conversationId,
+  );
+  const isApprovalPending = approval !== null || activePending !== undefined;
+  const approvalReason =
+    approval?.reason ?? activePending?.reason ?? 'approval';
+  const approvalTools = activePending?.tools ?? [];
+
+  const messageLabels: MessageContentLabels = {
+    table: t('chat.results.table'),
+    code: t('chat.results.code'),
+    resume: {
+      resume: t('chat.results.resume'),
+      summary: t('chat.results.summary'),
+      skills: t('chat.results.skills'),
+      experience: t('chat.results.experience'),
+      education: t('chat.results.education'),
+      verdict: t('chat.results.verdict'),
+      match: t('chat.results.match'),
+      years: t('chat.results.years'),
+      score: t('chat.results.score'),
+    },
+  };
 
   function handleLogout() {
     queryClient.clear();
@@ -253,6 +298,33 @@ export function ChatPage() {
 
     sendMessage(draft);
     setDraft('');
+  }
+
+  function toggleUpload(): void {
+    setIsUploadOpen((value) => !value);
+  }
+
+  function closeUpload(): void {
+    setIsUploadOpen(false);
+  }
+
+  function handleApprove(): void {
+    approveAction(true);
+    void queryClient.invalidateQueries({ queryKey: pendingApprovalsQueryKey });
+  }
+
+  function handleReject(): void {
+    approveAction(false);
+    void queryClient.invalidateQueries({ queryKey: pendingApprovalsQueryKey });
+  }
+
+  function handleDocumentText(text: string): void {
+    if (!isReady || isSending || text.trim() === '') {
+      return;
+    }
+
+    sendMessage(text);
+    setIsUploadOpen(false);
   }
 
   return (
@@ -694,9 +766,8 @@ export function ChatPage() {
                     <MessageBubble
                       key={message.id}
                       message={message}
-                      isStreaming={
-                        isStreaming && index === messages.length - 1
-                      }
+                      labels={messageLabels}
+                      isStreaming={isStreaming && index === messages.length - 1}
                     />
                   ))}
                 </ol>
@@ -707,11 +778,58 @@ export function ChatPage() {
             </div>
           </div>
 
+          {isUploadOpen && (
+            <div className="shrink-0 border-t border-outline-variant bg-surface px-4 pt-4 sm:px-6">
+              <div className="mx-auto max-h-[60svh] max-w-3xl overflow-y-auto">
+                <DocumentUploader
+                  onSendToChat={handleDocumentText}
+                  onClose={closeUpload}
+                />
+              </div>
+            </div>
+          )}
+
+          {isApprovalPending && (
+            <div className="shrink-0 border-t border-outline-variant bg-surface px-4 pt-4 sm:px-6">
+              <div className="mx-auto max-w-3xl">
+                <ApprovalPrompt
+                  reason={approvalReason}
+                  tools={approvalTools}
+                  isSubmitting={isSending}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                />
+              </div>
+            </div>
+          )}
+
           <form
             onSubmit={handleSubmit}
             className="shrink-0 border-t border-outline-variant bg-surface px-4 py-4 sm:px-6"
           >
             <div className="mx-auto flex max-w-3xl items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleUpload}
+                aria-label={t('chat.upload.open')}
+                title={t('chat.upload.open')}
+                aria-expanded={isUploadOpen}
+                aria-controls="chat-document-upload"
+                className="grid size-12 shrink-0 place-items-center rounded-xl border border-outline bg-surface-container text-on-surface-variant transition hover:border-primary/40 hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <path d="M20.5 11.5 12 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 18a2 2 0 0 1-3-3l7.5-7.5" />
+                </svg>
+              </button>
               <label htmlFor="chat-message" className="sr-only">
                 {t('chat.messageLabel')}
               </label>

@@ -89,4 +89,34 @@ describe("outbound allowlist", () => {
       ),
     ).toThrow(/OUTBOUND_ALLOWLIST/);
   });
+
+  it("разрешает Tavily для фактчекинга из default allowlist", () => {
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://api.tavily.com/search",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+  });
+
+  it("разрешает облачный OCR и private SDE из default allowlist", () => {
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "http://sde.internal:8080/recognize",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://ocr.example.com/recognize",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).toThrow(/OUTBOUND_ALLOWLIST/);
+  });
 });

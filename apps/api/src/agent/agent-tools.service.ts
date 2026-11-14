@@ -10,6 +10,9 @@ import { GoogleApiService } from '../integrations/google/google-api.service.js';
 import { TelegramBotService } from '../integrations/telegram/telegram-bot.service.js';
 import { TelegramService } from '../integrations/telegram/telegram.service.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
+import { FactCheckerService } from './content/fact-checker.service.js';
+import { ResumeScreenerService } from './content/resume-screener.service.js';
+import { DocumentToolsService } from './documents/document-tools.service.js';
 import { FinanceToolsService } from './finance/finance-tools.service.js';
 import {
   FinanceSnapshotStore,
@@ -25,11 +28,13 @@ import {
   DETECT_PROFIT_LEAKS_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
+  EXTRACT_PDF_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
   GOOGLE_CALENDAR_CREATE_TOOL_NAME,
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   MONITOR_COMPETITOR_PRICES_TOOL_NAME,
+  OCR_DOCUMENT_TOOL_NAME,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
   RUN_WORKFLOW_TOOL_NAME,
@@ -41,15 +46,14 @@ import {
   TOOL_REGISTRY,
   WB_MCP_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
+  WRITE_DOCX_TOOL_NAME,
   type ToolName,
 } from './tools/tool-schemas.js';
 import {
   AuditFraudRiskToolSchema,
   CalculateUnitEconomicsToolSchema,
-  CheckFactsToolSchema,
   DetectProfitLeaksToolSchema,
   ExecToolSchema,
-  ExtractDocumentDataToolSchema,
   GenerateImageToolSchema,
   GoogleCalendarCreateToolSchema,
   GoogleDocsCreateToolSchema,
@@ -59,7 +63,6 @@ import {
   PublishToDzenToolSchema,
   RunWorkflowToolSchema,
   SandboxToolSchema,
-  ScreenResumeToolSchema,
   SendMessageToolSchema,
   WebSearchToolSchema,
 } from './tools/tool-schemas.js';
@@ -131,6 +134,9 @@ export class AgentToolsService {
     private readonly marketplace: MarketplaceMcpService,
     private readonly finance: FinanceToolsService,
     private readonly midjourney: MidjourneyService,
+    private readonly documents: DocumentToolsService,
+    private readonly factChecker: FactCheckerService,
+    private readonly resumeScreener: ResumeScreenerService,
     @Optional() private readonly snapshots?: FinanceSnapshotStore,
   ) {}
 
@@ -165,6 +171,9 @@ export class AgentToolsService {
       [CHECK_FACTS_TOOL_NAME, CHECK_FACTS_TOOL_NAME],
       [SCREEN_RESUME_TOOL_NAME, SCREEN_RESUME_TOOL_NAME],
       [EXTRACT_DOCUMENT_DATA_TOOL_NAME, EXTRACT_DOCUMENT_DATA_TOOL_NAME],
+      [EXTRACT_PDF_TOOL_NAME, EXTRACT_PDF_TOOL_NAME],
+      [WRITE_DOCX_TOOL_NAME, WRITE_DOCX_TOOL_NAME],
+      [OCR_DOCUMENT_TOOL_NAME, OCR_DOCUMENT_TOOL_NAME],
       [
         CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
         CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
@@ -412,23 +421,54 @@ export class AgentToolsService {
         return JSON.stringify(result);
       }
 
-      case CHECK_FACTS_TOOL_NAME:
-        CheckFactsToolSchema.parse(args);
+      case CHECK_FACTS_TOOL_NAME: {
+        // Схема разбирается в сервисе: он же ходит в Tavily.
+        const result = await this.factChecker.check(args);
+
         await options.beforeExecute?.();
 
-        return 'Факты подтверждены.';
+        return result;
+      }
 
-      case SCREEN_RESUME_TOOL_NAME:
-        ScreenResumeToolSchema.parse(args);
+      case SCREEN_RESUME_TOOL_NAME: {
+        const result = this.resumeScreener.screen(args);
+
         await options.beforeExecute?.();
 
-        return 'Кандидат подходит (Score: 85/100).';
+        return result;
+      }
 
-      case EXTRACT_DOCUMENT_DATA_TOOL_NAME:
-        ExtractDocumentDataToolSchema.parse(args);
+      case EXTRACT_DOCUMENT_DATA_TOOL_NAME: {
+        const result = await this.documents.extractDocumentData(args);
+
         await options.beforeExecute?.();
 
-        return '{"amount": "100000", "date": "2026-11-13"}';
+        return result;
+      }
+
+      case EXTRACT_PDF_TOOL_NAME: {
+        const result = await this.documents.extractPdf(args);
+
+        await options.beforeExecute?.();
+
+        return result;
+      }
+
+      case WRITE_DOCX_TOOL_NAME: {
+        const result = await this.documents.writeDocx(args);
+
+        await options.beforeExecute?.();
+
+        return result;
+      }
+
+      case OCR_DOCUMENT_TOOL_NAME: {
+        const result = await this.documents.ocrDocument(args);
+
+        await options.beforeExecute?.();
+
+        return result;
+      }
 
       default:
         throw new Error(`Инструмент «${name}» не найден`);

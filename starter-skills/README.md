@@ -14,6 +14,13 @@
 | `cron-automation` | [`03-automation/cron-automation`](03-automation/cron-automation/SKILL.md) | Регулярные задачи и напоминания через `cron_manager` | Pay-per-Call, 0.05 RUB за вызов | — | `cron_manager` |
 | `skill-vetter` | [`04-security/skill-vetter`](04-security/skill-vetter/SKILL.md) | Аудит навыка на опасные паттерны перед установкой | Free | `filesystem` | `read_file` |
 | `code-runner` | [`05-utility/code-runner`](05-utility/code-runner/SKILL.md) | Выполнение Python/shell-кода в изолированной песочнице | Pay-per-Call, 0.05 RUB за вызов | `shell` | `execute_sandbox_code` |
+| `dzen-article` | [`11-content/dzen-article`](11-content/dzen-article/SKILL.md) | Markdown-черновик статьи для Дзен с HITL и Pay-per-Outcome | Pay-per-Outcome, 100 RUB за статью | `filesystem` | `publish_to_dzen` |
+| `fact-checker` | [`12-content/fact-checker`](12-content/fact-checker/SKILL.md) | Проверка фактов через Tavily и сравнение источников | Pay-per-Call, 30 RUB за проверку | `network` | `check_facts` |
+| `resume-screener` | [`13-hr/resume-screener`](13-hr/resume-screener/SKILL.md) | Разбор резюме и сопоставление с требованиями вакансии | Pay-per-Outcome, 50 RUB за кандидата | — | `screen_resume` |
+| `document-analyzer` | [`14-legal/document-analyzer`](14-legal/document-analyzer/SKILL.md) | Реквизиты договора: суммы, даты, стороны, ИНН/КПП/ОГРН | Pay-per-Outcome, 500 RUB за договор | `filesystem` | `extract_document_data` |
+| `pdf-extractor` | [`16-documents/pdf-extractor`](16-documents/pdf-extractor/SKILL.md) | Текст и таблицы из PDF | Pay-per-Call, 30 RUB за файл | `filesystem` | `extract_pdf` |
+| `docx-writer` | [`16-documents/docx-writer`](16-documents/docx-writer/SKILL.md) | Отчёт в Word (DOCX) | Pay-per-Call, 10 RUB за файл | `filesystem` | `write_docx` |
+| `ocr-smart-engine` | [`16-documents/ocr-smart-engine`](16-documents/ocr-smart-engine/SKILL.md) | Распознавание сканов (Smart Document Engine / Tesseract) | Pay-per-Call, 50 RUB за документ | `filesystem`, `network` | `ocr_document` |
 
 ## Модели монетизации
 
@@ -77,8 +84,8 @@ curl -sS -X DELETE "$API/api/v1/skills/<id>" -H "Authorization: Bearer $TOKEN"
 
 ### Проверка манифестов
 
-Тест `apps/api/src/skills/starter-skills.spec.ts` читает все пять
-`SKILL.md` из этого каталога и валидирует их схемой `SkillManifestSchema`:
+Тест `apps/api/src/skills/starter-skills.spec.ts` читает все `SKILL.md` из
+этого каталога и валидирует их схемой `SkillManifestSchema`:
 
 ```bash
 pnpm --filter api test

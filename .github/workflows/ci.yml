@@ -82,6 +82,9 @@ jobs:
       - name: Test Sandbox Isolation
         run: bash scripts/test-sandbox.sh
 
+      - name: Test Sandbox Documents (OCR, PDF, DOCX)
+        run: bash scripts/test-documents.sh
+
       - name: Test Integration Script (skips without keys)
         run: bash scripts/test-integrations.sh
 

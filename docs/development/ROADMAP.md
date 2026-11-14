@@ -63,9 +63,9 @@
 * [x] Создание документов для 10 треков (A–J).
 * [x] Mock-навыки для интеграции с внешними API (мессенджеры, Google, Midjourney).
 * [x] Реальные MCP-серверы Ozon/WB (KI-011 закрыт).
-* [ ] Реальные Telegram Bot API и Google Workspace → Sprint 18.
-* [ ] Реальные финансы Ozon/WB и Midjourney → Sprint 19.
-* [ ] Реальные PDF/OCR/DOCX, fact-checker, resume-screener → Sprint 20.
+* [x] Реальные Telegram Bot API и Google Workspace → Sprint 18.
+* [x] Реальные финансы Ozon/WB и Midjourney → Sprint 19.
+* [x] Реальные PDF/OCR/DOCX, fact-checker, resume-screener → Sprint 20 (KI-014 закрыт).
 
 ## Спринты 9–13: Production Readiness (закрыты)
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Проверка внешних коннекторов Sprint 19: Ozon, Wildberries, Midjourney.
+# Проверка внешних коннекторов Sprint 19-20: Ozon, Wildberries, Midjourney
+# и OCR (Smart Document Engine).
 #
 #   bash scripts/test-integrations.sh
 #   bash scripts/test-integrations.sh --ozon --wb
@@ -13,6 +14,7 @@
 #   OZON_API_BASE_URL, OZON_API_TEST_PATH
 #   WB_PRICING_API_BASE_URL, WB_API_TEST_PATH
 #   MIDJOURNEY_BASE_URL, MIDJOURNEY_TEST_PATH, MIDJOURNEY_TEST_METHOD
+#   OCR_API_URL, OCR_API_KEY, OCR_API_AUTH_HEADER, OCR_API_AUTH_PREFIX
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -31,11 +33,16 @@ WB_API_TEST_PATH="${WB_API_TEST_PATH:-/ping}"
 MIDJOURNEY_BASE_URL="${MIDJOURNEY_BASE_URL:-https://api.ttapi.io}"
 MIDJOURNEY_TEST_PATH="${MIDJOURNEY_TEST_PATH:-/midjourney/v1/fetch?jobId=test}"
 MIDJOURNEY_TEST_METHOD="${MIDJOURNEY_TEST_METHOD:-GET}"
+OCR_API_URL="${OCR_API_URL:-}"
+OCR_API_KEY="${OCR_API_KEY:-}"
+OCR_API_AUTH_HEADER="${OCR_API_AUTH_HEADER:-Authorization}"
+OCR_API_AUTH_PREFIX="${OCR_API_AUTH_PREFIX:-Bearer}"
 CURL_TIMEOUT="${INTEGRATIONS_CURL_TIMEOUT:-15}"
 
 CHECK_OZON=1
 CHECK_WB=1
 CHECK_MIDJOURNEY=1
+CHECK_OCR=1
 
 usage() {
   cat <<'EOF'
@@ -44,6 +51,7 @@ usage() {
   --ozon          проверить только Ozon
   --wb            проверить только Wildberries
   --midjourney    проверить только Midjourney
+  --ocr           проверить только OCR (Smart Document Engine)
   -h, --help      показать справку
 
 Без опций проверяются все сервисы, у которых заданы ключи.
@@ -54,12 +62,14 @@ if [[ $# -gt 0 ]]; then
   CHECK_OZON=0
   CHECK_WB=0
   CHECK_MIDJOURNEY=0
+  CHECK_OCR=0
 
   for arg in "$@"; do
     case "$arg" in
       --ozon) CHECK_OZON=1 ;;
       --wb) CHECK_WB=1 ;;
       --midjourney) CHECK_MIDJOURNEY=1 ;;
+      --ocr) CHECK_OCR=1 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "FAIL: неизвестная опция $arg" >&2; usage; exit 2 ;;
     esac
@@ -220,10 +230,55 @@ check_midjourney() {
   esac
 }
 
-echo "== Проверка интеграций Sprint 19 =="
+check_ocr() {
+  if [[ $CHECK_OCR -eq 0 ]]; then
+    return
+  fi
+
+  if [[ -z "${OCR_API_URL:-}" ]]; then
+    skip "OCR" "OCR_API_URL (fallback: tesseract в sandbox-образе)"
+    return
+  fi
+
+  local body code auth_value
+  body="$TMP_DIR/ocr.json"
+
+  if [[ -z "${OCR_API_KEY:-}" ]]; then
+    # On-prem SDE может быть без авторизации; облачный API ответит 401.
+    code="$(curl -sS --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' \
+      -X POST "$OCR_API_URL" \
+      -H 'Content-Type: application/json' \
+      -d '{"content":"","mimeType":"image/png","language":"ru"}' || true)"
+  else
+    if [[ -n "${OCR_API_AUTH_PREFIX:-}" ]]; then
+      auth_value="${OCR_API_AUTH_PREFIX} ${OCR_API_KEY}"
+    else
+      auth_value="${OCR_API_KEY}"
+    fi
+
+    code="$(curl -sS --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' \
+      -X POST "$OCR_API_URL" \
+      -H 'Content-Type: application/json' \
+      -H "${OCR_API_AUTH_HEADER}: ${auth_value}" \
+      -d '{"content":"","mimeType":"image/png","language":"ru"}' || true)"
+  fi
+
+  case "$code" in
+    2??) ok "OCR" "HTTP $code, endpoint ${OCR_API_URL}" ;;
+    400|422)
+      ok "OCR" "HTTP $code: ключ принят, тестовое тело отклонено"
+      ;;
+    401|403) fail "OCR" "HTTP $code - ключ/права отклонены API" ;;
+    000) fail "OCR" "сеть/TLS недоступны (${OCR_API_URL})" ;;
+    *) fail "OCR" "HTTP $code: $(body_excerpt "$body")" ;;
+  esac
+}
+
+echo "== Проверка интеграций Sprint 19-20 =="
 check_ozon
 check_wb
 check_midjourney
+check_ocr
 
 echo "== Итог: OK=$PASSED FAIL=$FAILED SKIP=$SKIPPED =="
 

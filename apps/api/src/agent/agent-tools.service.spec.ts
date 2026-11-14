@@ -20,7 +20,9 @@ const createCalendarEvent = vi.fn(async () => ({
   eventId: 'event-1',
   htmlLink: 'https://calendar.google.com/event-1',
 }));
-const getBotToken = vi.fn(async () => 'user-bot-token');
+const getBotToken = vi.fn(
+  async (): Promise<string | null> => 'user-bot-token',
+);
 const unitEconomics = vi.fn(async () => ({
   tool: 'unit-economics' as const,
   marketplace: 'ozon' as const,
@@ -54,30 +56,35 @@ const generateImage = vi.fn(async () => ({
   status: 'completed',
 }));
 
-const service = new AgentToolsService(
-  { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
-  {
-    sendMessage,
-  } as unknown as ConstructorParameters<typeof AgentToolsService>[1],
-  {
-    appendSheetRows,
-    createDocument,
-    createCalendarEvent,
-  } as unknown as ConstructorParameters<typeof AgentToolsService>[2],
-  {
-    getBotToken,
-  } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
-  new MarketplaceMcpService(),
-  {
-    unitEconomics,
-    profitLeaks,
-    priceMonitor,
-    fraudAudit,
-  } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
-  {
-    generate: generateImage,
-  } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
-);
+/** Подменяемые зависимости сервиса инструментов. */
+interface ToolsOverrides {
+  readonly marketplace?: unknown;
+  readonly documents?: unknown;
+  readonly factChecker?: unknown;
+  readonly resumeScreener?: unknown;
+  readonly snapshots?: unknown;
+}
+
+/** Сервис с фиктивными транспортами: бизнес-логика инструментов — в других тестах. */
+function createTools(overrides: ToolsOverrides = {}): AgentToolsService {
+  const args = [
+    { runCommand },
+    { sendMessage },
+    { appendSheetRows, createDocument, createCalendarEvent },
+    { getBotToken },
+    overrides.marketplace ?? new MarketplaceMcpService(),
+    { unitEconomics, profitLeaks, priceMonitor, fraudAudit },
+    { generate: generateImage },
+    overrides.documents ?? {},
+    overrides.factChecker ?? {},
+    overrides.resumeScreener ?? {},
+    overrides.snapshots,
+  ] as unknown as ConstructorParameters<typeof AgentToolsService>;
+
+  return new AgentToolsService(...args);
+}
+
+const service = createTools();
 
 describe('AgentToolsService', () => {
   it('отдаёт базовые инструменты в виде JSON Schema', () => {
@@ -390,25 +397,7 @@ describe('AgentToolsService', () => {
 
 /** Сервис с хранилищем снапшотов: проверяем связку «tool call → дашборд». */
 function serviceWithSnapshots(snapshots: unknown): AgentToolsService {
-  return new AgentToolsService(
-    { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
-    { sendMessage } as unknown as ConstructorParameters<typeof AgentToolsService>[1],
-    {
-      appendSheetRows,
-      createDocument,
-      createCalendarEvent,
-    } as unknown as ConstructorParameters<typeof AgentToolsService>[2],
-    { getBotToken } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
-    new MarketplaceMcpService(),
-    {
-      unitEconomics,
-      profitLeaks,
-      priceMonitor,
-      fraudAudit,
-    } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
-    { generate: generateImage } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
-    snapshots as ConstructorParameters<typeof AgentToolsService>[7],
-  );
+  return createTools({ snapshots });
 }
 
 describe('AgentToolsService: снапшоты финансового дашборда', () => {
@@ -493,24 +482,7 @@ describe('AgentToolsService: ключи провайдеров из БД', () =>
 
   it('ozon/wb MCP передают userId в MarketplaceMcpService', async () => {
     const call = vi.fn(async () => '{"result":[]}');
-    const tools = new AgentToolsService(
-      { runCommand } as unknown as ConstructorParameters<typeof AgentToolsService>[0],
-      { sendMessage } as unknown as ConstructorParameters<typeof AgentToolsService>[1],
-      {
-        appendSheetRows,
-        createDocument,
-        createCalendarEvent,
-      } as unknown as ConstructorParameters<typeof AgentToolsService>[2],
-      { getBotToken } as unknown as ConstructorParameters<typeof AgentToolsService>[3],
-      { call } as unknown as ConstructorParameters<typeof AgentToolsService>[4],
-      {
-        unitEconomics,
-        profitLeaks,
-        priceMonitor,
-        fraudAudit,
-      } as unknown as ConstructorParameters<typeof AgentToolsService>[5],
-      { generate: generateImage } as unknown as ConstructorParameters<typeof AgentToolsService>[6],
-    );
+    const tools = createTools({ marketplace: { call } });
 
     await tools.execute(
       'ozon_mcp_call',
@@ -524,5 +496,152 @@ describe('AgentToolsService: ключи провайдеров из БД', () =>
       {},
       expect.objectContaining({ userId: 'user-1' }),
     );
+  });
+});
+
+describe('AgentToolsService: документы и контент', () => {
+  const extractPdf = vi.fn(async () => '{"tool":"pdf-extractor"}');
+  const writeDocx = vi.fn(async () => '{"tool":"docx-writer"}');
+  const ocrDocument = vi.fn(async () => '{"tool":"ocr-smart-engine"}');
+  const extractDocumentData = vi.fn(async () => '{"tool":"document-analyzer"}');
+  const check = vi.fn(async () => '{"tool":"fact-checker"}');
+  const screen = vi.fn(() => '{"tool":"resume-screener"}');
+  const tools = createTools({
+    documents: { extractPdf, writeDocx, ocrDocument, extractDocumentData },
+    factChecker: { check },
+    resumeScreener: { screen },
+  });
+
+  it('extract_pdf/write_docx/ocr_document/extract_document_data делегируют в сервис', async () => {
+    await tools.execute('extract_pdf', { path: 'contract.pdf' });
+    await tools.execute('write_docx', {
+      title: 'Отчёт',
+      blocks: [{ type: 'paragraph', text: 'x' }],
+    });
+    await tools.execute('ocr_document', { path: 'scan.png' });
+    await tools.execute('extract_document_data', {
+      documentText: 'Договор на 100000 руб.',
+    });
+
+    expect(extractPdf).toHaveBeenCalledWith({ path: 'contract.pdf' });
+    expect(writeDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Отчёт' }),
+    );
+    expect(ocrDocument).toHaveBeenCalledWith({ path: 'scan.png' });
+    expect(extractDocumentData).toHaveBeenCalledWith({
+      documentText: 'Договор на 100000 руб.',
+    });
+  });
+
+  it('check_facts и screen_resume делегируют в сервисы', async () => {
+    await tools.execute('check_facts', { text: 'Земля круглая' });
+    await tools.execute('screen_resume', { resumeText: 'Опыт 5 лет' });
+
+    expect(check).toHaveBeenCalledWith({ text: 'Земля круглая' });
+    expect(screen).toHaveBeenCalledWith({ resumeText: 'Опыт 5 лет' });
+  });
+
+  it('check_facts списывает Pay-per-Call только после успешного ответа', async () => {
+    const order: string[] = [];
+    const beforeExecute = vi.fn(async () => {
+      order.push('charge');
+    });
+
+    check.mockImplementationOnce(async () => {
+      order.push('search');
+
+      return '{"tool":"fact-checker"}';
+    });
+
+    const result = await tools.execute(
+      'check_facts',
+      { text: 'Выручка выросла на 25%' },
+      { beforeExecute },
+    );
+
+    expect(order).toEqual(['search', 'charge']);
+    expect(JSON.parse(result)).toMatchObject({ tool: 'fact-checker' });
+  });
+
+  it('ошибка проверки фактов не списывает средства', async () => {
+    const beforeExecute = vi.fn(async () => undefined);
+
+    check.mockRejectedValueOnce(new Error('Tavily down'));
+
+    await expect(
+      tools.execute('check_facts', { text: 'x' }, { beforeExecute }),
+    ).rejects.toThrow('Tavily down');
+    expect(beforeExecute).not.toHaveBeenCalled();
+  });
+
+  it('экспортирует новые инструменты в дескрипторах для LLM', () => {
+    const manifest = (name: string, tools: string[], permissions: string[]) => ({
+      name,
+      version: '1.0.0',
+      description: name,
+      author: { name: 'SkillWharf Team' },
+      permissions,
+      dependencies: { tools },
+    });
+    const descriptors = tools.buildDescriptors([
+      {
+        id: 's1',
+        name: 'pdf-extractor',
+        manifest: manifest('pdf-extractor', ['extract_pdf'], ['filesystem']),
+        isEnabled: true,
+      },
+      {
+        id: 's2',
+        name: 'docx-writer',
+        manifest: manifest('docx-writer', ['write_docx'], ['filesystem']),
+        isEnabled: true,
+      },
+      {
+        id: 's3',
+        name: 'ocr-smart-engine',
+        manifest: manifest('ocr-smart-engine', ['ocr_document'], [
+          'filesystem',
+          'network',
+        ]),
+        isEnabled: true,
+      },
+      {
+        id: 's4',
+        name: 'fact-checker',
+        manifest: manifest('fact-checker', ['check_facts'], ['network']),
+        isEnabled: true,
+      },
+      {
+        id: 's5',
+        name: 'resume-screener',
+        manifest: manifest('resume-screener', ['screen_resume'], []),
+        isEnabled: true,
+      },
+      {
+        id: 's6',
+        name: 'document-analyzer',
+        manifest: manifest('document-analyzer', ['extract_document_data'], [
+          'filesystem',
+        ]),
+        isEnabled: true,
+      },
+    ]);
+    const names = descriptors.map((descriptor) => descriptor.name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'extract_pdf',
+        'write_docx',
+        'ocr_document',
+        'check_facts',
+        'screen_resume',
+        'extract_document_data',
+      ]),
+    );
+    // JSON Schema инструментов строится без ошибок и без $schema.
+    for (const descriptor of descriptors) {
+      expect(descriptor.parameters.$schema).toBeUndefined();
+      expect(descriptor.parameters.type).toBe('object');
+    }
   });
 });

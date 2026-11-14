@@ -1,5 +1,24 @@
 import { z } from 'zod';
+import {
+  CheckFactsToolSchema,
+  ScreenResumeToolSchema,
+} from '../content/content.schemas.js';
+import {
+  ExtractDocumentDataToolSchema,
+  ExtractPdfToolSchema,
+  OcrDocumentToolSchema,
+  WriteDocxToolSchema,
+} from '../documents/document-tools.schemas.js';
 import { mcpToolCallSchema } from './mcp-gateway.js';
+
+export {
+  CheckFactsToolSchema,
+  ExtractDocumentDataToolSchema,
+  ExtractPdfToolSchema,
+  OcrDocumentToolSchema,
+  ScreenResumeToolSchema,
+  WriteDocxToolSchema,
+};
 
 /** Имя инструмента песочницы, которым LLM может вызвать выполнение кода. */
 export const SANDBOX_TOOL_NAME = 'execute_sandbox_code';
@@ -204,29 +223,41 @@ export const AuditFraudRiskToolSchema = z.object({
   sellerId: z.string().optional().describe('shop_id продавца'),
 });
 
-/** Mock-инструмент проверки фактов. */
+/** Инструмент извлечения текста и таблиц из PDF. */
+export const EXTRACT_PDF_TOOL_NAME = 'extract_pdf';
+export const EXTRACT_PDF_TOOL_DESCRIPTION =
+  'Извлекает текст и таблицы из PDF: разбирает страницы, шрифты и ToUnicode, возвращает текст, таблицы и предупреждения';
+export const ExtractPdfSchema = ExtractPdfToolSchema;
+
+/** Инструмент генерации DOCX. */
+export const WRITE_DOCX_TOOL_NAME = 'write_docx';
+export const WRITE_DOCX_TOOL_DESCRIPTION =
+  'Создаёт документ Word (DOCX) с заголовками, абзацами, списками и таблицами и возвращает путь к файлу';
+export const WriteDocxSchema = WriteDocxToolSchema;
+
+/** Инструмент OCR сканов. */
+export const OCR_DOCUMENT_TOOL_NAME = 'ocr_document';
+export const OCR_DOCUMENT_TOOL_DESCRIPTION =
+  'Распознаёт текст на изображении через Smart Document Engine (или Tesseract в песочнице) и возвращает текст и движок';
+export const OcrDocumentSchema = OcrDocumentToolSchema;
+
+/** Инструмент проверки фактов по внешним источникам. */
 export const CHECK_FACTS_TOOL_NAME = 'check_facts';
 export const CHECK_FACTS_TOOL_DESCRIPTION =
-  'Проверяет факты в тексте (заглушка)';
-export const CheckFactsToolSchema = z.object({
-  text: z.string().describe('Текст для проверки'),
-});
+  'Проверяет утверждения в тексте: ищет источники через Tavily, сравнивает их между собой и возвращает вердикт по каждому утверждению';
+export const CheckFactsSchema = CheckFactsToolSchema;
 
-/** Mock-инструмент скрининга резюме. */
+/** Инструмент скрининга резюме. */
 export const SCREEN_RESUME_TOOL_NAME = 'screen_resume';
 export const SCREEN_RESUME_TOOL_DESCRIPTION =
-  'Оценивает резюме кандидата (заглушка)';
-export const ScreenResumeToolSchema = z.object({
-  resumeText: z.string().describe('Текст резюме'),
-});
+  'Разбирает резюме (контакты, навыки, опыт, образование) и сопоставляет его с требованиями вакансии без вымышленных оценок';
+export const ScreenResumeSchema = ScreenResumeToolSchema;
 
-/** Mock-инструмент извлечения данных из документа. */
+/** Инструмент извлечения реквизитов документа. */
 export const EXTRACT_DOCUMENT_DATA_TOOL_NAME = 'extract_document_data';
 export const EXTRACT_DOCUMENT_DATA_TOOL_DESCRIPTION =
-  'Извлекает сумму и дату из договора (заглушка)';
-export const ExtractDocumentDataToolSchema = z.object({
-  documentText: z.string().describe('Текст документа'),
-});
+  'Извлекает реквизиты договора из текста или файла (PDF, DOCX, TXT, скан): суммы, даты, стороны, номер, ИНН/КПП/ОГРН и подписанта';
+export const ExtractDocumentDataSchema = ExtractDocumentDataToolSchema;
 
 /** Запрос к Tavily через песочницу. */
 export const TAVILY_SEARCH_COMMAND =
@@ -306,15 +337,27 @@ export const TOOL_REGISTRY = {
   },
   [CHECK_FACTS_TOOL_NAME]: {
     description: CHECK_FACTS_TOOL_DESCRIPTION,
-    schema: CheckFactsToolSchema,
+    schema: CheckFactsSchema,
   },
   [SCREEN_RESUME_TOOL_NAME]: {
     description: SCREEN_RESUME_TOOL_DESCRIPTION,
-    schema: ScreenResumeToolSchema,
+    schema: ScreenResumeSchema,
   },
   [EXTRACT_DOCUMENT_DATA_TOOL_NAME]: {
     description: EXTRACT_DOCUMENT_DATA_TOOL_DESCRIPTION,
-    schema: ExtractDocumentDataToolSchema,
+    schema: ExtractDocumentDataSchema,
+  },
+  [EXTRACT_PDF_TOOL_NAME]: {
+    description: EXTRACT_PDF_TOOL_DESCRIPTION,
+    schema: ExtractPdfSchema,
+  },
+  [WRITE_DOCX_TOOL_NAME]: {
+    description: WRITE_DOCX_TOOL_DESCRIPTION,
+    schema: WriteDocxSchema,
+  },
+  [OCR_DOCUMENT_TOOL_NAME]: {
+    description: OCR_DOCUMENT_TOOL_DESCRIPTION,
+    schema: OcrDocumentSchema,
   },
 } as const;
 

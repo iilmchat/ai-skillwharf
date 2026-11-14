@@ -3,11 +3,11 @@ import { z } from "zod";
 /**
  * Домены, которые разрешены для исходящих HTTP-запросов API и llm-worker.
  *
- * Список нужен для интеграций Sprint 18–19: Telegram Bot API, Google Workspace
+ * Список нужен для интеграций Sprint 18–20: Telegram Bot API, Google Workspace
  * OAuth/API, Midjourney через TTAPI, Ozon Performance API и WB Pricing API,
- * а также LLM-провайдеры, которые вызывает worker. Локальные адреса
- * (LM Studio, Ollama, compose-сервисы) считаются private и проходят без
- * allowlist, но только по http.
+ * фактчекинг Tavily, облачный OCR (Yandex Vision), а также LLM-провайдеры,
+ * которые вызывает worker. Локальные адреса (LM Studio, Ollama, on-prem SDE,
+ * compose-сервисы) считаются private и проходят без allowlist.
  */
 export const DEFAULT_OUTBOUND_ALLOWLIST: readonly string[] = [
   "api.telegram.org",
@@ -18,6 +18,8 @@ export const DEFAULT_OUTBOUND_ALLOWLIST: readonly string[] = [
   "api.ttapi.io",
   "api-performance.ozon.ru",
   "discounts-prices-api.wildberries.ru",
+  "api.tavily.com",
+  "ocr.api.cloud.yandex.net",
   "llm.api.cloud.yandex.net",
   "iam.api.cloud.yandex.net",
   "ngw.devices.sberbank.ru",

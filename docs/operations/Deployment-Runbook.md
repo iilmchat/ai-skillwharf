@@ -1431,6 +1431,142 @@ LLM_WORKER_OUTBOUND_ALLOWLIST=api.telegram.org,www.googleapis.com,oauth2.googlea
 
 Egress — прикладной allowlist, не замена NetworkPolicy (KI-052).
 
+## 21. Документы: OCR, PDF и DOCX
+
+### 21.1. Переменные окружения
+
+| Переменная | Назначение |
+| --- | --- |
+| `OCR_API_URL` | Полный URL эндпоинта распознавания (SDE или совместимый API). Пусто — только Tesseract |
+| `OCR_API_KEY` | Ключ или IAM-токен провайдера; в логи не попадает |
+| `OCR_API_AUTH_HEADER` | Заголовок авторизации, по умолчанию `Authorization` |
+| `OCR_API_AUTH_PREFIX` | Префикс схемы, по умолчанию `Bearer`; пусто — ключ без префикса |
+| `OCR_API_TIMEOUT_MS` | Таймаут одного HTTP-запроса, по умолчанию 60000 |
+| `OCR_MAX_POLL_ATTEMPTS`, `OCR_POLL_INTERVAL_MS` | Опрос асинхронной задачи: 10 попыток по 2000 мс |
+| `OCR_TESSERACT_ENABLED` | `true` — разрешить локальный fallback, `false` — только облачный OCR |
+| `OCR_TESSERACT_LANG` | Языки Tesseract, по умолчанию `rus+eng` |
+| `OCR_MAX_IMAGE_BYTES` | Лимит входного изображения, по умолчанию 8 МБ |
+
+Переменные читает `OcrSmartEngineService`
+(`apps/api/src/agent/documents/ocr-smart-engine.service.ts`); те же значения
+переданы в сервис `api` в `docker-compose.yml`. Это и есть аналоги
+`SDE_BASE_URL`/`SDE_API_KEY`: сервис читает только `OCR_*`, отдельные `SDE_*`
+не используются. В `.env` переменные можно не задавать: пустой `OCR_API_URL`
+включает Tesseract, а пустой `OCR_API_KEY` допустим для on-prem SDE без
+авторизации.
+
+### 21.2. Как получить ключи
+
+**On-prem Smart Document Engine (рекомендуется для документов).**
+
+1. Запросите у вендора (Smart Engines) серверную лицензию SDE и установите
+   сервер в приватной сети.
+2. Зафиксируйте URL распознавания, например
+   `http://sde.internal:8080/recognize`, и схему авторизации из документации
+   поставки.
+3. Задайте в `.env`:
+
+   ```text
+   OCR_API_URL=http://sde.internal:8080/recognize
+   OCR_API_KEY=<ключ из поставки>
+   OCR_API_AUTH_HEADER=Authorization
+   OCR_API_AUTH_PREFIX=Bearer
+   OCR_TESSERACT_ENABLED=true
+   ```
+
+Приватный адрес (`sde.internal`, RFC1918) проходит egress без allowlist.
+Если SDE опубликован через внешний домен — добавьте его в
+`API_OUTBOUND_ALLOWLIST`.
+
+**Облачный Yandex Vision OCR.**
+
+1. В Yandex Cloud создайте сервисный аккаунт с ролью `ai.vision.user` и
+   выпустите IAM-токен (или используйте API-ключ, если он поддержан тарифом).
+2. Узнайте `folderId` каталога.
+3. Задайте:
+
+   ```text
+   OCR_API_URL=https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText
+   OCR_API_KEY=<IAM-токен>
+   OCR_API_AUTH_HEADER=Authorization
+   OCR_API_AUTH_PREFIX=Bearer
+   ```
+
+Домен `ocr.api.cloud.yandex.net` уже в `DEFAULT_OUTBOUND_ALLOWLIST`,
+`API_OUTBOUND_ALLOWLIST` и `LLM_WORKER_OUTBOUND_ALLOWLIST`. Текущий адаптер
+не отправляет обязательный для Yandex Vision заголовок `x-folder-id` и
+передаёт `language` вместо `languageCodes` (см. KI-071): без прокси, который
+исправляет запрос, облачный путь вернёт 400/403 и уйдёт в Tesseract. Для
+боевого облачного OCR нужен либо прокси, либо доработка адаптера.
+
+**Локальный Tesseract (без ключей).**
+
+Ничего получать не нужно: `tesseract-ocr` и языковые данные `rus`/`eng`
+входят в образ `skillwharf-sandbox`. Оставьте `OCR_API_URL` пустым и
+`OCR_TESSERACT_ENABLED=true`. Fallback выполняется в песочнице под лимитами
+навыка: 10 с, 128 МБ памяти, 0.5 CPU, без сети.
+
+### 21.3. Egress
+
+* облачный OCR — только `https` и только домен из allowlist;
+* on-prem SDE — private-хост, allowlist не требуется;
+* при смене облачного провайдера добавьте его FQDN в
+  `API_OUTBOUND_ALLOWLIST` и `LLM_WORKER_OUTBOUND_ALLOWLIST`
+  (`.env`/`docker-compose.yml`) и в `DEFAULT_OUTBOUND_ALLOWLIST`
+  (`packages/shared/src/outbound.ts`).
+
+Проверка allowlist закреплена тестами `packages/shared/src/outbound.test.ts`
+и `apps/api/src/integrations/provider-http.spec.ts`.
+
+### 21.4. Как проверить
+
+1. Проверка ключа без распознавания документа (ключ не печатается):
+
+   ```bash
+   bash scripts/test-integrations.sh --ocr
+   ```
+
+   2xx или 400/422 — ключ принят (тестовое тело с пустым `content`
+   отклонено); 401/403 — ключ или права неверны; 000 — нет сети/TLS.
+
+2. Проверка инструментов в образе песочницы:
+
+   ```bash
+   bash scripts/test-documents.sh
+   ```
+
+   Скрипт собирает `skillwharf-sandbox`, запускает контейнер с теми же
+   ограничениями, что у навыка (read-only rootfs, uid 65534, tmpfs `/tmp`,
+   без сети, 128 МБ, seccomp), и проверяет цепочки
+   PDF → `pdftotext` → `pdftoppm` → `tesseract` и
+   Markdown → `pandoc` → DOCX.
+
+3. Ручная проверка Tesseract:
+
+   ```bash
+   docker run --rm --network none --read-only --cap-drop ALL \
+     --user 65534:65534 --tmpfs /tmp --memory 128m \
+     -v "$PWD/sample.png:/tmp/sample.png:ro" \
+     skillwharf-sandbox:latest \
+     tesseract /tmp/sample.png stdout -l rus+eng
+   ```
+
+4. Проверка в чате: загрузите PDF/PNG в панель документов или вызовите
+   `ocr_document`; при пустом `OCR_API_URL` в ответе будет текст Tesseract,
+   при заданном — текст облачного OCR. Ошибка конфигурации — 503
+   `errors.provider_not_configured`, недоступность провайдера — 502
+   `errors.provider_unavailable`.
+
+### 21.5. Ограничения
+
+* Tesseract в песочнице ограничен 10 с и 128 МБ — большие сканы
+  распознавайте постранично (KI-068).
+* Собственный PDF-парсер не поддерживает шифрование и редкие фильтры,
+  `write_docx` не делает `numbering.xml` (KI-069).
+* `pandoc` в образе нужен навыкам и smoke-тесту; инструмент `write_docx`
+  собирает OOXML через `adm-zip` и от `pandoc` не зависит.
+* Образ вырос до ~624 МБ из-за `pandoc` и языков Tesseract (KI-072).
+
 ## 18. Интеграции: Telegram и Google Workspace
 
 ### 18.1. Переменные окружения

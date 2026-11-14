@@ -7,6 +7,11 @@
 # поднимает bridge + NET_ADMIN и запускает root-entrypoint, который разрешает
 # только IP из FQDN-allowlist, ставит DROP-политику и сбрасывает права до 65534.
 # musl-utils — getent для резолва allowlist, bind-tools — fallback (nslookup).
+#
+# Документы (Sprint 20): tesseract-ocr — локальный OCR-fallback, когда нет
+# ключа облачного SDE; poppler-utils — pdftotext/pdfinfo/pdftoppm для PDF;
+# pandoc — генерация DOCX из Markdown/HTML. LibreOffice не ставим: +578 МБ
+# на образ ради конвертации, которая не нужна для DOCX.
 FROM alpine:3.20
 
 RUN apk add --no-cache \
@@ -19,7 +24,18 @@ RUN apk add --no-cache \
     iptables \
     su-exec \
     musl-utils \
-    bind-tools
+    bind-tools \
+    tesseract-ocr \
+    tesseract-ocr-data-rus \
+    tesseract-ocr-data-eng \
+    poppler-utils \
+    pandoc-cli \
+    font-dejavu
+
+# fontconfig (pdftoppm/pandoc) пишет кэш шрифтов в $XDG_CACHE_HOME; rootfs
+# read-only, поэтому кэш направляем в tmpfs /tmp, иначе pdftoppm сыплет
+# «Fontconfig error: No writable cache directories».
+ENV XDG_CACHE_HOME=/tmp/.cache
 
 COPY egress-setup.sh /usr/local/bin/sandbox-egress-setup.sh
 RUN chmod 0755 /usr/local/bin/sandbox-egress-setup.sh

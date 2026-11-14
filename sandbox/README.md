@@ -8,15 +8,25 @@ hardened Docker-контейнер; целевой бэкенд — Firecracker 
 
 | Путь | Назначение |
 | --- | --- |
-| `Dockerfile` | Образ `skillwharf-sandbox` с `curl`, `jq`, `gh`, `bash`, `python3` и `pip` |
+| `Dockerfile` | Образ `skillwharf-sandbox` с `curl`, `jq`, `gh`, `bash`, `python3`, `pip`, `tesseract`, `pdftotext` и `pandoc` |
 | `docker-compose.sandbox.yml` | Описание сервиса `sandbox-runner` (лимиты и изоляция) |
 | `seccomp-profile.json` | Default-deny seccomp-профиль для контейнеров `sandbox-worker` |
 | `egress-setup.sh` | Root-entrypoint: FQDN-allowlist в iptables, DNS только для root, `/etc/hosts`, строгий ip6tables, запуск кода от uid 65534 |
 | `scripts/test-sandbox.sh` | Скрипт проверки изоляции |
+| `scripts/test-documents.sh` | Smoke-тест документов: Tesseract, `pdftotext`/`pdftoppm`, `pandoc` |
 
 Образ собирается из `sandbox/Dockerfile` на базе `alpine:3.20`. Утилиты нужны
 навыкам, которые обращаются к внешним API (например, `tavily-search` и
-`github`). API запускает контейнеры с образом `skillwharf-sandbox:latest`;
+`github`), и документам Sprint 20:
+
+- `tesseract-ocr` + `tesseract-ocr-data-rus`/`eng` — локальный OCR-fallback,
+  когда `OCR_API_URL` не задан или облачный OCR недоступен;
+- `poppler-utils` — `pdftotext`, `pdfinfo`, `pdftoppm` для извлечения текста и
+  растеризации PDF перед OCR;
+- `pandoc` — генерация DOCX из Markdown/HTML (`pandoc report.md -o report.docx`).
+
+LibreOffice в образ не включён: пакет добавляет ~578 МБ, а для DOCX достаточно
+`pandoc`. API запускает контейнеры с образом `skillwharf-sandbox:latest`;
 переопределить образ можно переменной `SANDBOX_IMAGE`.
 
 ## Требования
@@ -55,6 +65,9 @@ docker compose -f docker-compose.sandbox.yml run --rm sandbox-runner sh
 4. Под `seccomp-profile.json` работают bash, curl, jq, gh, Python и Node.js/V8.
 5. Опасные сисколлы (`ptrace`, `mount`, `unshare`, `bpf` и др.) возвращают `EPERM`.
 6. В образе есть `iptables`, `su-exec` и entrypoint `sandbox-egress-setup.sh`.
+
+Отдельный `scripts/test-documents.sh` проверяет `tesseract`, `pdftotext`,
+`pandoc` и полный цикл PDF → текст → изображение → OCR под теми же лимитами.
 
 ## Ограничения сервиса
 
@@ -141,5 +154,5 @@ entrypoint-а в dev); неразрешённые домены не резолв
 - профилей seccomp для arm64: текущий файл рассчитан на linux/amd64 (см.
   KI-026).
 
-В CI шаг `Test Sandbox Isolation` запускает `scripts/test-sandbox.sh` и
-проверяет изоляцию контейнера.
+В CI шаги `Test Sandbox Isolation` и `Test Sandbox Documents (OCR, PDF,
+DOCX)` запускают `scripts/test-sandbox.sh` и `scripts/test-documents.sh`.

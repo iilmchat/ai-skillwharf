@@ -32,6 +32,9 @@ const STARTER_SKILLS = [
   '15-finance/profit-leak-detector/SKILL.md',
   '15-finance/price-monitor/SKILL.md',
   '15-finance/fraud-shield-audit/SKILL.md',
+  '16-documents/pdf-extractor/SKILL.md',
+  '16-documents/docx-writer/SKILL.md',
+  '16-documents/ocr-smart-engine/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

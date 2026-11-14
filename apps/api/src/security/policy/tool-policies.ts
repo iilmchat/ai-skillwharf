@@ -1,5 +1,15 @@
 import type { SkillPermission } from '@skillwharf/shared';
 import { z } from 'zod';
+import {
+  CheckFactsToolSchema as CheckFactsSchema,
+  ScreenResumeToolSchema as ScreenResumeSchema,
+} from '../../agent/content/content.schemas.js';
+import {
+  ExtractDocumentDataToolSchema as ExtractDocumentDataSchema,
+  ExtractPdfToolSchema as ExtractPdfSchema,
+  OcrDocumentToolSchema as OcrDocumentSchema,
+  WriteDocxToolSchema as WriteDocxSchema,
+} from '../../agent/documents/document-tools.schemas.js';
 import type { UserRole } from './policy.types.js';
 
 /**
@@ -348,7 +358,7 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   },
   check_facts: {
     name: 'check_facts',
-    schema: z.object({ text: text(20_000) }).strict(),
+    schema: CheckFactsSchema,
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
@@ -357,7 +367,7 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   },
   screen_resume: {
     name: 'screen_resume',
-    schema: z.object({ resumeText: text(50_000) }).strict(),
+    schema: ScreenResumeSchema,
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,
@@ -366,7 +376,35 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   },
   extract_document_data: {
     name: 'extract_document_data',
-    schema: z.object({ documentText: text(100_000) }).strict(),
+    schema: ExtractDocumentDataSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'none',
+    allowedRoles: ALL_ROLES,
+  },
+  // --- Документы (Sprint 20): файлы берутся из DOCUMENTS_INPUT_DIR, сети нет -
+  extract_pdf: {
+    name: 'extract_pdf',
+    schema: ExtractPdfSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'none',
+    allowedRoles: ALL_ROLES,
+  },
+  write_docx: {
+    name: 'write_docx',
+    schema: WriteDocxSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'none',
+    allowedRoles: ALL_ROLES,
+  },
+  ocr_document: {
+    name: 'ocr_document',
+    schema: OcrDocumentSchema,
     requiredPermission: null,
     egress: 'none',
     egressRequested: false,

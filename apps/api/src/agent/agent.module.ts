@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module.js';
 import { ChatPersistenceModule } from '../chat/persistence/persistence.module.js';
+import { DocumentsModule } from '../documents/documents.module.js';
 import { ProvidersModule } from '../integrations/providers.module.js';
 import { SandboxModule } from '../sandbox/sandbox.module.js';
 import { SecurityModule } from '../security/security.module.js';
 import { AgentInternalController } from './agent-internal.controller.js';
 import { AgentRuntimeService } from './agent-runtime.service.js';
 import { AgentToolsService } from './agent-tools.service.js';
+import { FactCheckerService } from './content/fact-checker.service.js';
+import { ResumeScreenerService } from './content/resume-screener.service.js';
 import { FinanceDataService } from './finance/finance-data.service.js';
 import {
   FINANCE_SNAPSHOT_REDIS_URL,
@@ -21,6 +24,9 @@ import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 /**
  * Agent Gateway: инструменты, policy/billing-мост для llm-worker и
  * внутренние эндпоинты worker → API.
+ *
+ * Документные сервисы (`DocumentToolsService`, `OcrSmartEngineService`)
+ * приходят из `DocumentsModule`: тот же OCR обслуживает upload-маршрут UI.
  */
 @Module({
   imports: [
@@ -29,6 +35,7 @@ import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
     SandboxModule,
     ChatPersistenceModule,
     ProvidersModule,
+    DocumentsModule,
   ],
   controllers: [AgentInternalController],
   providers: [
@@ -40,6 +47,8 @@ import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
     FinanceDataService,
     FinanceToolsService,
     MidjourneyService,
+    FactCheckerService,
+    ResumeScreenerService,
     {
       // Redis общий для реплик API; без него снапшоты живут в памяти.
       provide: FINANCE_SNAPSHOT_REDIS_URL,

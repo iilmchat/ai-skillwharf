@@ -4,6 +4,137 @@
 
 ## [Unreleased]
 
+### Sprint 20: Documents UI, agent results & dzen HITL
+
+- В чате появилась загрузка документов: кнопка-скрепка открывает панель с
+  drag-and-drop и выбором файла (PDF, PNG, JPEG, WebP до 15 МБ). Файл
+  проверяется Zod-схемой до отправки (тип, пустой файл, лимит), загрузка
+  идёт в `POST /api/v1/documents` с прогрессом из `onUploadProgress`
+  (100% — только после ответа сервера), отменяется по кнопке и не теряет
+  выбранный файл.
+- Контракт `POST /documents` описан в `apps/web/src/lib/documents.ts`:
+  `{ id, filename, mimeType, size, kind?, text?, pages?[], tables?[],
+  warnings?[], createdAt? }`. Схема терпимая: плоский `text` или
+  постраничный `pages[].text`, таблицы с `columns` и без них, `kind`
+  выводится из MIME. Ошибки различаются по категориям: 404/405/501 —
+  «эндпоинт не выкачен» (KI-065), 413 — размер, 415 — тип, без ответа —
+  сеть.
+- Результат разбора показывается в панели: извлечённый текст, таблицы,
+  предупреждения парсера и кнопка «Отправить текст в чат» (текст плюс
+  таблицы в Markdown).
+- Ответы агентов рендерятся по разметке (`lib/message-blocks.ts`):
+  pipe-таблицы — настоящими таблицами с горизонтальным скроллом, fence с
+  языком — блоком кода с подписью, JSON `resume-screener` — карточками
+  кандидата (навыки, опыт, образование, скор и вердикт). Незакрытый fence
+  во время стрима остаётся текстом, разметка экранируется, произвольный
+  HTML не исполняется.
+- HITL для `dzen-article`: если агент остановился на `publish_to_dzen`,
+  в чате появляется карточка «Одобрить публикацию» / «Отклонить»; в
+  AI-Офисе так же подписаны кнопки в карточке агента и в списке ожиданий.
+  Решение отправляется событием `approve_action`, ответ приходит потоком
+  как обычное сообщение агента, список ожиданий инвалидируется.
+- i18n RU/EN: новые разделы `chat.upload`, `chat.results`, `chat.approval`,
+  `office.pending.approve*`, `office.approval.publish*`.
+- Тесты: `documents.test.ts` (27), `message-blocks.test.ts` (11),
+  `resume.test.ts` (6), `approval.test.ts` (2), `MessageContent.test.ts`
+  (+3 кейса на таблицу, код и карточки резюме).
+- Остатки: маршрута `POST /documents` в API пока нет (KI-065); формат
+  результата агента остаётся договорённостью UI (KI-066), а инструмент
+  HITL известен только из `GET /chat/pending` (KI-067).
+
+### Sprint 20: реальные документы, OCR, фактчекинг и скрининг (KI-014)
+
+- `extract_pdf` (`pdf-extractor`) разбирает PDF без внешних бинарников
+  (`apps/api/src/agent/documents/pdf-text.ts`): объекты и потоки
+  `/FlateDecode`, object streams PDF 1.5+ (`/Type /ObjStm`), дерево страниц,
+  операторы `BT/ET/Tf/Td/TD/Tm/T*/Tj/TJ/'/"`, `ToUnicode` CMap (кириллица) и
+  WinAnsi, строки/таблицы по геометрии колонок. Возвращает постраничный текст,
+  таблицы, метаданные и `warnings` (шифрование, неподдержанный фильтр, лимит
+  страниц).
+- `write_docx` (`docx-writer`) собирает валидный OOXML-пакет (Content Types,
+  `document.xml`, `styles.xml`, связи) через `adm-zip`: заголовки 1–3, абзацы,
+  списки и таблицы с границами. Файл пишется в `DOCUMENTS_OUTPUT_DIR`
+  (`./docx-output`, в compose — `/app/docx-output`), имя проверяется Zod.
+- `ocr_document` (`ocr-smart-engine`) вызывает SDE-совместимый OCR по
+  `OCR_API_URL` (`{content, mimeType, language}` → `text`), опрашивает
+  асинхронную задачу (`taskId`/`status`), валидирует ответ Zod и при сбое
+  переключается на Tesseract в песочнице (маркер отсутствия бинарника отдаёт
+  понятную 503). Ответы разных вендоров сводятся к одному тексту.
+- `check_facts` (`fact-checker`) вместо Mock ищет утверждения в Tavily
+  (`POST https://api.tavily.com/search`, `TAVILY_API_KEY`, домен добавлен в
+  `DEFAULT_OUTBOUND_ALLOWLIST`), сравнивает источники по значимым словам и
+  числам: `supported` (2+ независимых домена), `single_source`,
+  `contradicted`, `unverified`. В ответе — ссылки, цитаты, `confidence`, сводка.
+- `screen_resume` (`resume-screener`) разбирает реальный текст: контакты,
+  навыки (словарь + раздел «Навыки»), опыт по диапазонам дат с объединением
+  пересечений, образование, языки. `score` считается только при переданных
+  требованиях (70 % покрытие навыков / 30 % опыт) и объясняется `scoreFormula`;
+  верхний уровень ответа совпадает с контрактом карточек UI
+  (`apps/web/src/lib/resume.ts`).
+- `extract_document_data` (`document-analyzer`) читает текст, PDF, DOCX, TXT/MD
+  или скан (через OCR) и извлекает суммы с валютой, даты (ДД.ММ.ГГГГ,
+  ГГГГ-ММ-ДД, «12 марта 2026 г.»), стороны, номер, ИНН/КПП/ОГРН и подписанта.
+  Каждое значение содержит `raw` и контекст, `primaryAmount`/`primaryDate`
+  выбираются по описанным правилам, отсутствие данных — `warnings`, а не
+  подставленные значения.
+- Новый маршрут `POST /api/v1/documents` (`apps/api/src/documents/`):
+  multipart-поле `file`, JWT, лимит 15 МБ, PDF/PNG/JPEG/WebP, rate limit
+  30/мин. Ответ совпадает с контрактом UI загрузки (`{id, filename, mimeType,
+  size, kind, text, tables, warnings, createdAt}`), `UploadErrorFilter` отдаёт
+  `413 errors.document_too_large` и `415 errors.unsupported_document_type`.
+- Инструменты `extract_pdf`, `write_docx`, `ocr_document` зарегистрированы в
+  реестре и политиках Gateway (всего 22 инструмента), пути к файлам
+  ограничены `DOCUMENTS_INPUT_DIR` (обход каталога запрещён), размер и объём
+  текста — лимитами `DOCUMENTS_*`.
+- Starter skills: три новых навыка в `16-documents/` (`pdf-extractor`,
+  `docx-writer`, `ocr-smart-engine`) и обновлённые `fact-checker`,
+  `resume-screener`, `document-analyzer` — без «заглушек», с описанием
+  реальных контрактов и ограничений; всего 22 стартовых навыка.
+- HITL и Pay-per-Outcome `dzen-article` закреплены тестом
+  `apps/api/src/agent/dzen-article.spec.ts`: манифест требует одобрения,
+  цена 100 ₽, hold создаётся до вызова, фиксируется только после успешной
+  записи черновика и отменяется при ошибке или отказе.
+- Env: `OCR_*` (адрес, ключ, авторизация, таймауты, Tesseract),
+  `DOCUMENTS_INPUT_DIR`/`OUTPUT_DIR`/`MAX_*`; в compose добавлены env и
+  монтирование `./documents` (ro) и `./docx-output`; `api.tavily.com` добавлен
+  в `API_OUTBOUND_ALLOWLIST` и default-allowlist.
+- Тесты: `pdf-text.spec.ts` (10), `docx-builder.spec.ts` (7),
+  `document-fields.spec.ts` (15), `ocr-smart-engine.service.spec.ts` (14),
+  `document-tools.service.spec.ts` (23), `resume-parser.spec.ts` (13),
+  `resume-screener.service.spec.ts` (9), `fact-checker.service.spec.ts` (13),
+  `documents.service.spec.ts` (9), `documents.controller.spec.ts` (6),
+  `dzen-article.spec.ts` (8), обновлены политики (48).
+
+### Sprint 20: инфраструктура документов и OCR
+
+- Образ `skillwharf-sandbox` (`sandbox/Dockerfile`) получил инструменты для
+  документов: `tesseract-ocr` с языками `rus`/`eng` (локальный OCR-fallback),
+  `poppler-utils` (`pdftotext`, `pdfinfo`, `pdftoppm`) и `pandoc-cli` для
+  генерации DOCX. LibreOffice не добавлялся: +578 МБ на образ; для DOCX
+  достаточно `pandoc`. `font-dejavu` добавлен для растеризации PDF без ошибок
+  `Couldn't find a font`.
+- Egress: `ocr.api.cloud.yandex.net` добавлен в `DEFAULT_OUTBOUND_ALLOWLIST`
+  (`packages/shared/src/outbound.ts`), `API_OUTBOUND_ALLOWLIST` и
+  `LLM_WORKER_OUTBOUND_ALLOWLIST` в `.env.example`/`docker-compose.yml`.
+  On-prem Smart Document Engine остаётся private-хостом и проходит без
+  allowlist.
+- Env: в `.env.example` и `docker-compose.yml` описан контракт `OCR_*`,
+  который уже читает `OcrSmartEngineService`: `OCR_API_URL`, `OCR_API_KEY`,
+  `OCR_API_AUTH_HEADER`, `OCR_API_AUTH_PREFIX`, `OCR_API_TIMEOUT_MS`,
+  `OCR_MAX_POLL_ATTEMPTS`, `OCR_POLL_INTERVAL_MS`, `OCR_TESSERACT_ENABLED`,
+  `OCR_TESSERACT_LANG`, `OCR_MAX_IMAGE_BYTES`. Пустой `OCR_API_URL` означает
+  работу только через Tesseract.
+- Проверки: `scripts/fixtures/document-smoke.py` и
+  `scripts/test-documents.sh` прогоняют PDF → `pdftotext` → `pdftoppm` →
+  `tesseract` и Markdown → `pandoc` → DOCX под ограничениями навыка
+  (read-only rootfs, uid 65534, tmpfs `/tmp`, без сети, 128 МБ, seccomp).
+  В CI добавлен шаг `Test Sandbox Documents (OCR, PDF, DOCX)`.
+  `scripts/test-integrations.sh --ocr` проверяет OCR-endpoint без печати
+  ключа: 2xx и 400/422 — ключ принят, 401/403 — ошибка прав.
+- Тесты: `packages/shared/src/outbound.test.ts` и
+  `apps/api/src/integrations/provider-http.spec.ts` закрепляют allowlist для
+  облачного OCR и запрет произвольного внешнего хоста.
+
 ### Sprint 19: Integration keys (Ozon/WB/Midjourney)
 
 - Новые маршруты `POST/DELETE /api/v1/integrations/{ozon|wildberries|midjourney}`

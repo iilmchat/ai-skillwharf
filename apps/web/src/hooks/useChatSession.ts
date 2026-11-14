@@ -13,7 +13,10 @@ import {
   type ChatErrorKind,
 } from '../lib/chat-errors';
 import { isLlmAuthError, llmAuthErrorMessage } from '../lib/llm';
-import { parseOfficeEvent } from '../lib/office-events';
+import {
+  parseOfficeEvent,
+  type OfficeApprovalReason,
+} from '../lib/office-events';
 import { getSharedSocket } from '../lib/socket';
 import { useAuthStore } from '../store/auth.store';
 import { useOfficeStore } from '../store/office.store';
@@ -32,6 +35,12 @@ export interface ChatMessage {
   content: string;
 }
 
+/** Ожидание HITL: агент остановился и ждёт решения пользователя. */
+export interface ChatApproval {
+  /** Причина остановки: обычное подтверждение или оплата. */
+  reason: OfficeApprovalReason;
+}
+
 export interface ChatSession {
   messages: ChatMessage[];
   conversationId: string | null;
@@ -42,7 +51,11 @@ export interface ChatSession {
   setupError: string | null;
   notice: string | null;
   noticeTopUp: boolean;
+  /** `null` — агент ничего не ждёт от пользователя. */
+  approval: ChatApproval | null;
   sendMessage: (content: string) => void;
+  /** Подтверждает или отклоняет действие, на котором остановился агент. */
+  approveAction: (approved: boolean) => void;
   clearNotice: () => void;
   retry: () => void;
 }
@@ -271,6 +284,7 @@ export function useChatSession(): ChatSession {
   const [socketError, setSocketError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTopUp, setNoticeTopUp] = useState(false);
+  const [approval, setApproval] = useState<ChatApproval | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
@@ -303,6 +317,7 @@ export function useChatSession(): ChatSession {
     setConversationId(null);
     setMessages([]);
     setIsStreaming(false);
+    setApproval(null);
     socketRef.current?.connect();
     setAttempt((value) => value + 1);
   }, []);
@@ -487,6 +502,11 @@ export function useChatSession(): ChatSession {
         return;
       }
 
+      // Остановка на подтверждении — единственный сигнал HITL в чате.
+      if (event.status === 'waiting_approval') {
+        setApproval({ reason: event.reason ?? 'approval' });
+      }
+
       // Само событие уже записал общий ingest; фиксируем привязку к чату.
       useOfficeStore
         .getState()
@@ -518,25 +538,12 @@ export function useChatSession(): ChatSession {
     };
   }, [accessToken, attempt]);
 
-  const sendMessage = useCallback(
-    (content: string) => {
-      const trimmed = content.trim();
-      const socket = socketRef.current;
-
-      if (trimmed === '' || pendingRef.current !== null) {
-        return;
-      }
-
-      if (conversationId === null || socket === null || !socket.connected) {
-        setNotice(i18n.t('chat.errors.notReady'));
-        setNoticeTopUp(false);
-        return;
-      }
-
-      setMessages((current) => [
-        ...current,
-        { id: crypto.randomUUID(), role: 'user', content: trimmed },
-      ]);
+  /**
+   * Один обмен с сокетом (`send_message` или `approve_action`): общий таймаут
+   * ack, потоковые дельты, нормализация ответа и разбор ошибок.
+   */
+  const startExchange = useCallback(
+    (emit: (ack: (response: unknown) => void) => void): void => {
       setIsSending(true);
       setIsStreaming(false);
       streamMessageIdRef.current = null;
@@ -578,29 +585,25 @@ export function useChatSession(): ChatSession {
           },
         };
 
-        socket.emit(
-          'send_message',
-          { conversationId, content: trimmed },
-          (response: unknown) => {
-            const pending = pendingRef.current;
+        emit((response: unknown) => {
+          const pending = pendingRef.current;
 
-            if (pending === null) {
-              return;
-            }
+          if (pending === null) {
+            return;
+          }
 
-            // Уже пришли `stream_delta`: полный ответ в ack — дубль.
-            if (streamMessageIdRef.current !== null) {
-              return;
-            }
+          // Уже пришли `stream_delta`: полный ответ в ack — дубль.
+          if (streamMessageIdRef.current !== null) {
+            return;
+          }
 
-            if (isChatReply(response)) {
-              pending.resolve(response.reply);
-              return;
-            }
+          if (isChatReply(response)) {
+            pending.resolve(response.reply);
+            return;
+          }
 
-            pending.reject(new Error(i18n.t('chat.errors.invalidResponse')));
-          },
-        );
+          pending.reject(new Error(i18n.t('chat.errors.invalidResponse')));
+        });
       })
         .then((reply) => {
           // `null` — текст уже отрисован из событий `stream_delta`.
@@ -660,7 +663,63 @@ export function useChatSession(): ChatSession {
           streamedTextRef.current = '';
         });
     },
-    [conversationId],
+    [],
+  );
+
+  const sendMessage = useCallback(
+    (content: string) => {
+      const trimmed = content.trim();
+      const socket = socketRef.current;
+
+      if (trimmed === '' || pendingRef.current !== null) {
+        return;
+      }
+
+      if (conversationId === null || socket === null || !socket.connected) {
+        setNotice(i18n.t('chat.errors.notReady'));
+        setNoticeTopUp(false);
+        return;
+      }
+
+      setMessages((current) => [
+        ...current,
+        { id: crypto.randomUUID(), role: 'user', content: trimmed },
+      ]);
+      // Новый запрос отменяет ожидание подтверждения — как и на бэкенде.
+      setApproval(null);
+
+      startExchange((ack) => {
+        socket.emit('send_message', { conversationId, content: trimmed }, ack);
+      });
+    },
+    [conversationId, startExchange],
+  );
+
+  /**
+   * Решение по HITL-ожиданию: `approve_action` возобновляет граф, ответ
+   * приходит потоком как обычное сообщение агента.
+   */
+  const approveAction = useCallback(
+    (approved: boolean) => {
+      const socket = socketRef.current;
+
+      if (pendingRef.current !== null) {
+        return;
+      }
+
+      if (conversationId === null || socket === null || !socket.connected) {
+        setNotice(i18n.t('chat.errors.notReady'));
+        setNoticeTopUp(false);
+        return;
+      }
+
+      setApproval(null);
+
+      startExchange((ack) => {
+        socket.emit('approve_action', { conversationId, approved }, ack);
+      });
+    },
+    [conversationId, startExchange],
   );
 
   const isReady = conversationId !== null && isSocketOnline;
@@ -680,7 +739,9 @@ export function useChatSession(): ChatSession {
     setupError: conversationError ?? socketError,
     notice,
     noticeTopUp,
+    approval,
     sendMessage,
+    approveAction,
     clearNotice,
     retry,
   };

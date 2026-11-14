@@ -40,6 +40,10 @@ export const ERROR_KEYS = {
   providerNotConfigured: 'errors.provider_not_configured',
   /** Внешний запрос отклонён egress-политикой API/worker. */
   outboundBlocked: 'errors.outbound_blocked',
+  /** Загруженный документ больше лимита (413). */
+  documentTooLarge: 'errors.document_too_large',
+  /** MIME-тип документа не поддержан парсером (415). */
+  unsupportedDocumentType: 'errors.unsupported_document_type',
   /**
    * LLM временно недоступен: все маршруты цепочки упали или исчерпали
    * дневной бюджет (LLM Router v2).

@@ -118,3 +118,23 @@ export function outboundBlockedError(message: string): ApiException {
     message,
   });
 }
+
+/** Загруженный документ больше лимита multipart (15 МБ). */
+export function documentTooLargeError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 413,
+    error: 'Payload Too Large',
+    code: 'errors.document_too_large',
+    message,
+  });
+}
+
+/** MIME-тип документа не поддержан парсером (PDF и изображения). */
+export function unsupportedDocumentTypeError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 415,
+    error: 'Unsupported Media Type',
+    code: 'errors.unsupported_document_type',
+    message,
+  });
+}

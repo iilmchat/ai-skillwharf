@@ -1,5 +1,9 @@
 import { useMemo } from 'react';
 import { splitMessageContent } from '../lib/message-images';
+import { parseMessageBlocks } from '../lib/message-blocks';
+import { MessageCodeBlock } from './MessageCodeBlock';
+import { ResultTable } from './ResultTable';
+import { ResumeCards, type ResumeLabels } from './ResumeCards';
 
 function StreamingCursor() {
   return (
@@ -10,28 +14,35 @@ function StreamingCursor() {
   );
 }
 
+/** Подписи блоков ответа; страница передаёт их из i18n. */
+export interface MessageContentLabels {
+  table: string;
+  code: string;
+  resume: ResumeLabels;
+}
+
 /**
- * Текст ответа агента с превью картинок.
+ * Текст с превью картинок.
  *
  * Картинка оборачивается в ссылку `target="_blank"`, поэтому её можно открыть
  * в полном размере; сама ссылка уже прошла проверку схемы в парсере.
  */
-export function MessageContent({
-  content,
+function TextWithImages({
+  text,
   isStreaming,
   imageAltFallback,
 }: {
-  content: string;
+  text: string;
   isStreaming: boolean;
   imageAltFallback: string;
 }) {
-  const segments = useMemo(() => splitMessageContent(content), [content]);
+  const segments = useMemo(() => splitMessageContent(text), [text]);
   const hasImages = segments.some((segment) => segment.type === 'image');
 
   if (!hasImages) {
     return (
       <p className="whitespace-pre-wrap break-words">
-        {content}
+        {text}
         {isStreaming && <StreamingCursor />}
       </p>
     );
@@ -54,9 +65,10 @@ export function MessageContent({
           );
         }
 
-        const alt = segment.image.alt.trim() === ''
-          ? imageAltFallback
-          : segment.image.alt;
+        const alt =
+          segment.image.alt.trim() === ''
+            ? imageAltFallback
+            : segment.image.alt;
 
         return (
           <a
@@ -77,6 +89,75 @@ export function MessageContent({
               className="max-h-80 w-auto max-w-full rounded-xl border border-outline-variant bg-surface-container object-contain"
             />
           </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Ответ агента: текст, картинки, блоки кода, таблицы и карточки резюме.
+ *
+ * Разметка разбирается `parseMessageBlocks`; неизвестные конструкции
+ * остаются текстом, поэтому ответ не может подставить произвольный HTML.
+ */
+export function MessageContent({
+  content,
+  isStreaming,
+  imageAltFallback,
+  labels,
+}: {
+  content: string;
+  isStreaming: boolean;
+  imageAltFallback: string;
+  labels: MessageContentLabels;
+}) {
+  const blocks = useMemo(() => parseMessageBlocks(content), [content]);
+
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, index) => {
+        const isLast = index === blocks.length - 1;
+        const showCursor = isStreaming && isLast;
+
+        if (block.type === 'text') {
+          return (
+            <TextWithImages
+              key={`text-${index}`}
+              text={block.text}
+              isStreaming={showCursor}
+              imageAltFallback={imageAltFallback}
+            />
+          );
+        }
+
+        if (block.type === 'code') {
+          return (
+            <div key={`code-${index}`}>
+              <MessageCodeBlock
+                language={block.language}
+                code={block.code}
+                label={labels.code}
+              />
+              {showCursor && <StreamingCursor />}
+            </div>
+          );
+        }
+
+        if (block.type === 'table') {
+          return (
+            <div key={`table-${index}`}>
+              <ResultTable table={block.table} label={labels.table} />
+              {showCursor && <StreamingCursor />}
+            </div>
+          );
+        }
+
+        return (
+          <div key={`resume-${index}`}>
+            <ResumeCards resume={block.resume} labels={labels.resume} />
+            {showCursor && <StreamingCursor />}
+          </div>
         );
       })}
     </div>

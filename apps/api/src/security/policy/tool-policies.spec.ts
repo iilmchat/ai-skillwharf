@@ -41,13 +41,19 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
   check_facts: { text: 'Земля круглая' },
   screen_resume: { resumeText: 'Опыт работы: 5 лет' },
   extract_document_data: { documentText: 'Договор на 100000 рублей' },
+  extract_pdf: { path: 'contract.pdf' },
+  write_docx: {
+    title: 'Отчёт',
+    blocks: [{ type: 'paragraph', text: 'Текст' }],
+  },
+  ocr_document: { path: 'scan.png', language: 'ru' },
 };
 
 const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
   it('покрывает политикой все инструменты из tool-schemas.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(19);
+    expect(TOOL_NAMES).toHaveLength(22);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 

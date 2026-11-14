@@ -73,7 +73,7 @@ services:
       YANDEX_IAM_TOKEN: ${YANDEX_IAM_TOKEN:-}
       YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
       # Egress worker'а: внешние LLM, Telegram, Google и Midjourney — только эти домены.
-      OUTBOUND_ALLOWLIST: ${LLM_WORKER_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,sheets.googleapis.com,docs.googleapis.com,oauth2.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru}
+      OUTBOUND_ALLOWLIST: ${LLM_WORKER_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,sheets.googleapis.com,docs.googleapis.com,oauth2.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,ocr.api.cloud.yandex.net,llm.api.cloud.yandex.net,iam.api.cloud.yandex.net,ngw.devices.sberbank.ru,gigachat.devices.sberbank.ru}
     extra_hosts:
       # LLM на хосте (LM Studio/Ollama) доступна так же, как из API.
       - "host.docker.internal:host-gateway"
@@ -126,6 +126,25 @@ services:
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_OAUTH_SCOPES: ${GOOGLE_OAUTH_SCOPES:-}
       GOOGLE_OAUTH_STATE_SECRET: ${GOOGLE_OAUTH_STATE_SECRET:-}
+      # Документы/OCR: SDE-совместимый HTTP API или локальный tesseract
+      # в образе skillwharf-sandbox (fallback).
+      OCR_API_URL: ${OCR_API_URL:-}
+      OCR_API_KEY: ${OCR_API_KEY:-}
+      OCR_API_AUTH_HEADER: ${OCR_API_AUTH_HEADER:-Authorization}
+      # `-` вместо `:-`: пустой префикс — валидная схема (ключ без `Bearer`).
+      OCR_API_AUTH_PREFIX: ${OCR_API_AUTH_PREFIX-Bearer}
+      OCR_API_TIMEOUT_MS: ${OCR_API_TIMEOUT_MS:-60000}
+      OCR_MAX_POLL_ATTEMPTS: ${OCR_MAX_POLL_ATTEMPTS:-10}
+      OCR_POLL_INTERVAL_MS: ${OCR_POLL_INTERVAL_MS:-2000}
+      OCR_TESSERACT_ENABLED: ${OCR_TESSERACT_ENABLED:-true}
+      OCR_TESSERACT_LANG: ${OCR_TESSERACT_LANG:-rus+eng}
+      OCR_MAX_IMAGE_BYTES: ${OCR_MAX_IMAGE_BYTES:-8388608}
+      # Документы агента: каталог входящих файлов и результатов DOCX.
+      DOCUMENTS_INPUT_DIR: ${DOCUMENTS_INPUT_DIR:-/app/documents}
+      DOCUMENTS_OUTPUT_DIR: ${DOCUMENTS_OUTPUT_DIR:-/app/docx-output}
+      DOCUMENTS_MAX_BYTES: ${DOCUMENTS_MAX_BYTES:-10485760}
+      DOCUMENTS_MAX_PAGES: ${DOCUMENTS_MAX_PAGES:-50}
+      DOCUMENTS_MAX_TEXT_CHARS: ${DOCUMENTS_MAX_TEXT_CHARS:-100000}
       # Midjourney: TTAPI, эндпоинты зафиксированы в коде (домен в allowlist).
       MIDJOURNEY_API_KEY: ${MIDJOURNEY_API_KEY:-}
       MIDJOURNEY_POLL_INTERVAL_MS: ${MIDJOURNEY_POLL_INTERVAL_MS:-2000}
@@ -141,7 +160,7 @@ services:
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       TOKEN_ENCRYPTION_KEY_ID: ${TOKEN_ENCRYPTION_KEY_ID:-local-v1}
       # Egress API: Telegram и Google — только эти домены.
-      OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru}
+      OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,ocr.api.cloud.yandex.net,api.tavily.com}
       # Повторы 429/5xx внешних провайдеров (экспоненциальный backoff).
       PROVIDER_RETRY_MAX_ATTEMPTS: ${PROVIDER_RETRY_MAX_ATTEMPTS:-3}
       PROVIDER_RETRY_BASE_DELAY_MS: ${PROVIDER_RETRY_BASE_DELAY_MS:-500}
@@ -164,6 +183,9 @@ services:
     volumes:
       # Черновики Дзен, которые API пишет в ./dzen-output, видны на хосте.
       - ./dzen-output:/app/dzen-output
+      # Документы: входной каталог только для чтения, DOCX — на запись.
+      - ./documents:/app/documents:ro
+      - ./docx-output:/app/docx-output
     depends_on:
       postgres:
         condition: service_healthy

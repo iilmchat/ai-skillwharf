@@ -275,7 +275,7 @@ version: 1
 
       const seeded = await service.seedStarterSkills();
 
-      expect(seeded).toBe(19);
+      expect(seeded).toBe(22);
 
       const names = (prisma.installedSkill.upsert.mock.calls as [UpsertArgs][])
         .map(([args]) => args.where.name)
@@ -285,6 +285,7 @@ version: 1
         'code-runner',
         'cron-automation',
         'document-analyzer',
+        'docx-writer',
         'dzen-article',
         'fact-checker',
         'fraud-shield-audit',
@@ -292,7 +293,9 @@ version: 1
         'google-workspace',
         'messenger-connector',
         'midjourney-api',
+        'ocr-smart-engine',
         'ozon-seller',
+        'pdf-extractor',
         'price-monitor',
         'profit-leak-detector',
         'resume-screener',
