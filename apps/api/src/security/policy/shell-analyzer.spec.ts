@@ -213,4 +213,32 @@ describe('shell-analyzer', () => {
     );
     expect(violationsOf('sed s/a/b/ file', SANDBOX)).toEqual([]);
   });
+
+  // Регрессия: `execute_sandbox_code` получает код, а не shell-строку,
+  // поэтому `print("...")` нельзя сверять со списком команд.
+  describe('sandbox code without command allowlist', () => {
+    it('allows python code that is not a command', () => {
+      const analysis = analyzeShell('print("e2e-escrow")', {
+        allowlist: SANDBOX_COMMAND_ALLOWLIST,
+        enforceCommandAllowlist: false,
+      });
+
+      expect(analysis.violations).toEqual([]);
+    });
+
+    it('still enforces the allowlist by default', () => {
+      expect(violationsOf('print("e2e-escrow")')).toContain(
+        SHELL_VIOLATION.COMMAND_NOT_ALLOWED,
+      );
+    });
+
+    it('still reports dangerous code without the allowlist', () => {
+      const analysis = analyzeShell('import os; os.system("rm -rf /")', {
+        allowlist: SANDBOX_COMMAND_ALLOWLIST,
+        enforceCommandAllowlist: false,
+      });
+
+      expect(analysis.violations.length).toBeGreaterThan(0);
+    });
+  });
 });

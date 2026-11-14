@@ -260,7 +260,11 @@ export class AgentGatewayService {
         ? EXEC_COMMAND_ALLOWLIST
         : SANDBOX_COMMAND_ALLOWLIST;
 
-    const analysis = analyzeShell(code, { allowlist });
+    const analysis = analyzeShell(code, {
+      allowlist,
+      // `shell: 'sandbox'` means the payload is code, not a command line.
+      enforceCommandAllowlist: policy.shell !== 'sandbox',
+    });
 
     if (analysis.violations.length > 0) {
       const detail = analysis.violations

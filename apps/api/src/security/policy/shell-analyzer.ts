@@ -46,6 +46,15 @@ export interface ShellAnalysis {
 /** Опции анализа: allowlist бинарников зависит от инструмента. */
 export interface ShellAnalysisOptions {
   allowlist: ReadonlySet<string>;
+  /**
+   * Check the first word against `allowlist` (default true).
+   *
+   * `execute_sandbox_code` receives **code** (Python), not a shell string:
+   * `print("x")` is not the command `print`, so it can never be in the
+   * command allowlist. Sandbox code turns this off, while the remaining
+   * rules (dangerous patterns, secret access, network) stay active.
+   */
+  enforceCommandAllowlist?: boolean;
 }
 
 interface WordToken {
@@ -250,7 +259,7 @@ export function analyzeShell(
       networkRequested = true;
     }
 
-    if (!opts.allowlist.has(base)) {
+    if (opts.enforceCommandAllowlist !== false && !opts.allowlist.has(base)) {
       addViolation(SHELL_VIOLATION.COMMAND_NOT_ALLOWED, base);
       continue;
     }

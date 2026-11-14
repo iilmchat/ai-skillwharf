@@ -24,11 +24,14 @@ interface CategoryPrefixRule {
   prefixes: readonly string[];
 }
 
-/** Специфичные новые направления: dzen/fact → Контент, resume → HR, document → Документы. */
+/** Специфичные новые направления: dzen/fact → Контент, resume → HR, документы → Документы. */
 const CATEGORY_PREFIX_RULES: readonly CategoryPrefixRule[] = [
   { category: 'content', prefixes: ['dzen', 'fact'] },
   { category: 'hr', prefixes: ['resume'] },
-  { category: 'documents', prefixes: ['document'] },
+  // docx/ocr/pdf живут в starter-skills/16-documents: без этих префиксов
+  // `pdf-extractor` уезжал в «Продуктивность» по ключу `pdf`, а `ocr` и `docx`
+  // не классифицировались вовсе.
+  { category: 'documents', prefixes: ['document', 'docx', 'ocr', 'pdf'] },
 ];
 
 /** Порядок важен: поиск должен сработать раньше разработки. */

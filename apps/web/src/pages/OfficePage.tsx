@@ -17,6 +17,7 @@ import { PendingTtl } from '../components/PendingTtl';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useIntegrations } from '../hooks/useIntegrations';
 import { usePendingApprovals } from '../hooks/usePendingApprovals';
+import { resolveApprovalAction } from '../lib/approval';
 import {
   DEFAULT_OFFICE_AGENT_ID,
   parseOfficeEvent,
@@ -391,6 +392,7 @@ function AgentSidebar({
   channels,
   isApproved,
   conversationId,
+  approvalTools,
   onApprove,
   onClose,
 }: {
@@ -398,6 +400,8 @@ function AgentSidebar({
   channels: readonly IntegrationProvider[];
   isApproved: boolean;
   conversationId: string | null;
+  /** Инструменты ожидания: по ним подписывается кнопка подтверждения. */
+  approvalTools: readonly string[];
   onApprove: (agentId: string) => void;
   onClose: () => void;
 }) {
@@ -406,6 +410,7 @@ function AgentSidebar({
   const meta = STATUS_META[agent.status];
   const isPayment =
     agent.status === 'waiting_approval' && agent.reason === 'payment';
+  const isDzenPublish = resolveApprovalAction(approvalTools) === 'dzen-publish';
   const statusLabel = isPayment
     ? t('office.status.waiting_payment')
     : t(meta.labelKey);
@@ -550,7 +555,9 @@ function AgentSidebar({
               <p className="text-sm font-semibold text-on-warning-container">
                 {isPayment
                   ? t('office.payment.title')
-                  : t('office.approval.title')}
+                  : isDzenPublish
+                    ? t('office.approval.publishTitle')
+                    : t('office.approval.title')}
               </p>
               <p className="mt-0.5 text-xs leading-relaxed text-on-warning-container">
                 {isPayment
@@ -600,7 +607,9 @@ function AgentSidebar({
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-on-primary shadow-lg shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:brightness-95"
           >
             <span aria-hidden="true">✋</span>
-            {t('office.sidebar.approve')}
+            {isDzenPublish
+              ? t('office.approval.publish')
+              : t('office.sidebar.approve')}
           </button>
         </div>
       )}
@@ -653,25 +662,41 @@ export function OfficePage() {
     [pendingQuery.data],
   );
 
-  // Для текущего диалога TTL берём из REST: событие `office_event` его не
-  // содержит, а старый API может не присылать `expiresAt` вовсе.
-  const displayAgents = useMemo(() => {
-    const activePending = pendingApprovals.find(
-      (item) => item.conversationId === conversationId,
-    );
-    const expiresAt = activePending?.expiresAt;
+  // Для текущего диалога TTL и инструменты берём из REST: событие
+  // `office_event` их не содержит, а старый API может не присылать `expiresAt`.
+  const activePending = useMemo(
+    () =>
+      pendingApprovals.find((item) => item.conversationId === conversationId),
+    [pendingApprovals, conversationId],
+  );
 
-    if (expiresAt === undefined) {
+  const displayAgents = useMemo(() => {
+    if (activePending === undefined) {
       return agents;
     }
 
-    return agents.map((agent) =>
-      agent.id === DEFAULT_OFFICE_AGENT_ID &&
-      agent.status === 'waiting_approval'
-        ? { ...agent, expiresAt }
-        : agent,
-    );
-  }, [agents, conversationId, pendingApprovals]);
+    const expiresAt = activePending.expiresAt;
+
+    return agents.map((agent) => {
+      if (agent.id !== DEFAULT_OFFICE_AGENT_ID) {
+        return agent;
+      }
+
+      if (agent.status === 'waiting_approval') {
+        return expiresAt === undefined ? agent : { ...agent, expiresAt };
+      }
+
+      // REST is the source of truth: an `office_event` that fired before this
+      // page subscribed never reaches the socket handler, so the card would
+      // otherwise stay "working" while the API already waits for approval.
+      return {
+        ...agent,
+        status: 'waiting_approval' as const,
+        reason: activePending.reason,
+        ...(expiresAt === undefined ? {} : { expiresAt }),
+      };
+    });
+  }, [agents, activePending]);
 
   const selectedAgent =
     displayAgents.find((agent) => agent.id === selectedAgentId) ?? null;
@@ -791,9 +816,7 @@ export function OfficePage() {
 
     return () => {
       document.body.style.overflow = previousOverflow;
-      document
-        .getElementById(`office-agent-${selectedAgentId}`)
-        ?.focus();
+      document.getElementById(`office-agent-${selectedAgentId}`)?.focus();
     };
   }, [selectedAgentId]);
 
@@ -834,6 +857,23 @@ export function OfficePage() {
   function closeSidebar() {
     setSelectedAgentId(null);
     setApprovedAgentId(null);
+  }
+
+  /**
+   * Подтверждение прямо из списка ожиданий: `approve_action` принимает
+   * `conversationId`, поэтому диалог не обязательно открывать в офисе.
+   */
+  function handleApproveConversation(targetConversationId: string): void {
+    if (socket !== null && socket.connected) {
+      socket.emit('approve_action', {
+        conversationId: targetConversationId,
+        approved: true,
+      });
+    }
+
+    void queryClient.invalidateQueries({
+      queryKey: pendingApprovalsQueryKey,
+    });
   }
 
   return (
@@ -1021,7 +1061,22 @@ export function OfficePage() {
                           </p>
                         )}
                       </div>
-                      <PendingTtl expiresAt={item.expiresAt} />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <PendingTtl expiresAt={item.expiresAt} />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleApproveConversation(item.conversationId)
+                          }
+                          disabled={socket === null || !socket.connected}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary shadow-sm transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+                        >
+                          <span aria-hidden="true">✋</span>
+                          {resolveApprovalAction(item.tools) === 'dzen-publish'
+                            ? t('office.pending.approvePublish')
+                            : t('office.pending.approve')}
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1052,9 +1107,7 @@ export function OfficePage() {
                   isLive ? 'bg-success' : 'bg-tertiary'
                 }`}
               />
-              {isAuthenticated
-                ? t('office.liveNote')
-                : t('office.mockNote')}
+              {isAuthenticated ? t('office.liveNote') : t('office.mockNote')}
             </p>
           </div>
         </main>
@@ -1077,6 +1130,7 @@ export function OfficePage() {
                 channels={channels}
                 isApproved={approvedAgentId === selectedAgent.id}
                 conversationId={conversationId}
+                approvalTools={activePending?.tools ?? []}
                 onApprove={handleApprove}
                 onClose={closeSidebar}
               />

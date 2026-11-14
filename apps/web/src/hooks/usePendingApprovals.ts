@@ -19,6 +19,10 @@ export function usePendingApprovals() {
     queryFn: fetchPendingApprovals,
     enabled: accessToken !== null,
     staleTime: 15_000,
+    // The office card also derives its status from this query, so it must
+    // refresh on its own: an `office_event` fired before the page subscribed
+    // would otherwise be lost for good.
+    refetchInterval: 10_000,
     retry: false,
   });
 }

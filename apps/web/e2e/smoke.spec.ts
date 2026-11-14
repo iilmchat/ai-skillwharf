@@ -592,7 +592,22 @@ test.describe('Дымовые сценарии UI', () => {
     );
 
     await page.getByRole('tab', { name: /Продуктивность/ }).click();
-    await expect(page.locator('main ul > li > article')).toHaveCount(5);
+    await expect(page.locator('main ul > li > article')).toHaveCount(4);
+
+    // pdf/ocr/docx живут в starter-skills/16-documents и не должны уезжать
+    // в «Продуктивность» по ключевому слову `pdf`.
+    await page.getByRole('tab', { name: /Документы/ }).click();
+    const documentCards = page.locator('main ul > li > article');
+    await expect(documentCards).toHaveCount(5);
+    await expect(
+      documentCards.filter({ hasText: 'pdf-extractor' }),
+    ).toHaveCount(1);
+    await expect(
+      documentCards.filter({ hasText: 'docx-writer' }),
+    ).toHaveCount(1);
+    await expect(
+      documentCards.filter({ hasText: 'ocr-smart-engine' }),
+    ).toHaveCount(1);
 
     await page.getByRole('tab', { name: /Разработка/ }).click();
     await expect(page.locator('main ul > li > article')).toHaveCount(6);
