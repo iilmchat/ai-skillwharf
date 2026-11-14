@@ -252,56 +252,372 @@
       "eyebrow": "Tracks",
       "title": "10 ready-made scenarios",
       "featureLabel": "Highlight",
+      "details": {
+        "open": "View details",
+        "openFor": "View details for the “{{name}}” track",
+        "letter": "Track {{letter}}",
+        "agentsLabel": "Office staff",
+        "scenarioLabel": "Work scenario",
+        "pricingLabel": "Monetization"
+      },
       "items": {
         "pvz": {
           "name": "Pickup points",
           "description": "Automating intake, handovers, and returns.",
-          "feature": "Disputed returns wait for HITL."
+          "feature": "Disputed returns wait for HITL.",
+          "agents": {
+            "storekeeper": {
+              "name": "Storekeeper",
+              "role": "stock reconciliation"
+            },
+            "operator": {
+              "name": "Handover operator",
+              "role": "notifications"
+            },
+            "returns": {
+              "name": "Returns",
+              "role": "acts, HITL"
+            },
+            "reporting": {
+              "name": "Reporting",
+              "role": "summaries"
+            },
+            "support": {
+              "name": "Support",
+              "role": "FAQ"
+            }
+          },
+          "steps": {
+            "s1": "08:00 Report to Telegram",
+            "s2": "10:30 Arrival notifications",
+            "s3": "14:00 Disputed returns await HITL",
+            "s4": "20:00 Final report"
+          },
+          "pricing": {
+            "free": "1 location, 2 agents",
+            "pro": "2490 ₽/month",
+            "payPerOutcome": "50 ₽ per disputed return"
+          }
         },
         "dev": {
           "name": "Dev team",
           "description": "Code review, incidents, tests.",
-          "feature": "Production deploys stay under control."
+          "feature": "Production deploys stay under control.",
+          "agents": {
+            "reviewer": {
+              "name": "Reviewer",
+              "role": "code review"
+            },
+            "oncall": {
+              "name": "On-call",
+              "role": "incident response"
+            },
+            "tester": {
+              "name": "Tester",
+              "role": "sandbox runs"
+            },
+            "documenter": {
+              "name": "Documenter",
+              "role": "README"
+            },
+            "security": {
+              "name": "Security",
+              "role": "vulnerability scans"
+            }
+          },
+          "steps": {
+            "s1": "02:14 Alert",
+            "s2": "02:18 Task for the Reviewer",
+            "s3": "02:25 Rollback plan awaits HITL",
+            "s4": "08:00 Team lead approves"
+          },
+          "pricing": {
+            "free": "3 agents",
+            "team": "990 ₽/month per developer",
+            "payPerCall": "100–500 ₽ per post-mortem"
+          }
         },
         "ecommerce": {
           "name": "E-commerce",
           "description": "Managing Ozon/WB listings and orders.",
-          "feature": "Real MCP access to the APIs."
+          "feature": "Real MCP access to the APIs.",
+          "agents": {
+            "dispatcher": {
+              "name": "Dispatcher",
+              "role": "routing"
+            },
+            "support": {
+              "name": "Support",
+              "role": "chat replies"
+            },
+            "catalog": {
+              "name": "Catalog manager",
+              "role": "listings"
+            },
+            "ads": {
+              "name": "Ads manager",
+              "role": "bids"
+            },
+            "analyst": {
+              "name": "Analyst",
+              "role": "sales"
+            }
+          },
+          "steps": {
+            "s1": "08:00 Sales summary",
+            "s2": "09:30 Answering questions",
+            "s3": "11:00 Listing updates (HITL)",
+            "s4": "14:00 Ad campaign"
+          },
+          "pricing": {
+            "free": "2 agents",
+            "pro": "3990 ₽/month",
+            "payPerCall": "100–300 ₽ per cross-analysis"
+          }
         },
         "marketing": {
           "name": "Marketing",
           "description": "Generating content and visuals (Midjourney).",
-          "feature": "Isolated client workspaces."
+          "feature": "Isolated client workspaces.",
+          "agents": {
+            "dispatcher": {
+              "name": "Dispatcher",
+              "role": "tasks"
+            },
+            "copywriter": {
+              "name": "Copywriter",
+              "role": "texts"
+            },
+            "design": {
+              "name": "Design prompting",
+              "role": "Midjourney generation"
+            },
+            "seo": {
+              "name": "SEO",
+              "role": "audit"
+            },
+            "account": {
+              "name": "Account manager",
+              "role": "client communication"
+            }
+          },
+          "steps": {
+            "s1": "09:00 Task distribution",
+            "s2": "09:30 SEO audit",
+            "s3": "11:00 Writing articles",
+            "s4": "14:00 Visual generation"
+          },
+          "pricing": {
+            "free": "1 client",
+            "pro": "4990 ₽/month",
+            "payPerCall": "200–1000 ₽ per audit or visual"
+          }
         },
         "education": {
           "name": "Education",
           "description": "Homework checks and lesson plans.",
-          "feature": "The teacher approves complex essays."
+          "feature": "The teacher approves complex essays.",
+          "agents": {
+            "tutor": {
+              "name": "Tutor",
+              "role": "communication"
+            },
+            "methodist": {
+              "name": "Methodologist",
+              "role": "plans"
+            },
+            "checker": {
+              "name": "Checker",
+              "role": "homework, HITL on essays"
+            },
+            "content": {
+              "name": "Content manager",
+              "role": "FAQ"
+            },
+            "dispatcher": {
+              "name": "Dispatcher"
+            }
+          },
+          "steps": {
+            "s1": "08:00 Weekly plan",
+            "s2": "10:00 Tutor answers the student",
+            "s3": "12:00 Homework check (complex ones go to HITL)",
+            "s4": "18:00 Report"
+          },
+          "pricing": {
+            "free": "20 students",
+            "pro": "9900 ₽/month",
+            "payPerCall": "100–300 ₽ per essay check"
+          }
         },
         "content": {
           "name": "Content pipeline",
           "description": "Articles for Dzen and social media.",
-          "feature": "Pay per finished draft (Pay-per-Outcome)."
+          "feature": "Pay per finished draft (Pay-per-Outcome).",
+          "agents": {
+            "trend": {
+              "name": "Trend hunter",
+              "role": "SEO"
+            },
+            "copywriter": {
+              "name": "Copywriter",
+              "role": "articles"
+            },
+            "factchecker": {
+              "name": "Fact checker",
+              "role": "Tavily search"
+            },
+            "editor": {
+              "name": "Editor",
+              "role": "HITL"
+            }
+          },
+          "steps": {
+            "s1": "09:00 Trend search",
+            "s2": "09:05 Draft",
+            "s3": "09:10 Fact checking",
+            "s4": "09:15 HITL approval",
+            "s5": "09:20 Ready to publish"
+          },
+          "pricing": {
+            "free": "1 article/day",
+            "pro": "4990 ₽/month",
+            "payPerOutcome": "100 ₽ per article"
+          }
         },
         "hr": {
           "name": "HR recruiting",
           "description": "Screening hundreds of resumes.",
-          "feature": "Pay per candidate who reaches the interview."
+          "feature": "Pay per candidate who reaches the interview.",
+          "agents": {
+            "screener": {
+              "name": "Screener",
+              "role": "resumes"
+            },
+            "interviewer": {
+              "name": "Interviewer",
+              "role": "script"
+            },
+            "coordinator": {
+              "name": "Coordinator",
+              "role": "meetings"
+            },
+            "recruiter": {
+              "name": "Recruiter",
+              "role": "HITL"
+            }
+          },
+          "steps": {
+            "s1": "Upload of 100 resumes",
+            "s2": "Screening",
+            "s3": "Interview",
+            "s4": "Final (HITL)"
+          },
+          "pricing": {
+            "free": "20 resumes",
+            "pro": "9900 ₽/month",
+            "payPerOutcome": "50 ₽ per candidate"
+          }
         },
         "documents": {
           "name": "Document workflow",
           "description": "Analyzing PDF contracts and extracting amounts.",
-          "feature": "Pay per processed document."
+          "feature": "Pay per processed document.",
+          "agents": {
+            "secretary": {
+              "name": "Secretary",
+              "role": "registration"
+            },
+            "lawyer": {
+              "name": "Lawyer",
+              "role": "PDF analysis"
+            },
+            "finance": {
+              "name": "Finance officer",
+              "role": "amounts"
+            },
+            "director": {
+              "name": "Director",
+              "role": "HITL signing"
+            }
+          },
+          "steps": {
+            "s1": "PDF upload",
+            "s2": "Risk analysis",
+            "s3": "Amount check",
+            "s4": "Signing (HITL)"
+          },
+          "pricing": {
+            "enterprise": "from 500,000 ₽/year",
+            "payPerOutcome": "500 ₽ per contract"
+          }
         },
         "ocr": {
           "name": "OCR & Documents",
           "description": "Recognizing scans (Smart Document Engine).",
-          "feature": "Works even with poor scans."
+          "feature": "Works even with poor scans.",
+          "agents": {
+            "pdf": {
+              "name": "Pdf-extractor",
+              "role": "text"
+            },
+            "ocr": {
+              "name": "Ocr-engine",
+              "role": "scans"
+            },
+            "docx": {
+              "name": "Docx-writer",
+              "role": "reports"
+            },
+            "analyzer": {
+              "name": "Document-analyzer",
+              "role": "search"
+            }
+          },
+          "steps": {
+            "s1": "Upload of 50 scans",
+            "s2": "OCR",
+            "s3": "Data extraction",
+            "s4": "RAG search by counterparty"
+          },
+          "pricing": {
+            "enterprise": "from 300,000 ₽/year",
+            "payPerCall": "50 ₽ per page"
+          }
         },
         "finance": {
           "name": "Finance (Ozon/WB)",
           "description": "Finding profit leaks and monitoring prices.",
-          "feature": "Real financial reports from marketplaces."
+          "feature": "Real financial reports from marketplaces.",
+          "agents": {
+            "unit": {
+              "name": "Unit-economics",
+              "role": "margins"
+            },
+            "leak": {
+              "name": "Profit-leak",
+              "role": "leaks"
+            },
+            "price": {
+              "name": "Price-monitor",
+              "role": "prices"
+            },
+            "fraud": {
+              "name": "Fraud-shield",
+              "role": "risks"
+            }
+          },
+          "steps": {
+            "s1": "08:00 Digest",
+            "s2": "08:15 Leak detection",
+            "s3": "11:00 ERID check",
+            "s4": "17:00 Profit report"
+          },
+          "pricing": {
+            "free": "1 client",
+            "pro": "6990 ₽/month",
+            "payPerCall": "300–800 ₽ per audit"
+          }
         }
       }
     },

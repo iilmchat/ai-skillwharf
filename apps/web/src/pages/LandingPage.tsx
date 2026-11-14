@@ -4,6 +4,7 @@ import {
   useReducedMotion,
   type Variants,
 } from 'framer-motion';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Brand } from '../components/Brand';
@@ -13,21 +14,12 @@ import {
 } from '../components/IntegrationIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TrackDetailsModal } from '../components/TrackDetailsModal';
+import { LANDING_TRACKS, type TrackId } from '../lib/landing-tracks';
 import { useAuthStore } from '../store/auth.store';
 
 type PreviewStatus = 'idle' | 'working' | 'waiting_approval';
 type WhyId = 'hitl' | 'outcome' | 'selfHosted';
-type TrackId =
-  | 'pvz'
-  | 'dev'
-  | 'ecommerce'
-  | 'marketing'
-  | 'education'
-  | 'content'
-  | 'hr'
-  | 'documents'
-  | 'ocr'
-  | 'finance';
 type PlatformId =
   | 'telegram'
   | 'google'
@@ -41,12 +33,6 @@ interface PreviewAgent {
   name: string;
   roleKey: string;
   status: PreviewStatus;
-}
-
-interface LandingTrack {
-  id: TrackId;
-  letter: string;
-  icon: string;
 }
 
 interface LandingPlatform {
@@ -85,19 +71,6 @@ const WHY_ACCENT: Record<WhyId, { card: string; label: string; icon: string }> =
       icon: 'bg-tertiary-container text-on-tertiary-container',
     },
   };
-
-const TRACKS: readonly LandingTrack[] = [
-  { id: 'pvz', letter: 'A', icon: '📦' },
-  { id: 'dev', letter: 'B', icon: '🛠️' },
-  { id: 'ecommerce', letter: 'C', icon: '🛒' },
-  { id: 'marketing', letter: 'D', icon: '🎨' },
-  { id: 'education', letter: 'E', icon: '🎓' },
-  { id: 'content', letter: 'F', icon: '📝' },
-  { id: 'hr', letter: 'G', icon: '👥' },
-  { id: 'documents', letter: 'H', icon: '📄' },
-  { id: 'ocr', letter: 'I', icon: '🔍' },
-  { id: 'finance', letter: 'J', icon: '📊' },
-];
 
 const PLATFORMS: readonly LandingPlatform[] = [
   { id: 'telegram', labelKey: 'landing.ecosystem.items.telegram' },
@@ -255,6 +228,8 @@ export function LandingPage() {
   const { t } = useTranslation();
   const accessToken = useAuthStore((state) => state.accessToken);
   const shouldReduceMotion = useReducedMotion();
+  const [activeTrackId, setActiveTrackId] = useState<TrackId | null>(null);
+  const closeTrackDetails = useCallback(() => setActiveTrackId(null), []);
   const isAuthenticated = accessToken !== null;
   const headerHref = isAuthenticated ? '/app/chat' : '/login';
   const headerLabel = isAuthenticated
@@ -677,7 +652,7 @@ export function LandingPage() {
                 variants={staggerVariants}
                 className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
               >
-                {TRACKS.map((track) => (
+                {LANDING_TRACKS.map((track) => (
                   <motion.li
                     key={track.id}
                     variants={fadeUpVariants}
@@ -706,12 +681,37 @@ export function LandingPage() {
                         {t(`landing.tracks.items.${track.id}.description`)}
                       </p>
 
-                      <p className="mt-auto flex flex-wrap items-baseline gap-x-1.5 gap-y-1 pt-4 text-xs leading-relaxed text-on-surface-variant">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
-                          {t('landing.tracks.featureLabel')}
-                        </span>
-                        {t(`landing.tracks.items.${track.id}.feature`)}
-                      </p>
+                      <div className="mt-auto pt-4">
+                        <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-xs leading-relaxed text-on-surface-variant">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
+                            {t('landing.tracks.featureLabel')}
+                          </span>
+                          {t(`landing.tracks.items.${track.id}.feature`)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTrackId(track.id)}
+                          aria-haspopup="dialog"
+                          aria-label={t('landing.tracks.details.openFor', {
+                            name: t(`landing.tracks.items.${track.id}.name`),
+                          })}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-outline bg-surface-container px-3 py-2 text-xs font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        >
+                          {t('landing.tracks.details.open')}
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="size-3.5"
+                          >
+                            <path d="M5 12h14M13 6l6 6-6 6" />
+                          </svg>
+                        </button>
+                      </div>
                     </article>
                   </motion.li>
                 ))}
@@ -885,6 +885,11 @@ export function LandingPage() {
             </nav>
           </div>
         </footer>
+
+        <TrackDetailsModal
+          trackId={activeTrackId}
+          onClose={closeTrackDetails}
+        />
       </div>
     </MotionConfig>
   );
