@@ -56,6 +56,9 @@ if command -v cygpath >/dev/null 2>&1; then
   FIXTURE_PATH="$(cygpath -w "$FIXTURE_PATH")"
 fi
 
+# 256m вместо 128m: tesseract с OpenMP на 0.5 CPU в CI упирался в лимит и
+# получал SIGKILL (-9). OMP_THREAD_LIMIT=1 убирает лишние потоки, лимит всё
+# равно остаётся жёстким (у staging sandbox-worker 1 ГБ).
 echo "==> Документы под ограничениями sandbox"
 docker run --rm \
   --network none \
@@ -63,8 +66,9 @@ docker run --rm \
   --cap-drop ALL \
   --user 65534:65534 \
   --tmpfs /tmp \
-  --memory 128m \
+  --memory 256m \
   --cpus 0.5 \
+  -e OMP_THREAD_LIMIT=1 \
   --security-opt no-new-privileges:true \
   "${SECCOMP_ARGS[@]}" \
   -v "$FIXTURE_PATH:/fixtures/document-smoke.py:ro" \
