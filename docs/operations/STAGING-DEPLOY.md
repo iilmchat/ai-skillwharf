@@ -224,7 +224,7 @@ sudo systemctl enable --now cloudflared
 магазина отвечает `401` («Authentication type is not allowed») — нужен
 OAuth-токен партнёра. Обработчик сам перепроверяет платёж запросом в API ЮKassa,
 поэтому подделка уведомления не зачислит деньги; повторная доставка
-идемпотентна. Локально `YOOKASSA_RETURN_URL` — `https://skillwharf.ru/app/chat`.
+идемпотентна. `YOOKASSA_RETURN_URL` — `https://app.skillwharf.ru/app/chat`.
 
 Туннель зависит от живого дистрибутива: если WSL выгружен или Windows
 перезагружен без keep-alive (§5), сайт и webhook недоступны.
