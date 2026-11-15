@@ -239,6 +239,11 @@ services:
         # Раздел «Память» (RAG): Vite вшивает флаг на этапе сборки, поэтому
         # изменение значения требует пересборки web. По умолчанию выключен.
         VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
+        # Контакты и поддержка на лендинге. Пустой CLOUDTIPS_URL скрывает
+        # секцию «Поддержка» целиком.
+        VITE_CONTACT_EMAIL: ${VITE_CONTACT_EMAIL:-info@skillwharf.ru}
+        VITE_CLOUDTIPS_URL: ${VITE_CLOUDTIPS_URL:-}
+        VITE_CLOUDTIPS_QR: ${VITE_CLOUDTIPS_QR:-}
     ports:
       # Caddy слушает 80 внутри контейнера; на хосте оставляем 8080.
       - "8080:80"

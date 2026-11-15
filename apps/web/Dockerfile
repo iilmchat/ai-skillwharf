@@ -29,6 +29,14 @@ ENV VITE_API_URL=${VITE_API_URL}
 ARG VITE_RAG_MEMORY_ENABLED=false
 ENV VITE_RAG_MEMORY_ENABLED=${VITE_RAG_MEMORY_ENABLED}
 
+# Контакты и поддержка на лендинге (Vite вшивает значения на этапе сборки).
+ARG VITE_CONTACT_EMAIL=info@skillwharf.ru
+ENV VITE_CONTACT_EMAIL=${VITE_CONTACT_EMAIL}
+ARG VITE_CLOUDTIPS_URL=
+ENV VITE_CLOUDTIPS_URL=${VITE_CLOUDTIPS_URL}
+ARG VITE_CLOUDTIPS_QR=
+ENV VITE_CLOUDTIPS_QR=${VITE_CLOUDTIPS_QR}
+
 RUN pnpm --filter web build
 
 # --- Stage 2: раздача статики и прокси на API ---

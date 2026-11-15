@@ -15,3 +15,6 @@ blob-report/
 
 # пароли staging-стенда, генерируются scripts/seed-staging.ts
 staging-credentials.txt
+
+# доступ к FTP хостинга витрины (заполняется вручную, см. .ftp-hosting.env)
+/.ftp-hosting.env
