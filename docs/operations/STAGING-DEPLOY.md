@@ -244,13 +244,26 @@ OAuth-токен партнёра. Обработчик сам перепров�
 приложения:
 
 ```bash
-VITE_APP_URL=https://app.skillwharf.ru pnpm --filter web build:landing
-# результат: apps/web/dist-landing (index.html + assets) — залить в корень сайта
+VITE_APP_URL=https://app.skillwharf.ru \
+VITE_CLOUDTIPS_URL=https://pay.cloudtips.ru/p/<id> \
+VITE_CLOUDTIPS_QR=/qr-cloudtips.svg \
+VITE_CONTACT_EMAIL=info@skillwharf.ru \
+pnpm --filter web build:landing     # результат: apps/web/dist-landing
 ```
 
 `VITE_APP_URL` подставляется в кнопки «Войти», «AI-офис» и «Смотреть демо»,
 поэтому с витрины нельзя попасть в 404 на хостинге. Без переменной ссылки
 остаются относительными — так собирается образ для Caddy.
+
+Выкладка — одна команда: `bash scripts/upload-landing.sh`. Параметры FTP лежат
+в `.ftp-hosting.env` в корне репозитория (в git не попадает): `FTP_HOST`,
+`FTP_USER`, `FTP_PASSWORD`, `FTP_PATH` (на reg.ru — `/www/skillwharf.ru`),
+`FTP_PORT`, `FTP_TLS`. Скрипт идемпотентен: заливает `index.html`, `assets/`,
+`favicon.svg` и `qr-cloudtips.svg` с перезаписью.
+
+DNS и TLS: корень домена и `www` — `A` на IP хостинга (`31.31.198.142`),
+**Proxied**; `app` — CNAME на туннель. На хостинге сертификат самоподписанный,
+поэтому в Cloudflare нужен режим **Full** (не `Full (strict)` — он даст 526).
 
 В ingress туннеля нужен отдельный hostname приложения:
 
