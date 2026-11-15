@@ -6,7 +6,6 @@ import {
 } from 'framer-motion';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 import { Brand } from '../components/Brand';
 import {
   IntegrationIcon,
@@ -17,6 +16,8 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { TrackDetailsModal } from '../components/TrackDetailsModal';
 import { LANDING_TRACKS, type TrackId } from '../lib/landing-tracks';
 import { useAuthStore } from '../store/auth.store';
+import { LandingContact } from '../components/LandingContact';
+import { LandingSupport } from '../components/LandingSupport';
 
 type PreviewStatus = 'idle' | 'working' | 'waiting_approval';
 type WhyId = 'hitl' | 'outcome' | 'selfHosted';
@@ -48,8 +49,25 @@ interface LandingPlatform {
 const GITHUB_URL = 'https://github.com/iilmchat/ai-skillwharf';
 const DOCS_URL = `${GITHUB_URL}/tree/main/docs`;
 const USE_CASES_GUIDE_URL = `${DOCS_URL}/ecosystem/USE-CASES-GUIDE.md`;
-const PILOT_EMAIL = 'hello@skillwharf.ru';
-const PILOT_MAILTO = `mailto:${PILOT_EMAIL}`;
+
+/**
+ * Контакты лендинга. Адрес и ссылка на платёжную форму вынесены в переменные
+ * сборки (`VITE_CONTACT_EMAIL`, `VITE_CLOUDTIPS_URL`), чтобы менять их без
+ * правки кода. Пустой `VITE_CLOUDTIPS_URL` скрывает секцию «Поддержка».
+ */
+const CONTACT_EMAIL =
+  import.meta.env.VITE_CONTACT_EMAIL ?? 'info@skillwharf.ru';
+const CLOUDTIPS_URL = import.meta.env.VITE_CLOUDTIPS_URL ?? '';
+const CLOUDTIPS_QR = import.meta.env.VITE_CLOUDTIPS_QR ?? '';
+const SITE_URL = 'https://skillwharf.ru';
+
+/**
+ * База приложения. Пустое значение — тот же origin (SPA отдаёт Caddy).
+ * Статический лендинг собирается с `VITE_APP_URL=https://app.skillwharf.ru`,
+ * чтобы кнопки входа и офиса уходили на стенд, а не в 404.
+ */
+const APP_URL = (import.meta.env.VITE_APP_URL ?? '').replace(/\/$/, '');
+const appHref = (path: string): string => `${APP_URL}${path}`;
 
 const WHY_IDS: readonly WhyId[] = ['hitl', 'outcome', 'selfHosted'];
 
@@ -242,8 +260,8 @@ export function LandingPage() {
         <header className="sticky top-0 z-30 border-b border-outline-variant/70 bg-surface/80 backdrop-blur-xl">
           <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-6">
-              <Link
-                to="/"
+              <a
+                href="/"
                 aria-label="SkillWharf"
                 className="rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
@@ -253,7 +271,7 @@ export function LandingPage() {
                 <span className="hidden sm:block">
                   <Brand />
                 </span>
-              </Link>
+              </a>
 
               <nav
                 aria-label={t('nav.primary')}
@@ -283,24 +301,38 @@ export function LandingPage() {
                 >
                   {t('landing.nav.marketplace')}
                 </a>
-                <Link
-                  to="/app/office"
+                <a
+                  href="#contact"
+                  className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('landing.nav.contact')}
+                </a>
+                {CLOUDTIPS_URL !== '' && (
+                  <a
+                    href="#support"
+                    className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    {t('landing.nav.support')}
+                  </a>
+                )}
+                <a
+                  href={appHref('/app/office')}
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   {t('landing.nav.office')}
-                </Link>
+                </a>
               </nav>
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
               <LanguageSwitcher />
               <ThemeToggle />
-              <Link
-                to={headerHref}
+              <a
+                href={appHref(headerHref)}
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/20 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 {headerLabel}
-              </Link>
+              </a>
             </div>
           </div>
         </header>
@@ -364,7 +396,7 @@ export function LandingPage() {
                   className="mt-9 flex flex-col gap-3 sm:flex-row"
                 >
                   <a
-                    href={PILOT_MAILTO}
+                    href="#contact"
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-on-primary shadow-xl shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:brightness-95"
                   >
                     {t('landing.primaryCta')}
@@ -381,8 +413,8 @@ export function LandingPage() {
                       <path d="M5 12h14M13 6l6 6-6 6" />
                     </svg>
                   </a>
-                  <Link
-                    to="/app/office"
+                  <a
+                    href={appHref('/app/office')}
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface-container px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <span
@@ -398,7 +430,7 @@ export function LandingPage() {
                       </svg>
                     </span>
                     {t('landing.secondaryCta')}
-                  </Link>
+                  </a>
                 </motion.div>
 
                 <motion.p
@@ -520,8 +552,8 @@ export function LandingPage() {
                     ))}
                   </ul>
 
-                  <Link
-                    to="/app/office"
+                  <a
+                    href={appHref('/app/office')}
                     className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-primary-container/60 px-3 py-2.5 text-xs font-medium text-on-primary-container transition hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <span>{t('landing.preview.waiting', { count: 1 })}</span>
@@ -540,7 +572,7 @@ export function LandingPage() {
                         <path d="M5 12h14M13 6l6 6-6 6" />
                       </svg>
                     </span>
-                  </Link>
+                  </a>
                 </motion.div>
 
                 <motion.div
@@ -846,6 +878,14 @@ export function LandingPage() {
               </div>
             </div>
           </section>
+
+          <LandingContact
+            email={CONTACT_EMAIL}
+            githubUrl={GITHUB_URL}
+            siteUrl={SITE_URL}
+          />
+
+          <LandingSupport url={CLOUDTIPS_URL} qrSrc={CLOUDTIPS_QR || undefined} />
         </main>
 
         <footer className="border-t border-outline-variant/70">
@@ -875,12 +915,6 @@ export function LandingPage() {
                 className="transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 {t('landing.footer.docs')}
-              </a>
-              <a
-                href={PILOT_MAILTO}
-                className="transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              >
-                {t('landing.footer.pilot', { email: PILOT_EMAIL })}
               </a>
             </nav>
           </div>

@@ -1,7 +1,9 @@
 {
   "meta": {
     "title": "SkillWharf — Workspace",
-    "description": "SkillWharf is a workspace for autonomous AI agents."
+    "description": "SkillWharf is a workspace for autonomous AI agents.",
+    "landingTitle": "SkillWharf — a managed AI Office for your business",
+    "landingDescription": "10 ready-made business scenarios, pay only for outcomes, data stays on your server."
   },
   "common": {
     "closeNotification": "Close notification",
@@ -209,6 +211,8 @@
       "tracks": "Scenarios",
       "ecosystem": "Integrations",
       "marketplace": "Marketplace",
+      "contact": "Contact",
+      "support": "Support",
       "office": "AI office"
     },
     "login": "Sign in",
@@ -641,12 +645,63 @@
       "description": "Connect a ready-made skill from our store or write your own in TypeScript. Publish to the registry and earn 85% of sales.",
       "cta": "Open the documentation"
     },
+    "contact": {
+      "eyebrow": "Contacts",
+      "title": "We'll run a demo on your data",
+      "description": "We'll show the product on your scenarios: deploy a demo stand, connect the integrations you need and discuss a pilot.",
+      "emailRow": "E-mail",
+      "githubRow": "GitHub",
+      "githubValue": "github.com/iilmchat",
+      "siteRow": "Website",
+      "formTitle": "Request a demo",
+      "nameLabel": "How should we address you",
+      "namePlaceholder": "Name",
+      "emailFieldLabel": "Work e-mail",
+      "emailPlaceholder": "you@company.com",
+      "taskLabel": "Company and task",
+      "taskPlaceholder": "For example: 150 people, need a local model on our own GPUs",
+      "submit": "Send request",
+      "note": "The button composes an e-mail — it opens in your mail client.",
+      "mailSubject": "SkillWharf demo — {{name}}",
+      "mailAnonymous": "website request"
+    },
+    "support": {
+      "eyebrow": "Support · voluntary",
+      "title": "The project runs on support",
+      "description": "SkillWharf has no ads and no paid subscriptions: development, stands, the domain and GPUs rely on voluntary support.",
+      "points": {
+        "hosting": {
+          "title": "Domain and hosting",
+          "text": "So that the landing, the demo and the docs stay at permanent addresses and old links keep working."
+        },
+        "gpu": {
+          "title": "GPU inference",
+          "text": "Local models for tests, benchmarks and new scenarios — without cloud bills per token."
+        },
+        "traffic": {
+          "title": "Traffic and data",
+          "text": "Documents, generations and datasets weigh a lot — support keeps them available."
+        },
+        "experiments": {
+          "title": "New experiments",
+          "text": "Track prototypes, checks and releases: time to build, not only to come up with an idea."
+        }
+      },
+      "footer": "Made by IIRuChating (iilmchat). No ad integrations, no paid subscriptions.",
+      "formEyebrow": "Payment form · CloudTips",
+      "formTitle": "Support SkillWharf",
+      "formText": "A secure CloudTips page opens: card, SBP or T-Pay. One-off payment, no subscription.",
+      "cta": "Leave a tip",
+      "qrAlt": "CloudTips page QR code",
+      "qrTitle": "From your phone",
+      "qrText": "Point the camera at the QR code — the same form opens.",
+      "note": "CloudTips is an external service; payments are processed by CLAUDPAYMENTS LLC. The site never sees or stores card data."
+    },
     "footer": {
       "rights": "© {{year}} SkillWharf. A workspace for autonomous AI agents.",
       "linksLabel": "Links",
       "github": "GitHub",
-      "docs": "Documentation",
-      "pilot": "Pilot: {{email}}"
+      "docs": "Documentation"
     }
   },
   "office": {

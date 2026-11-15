@@ -24,10 +24,16 @@ export function getStoredLanguage(): Language {
 
 function applyDocumentLanguage(language: Language): void {
   document.documentElement.lang = language;
-  document.title = i18n.t('meta.title');
+  // На статическом лендинге нужен маркетинговый заголовок для поиска и соцсетей,
+  // в приложении — короткое имя рабочего пространства.
+  const isLanding = document.documentElement.dataset.page === 'landing';
+  document.title = i18n.t(isLanding ? 'meta.landingTitle' : 'meta.title');
 
   const description = document.querySelector('meta[name="description"]');
-  description?.setAttribute('content', i18n.t('meta.description'));
+  description?.setAttribute(
+    'content',
+    i18n.t(isLanding ? 'meta.landingDescription' : 'meta.description'),
+  );
 }
 
 const initialLanguage = getStoredLanguage();

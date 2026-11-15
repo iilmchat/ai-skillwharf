@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru" data-page="landing">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="SkillWharf — управляемый AI-Офис для бизнеса: 10 отраслевых сценариев, оплата по результату, данные на вашем сервере."
+    />
+    <meta name="theme-color" content="#8B5CF6" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SkillWharf — управляемый AI-Офис для бизнеса" />
+    <meta
+      property="og:description"
+      content="10 готовых бизнес-сценариев. Оплата только за результат. Данные остаются на вашем сервере."
+    />
+    <meta property="og:locale" content="ru_RU" />
+    <title>SkillWharf — управляемый AI-Офис для бизнеса</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Тема применяется до первого рендера, чтобы не было вспышки светлого фона. -->
+    <script>
+      (() => {
+        try {
+          const saved = window.localStorage.getItem('skillwharf-theme');
+          const parsed = saved === null ? null : JSON.parse(saved);
+          const stored = parsed?.state?.theme;
+          const theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+
+          document.documentElement.dataset.theme = theme;
+        } catch {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/landing-main.tsx"></script>
+  </body>
+</html>
