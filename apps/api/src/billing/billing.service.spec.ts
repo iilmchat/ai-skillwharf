@@ -476,7 +476,11 @@ describe('BillingService', () => {
         'topup-key-1',
       );
 
-      expect(result).toEqual({ balance: '100.50', entryId: 'entry-1' });
+      expect(result).toEqual({
+        balance: '100.50',
+        entryId: 'entry-1',
+        replayed: true,
+      });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
@@ -512,7 +516,11 @@ describe('BillingService', () => {
 
       await expect(
         service.addFunds(USER_ID, 100, 'Гонка', 'race-key'),
-      ).resolves.toEqual({ balance: '100.00', entryId: 'entry-1' });
+      ).resolves.toEqual({
+        balance: '100.00',
+        entryId: 'entry-1',
+        replayed: true,
+      });
     });
 
     it.each([0, -10, Number.NaN])(
@@ -664,6 +672,7 @@ describe('BillingService', () => {
       expect(result).toEqual({
         balance: '150.00',
         entryId: 'entry-debit-1',
+        replayed: true,
       });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });

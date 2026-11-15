@@ -22,6 +22,12 @@ export interface WalletBalance {
 
 export interface LedgerOperationResult extends WalletBalance {
   entryId: string;
+  /**
+   * `true`, если новая запись не создавалась: ключ идемпотентности уже был
+   * обработан и вернулось состояние существующей операции. Нужен вызывающему,
+   * чтобы не писать в лог «зачислено» при повторной доставке уведомления.
+   */
+  replayed?: boolean;
 }
 
 /** Результат escrow-операции: hold, capture или cancel. */
@@ -642,6 +648,7 @@ export class BillingService {
     return {
       balance: formatBalance(entry.wallet.balance),
       entryId: entry.id,
+      replayed: true,
     };
   }
 

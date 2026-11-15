@@ -243,15 +243,22 @@ export class BillingController {
       throw new BadRequestException('Платёж не подтверждён ЮKassa');
     }
 
-    await this.billingService.addFunds(
+    const result = await this.billingService.addFunds(
       notification.userId,
       notification.amount,
       'Пополнение через ЮKassa',
       `yookassa:${notification.paymentId}`,
     );
-    this.logger.log(
-      `ЮKassa webhook: зачислено ${notification.amount.toFixed(2)} ₽ пользователю ${notification.userId}`,
-    );
+
+    if (result.replayed === true) {
+      this.logger.log(
+        `ЮKassa webhook: платёж ${notification.paymentId} уже зачислен — повторная доставка не начисляет`,
+      );
+    } else {
+      this.logger.log(
+        `ЮKassa webhook: зачислено ${notification.amount.toFixed(2)} ₽ пользователю ${notification.userId}`,
+      );
+    }
 
     return { ok: true };
   }
