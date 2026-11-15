@@ -247,7 +247,7 @@ OAuth-токен партнёра. Обработчик сам перепров�
 VITE_APP_URL=https://app.skillwharf.ru \
 VITE_CLOUDTIPS_URL=https://pay.cloudtips.ru/p/<id> \
 VITE_CLOUDTIPS_QR=/qr-cloudtips.svg \
-VITE_CONTACT_EMAIL=info@skillwharf.ru \
+VITE_CONTACT_EMAIL=skillwharf@iiruchating.ru \
 pnpm --filter web build:landing     # результат: apps/web/dist-landing
 ```
 

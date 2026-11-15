@@ -56,7 +56,7 @@ const USE_CASES_GUIDE_URL = `${DOCS_URL}/ecosystem/USE-CASES-GUIDE.md`;
  * правки кода. Пустой `VITE_CLOUDTIPS_URL` скрывает секцию «Поддержка».
  */
 const CONTACT_EMAIL =
-  import.meta.env.VITE_CONTACT_EMAIL ?? 'info@skillwharf.ru';
+  import.meta.env.VITE_CONTACT_EMAIL ?? 'skillwharf@iiruchating.ru';
 const CLOUDTIPS_URL = import.meta.env.VITE_CLOUDTIPS_URL ?? '';
 const CLOUDTIPS_QR = import.meta.env.VITE_CLOUDTIPS_QR ?? '';
 const SITE_URL = 'https://skillwharf.ru';

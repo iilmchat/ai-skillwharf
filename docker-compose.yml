@@ -241,7 +241,7 @@ services:
         VITE_RAG_MEMORY_ENABLED: ${VITE_RAG_MEMORY_ENABLED:-false}
         # Контакты и поддержка на лендинге. Пустой CLOUDTIPS_URL скрывает
         # секцию «Поддержка» целиком.
-        VITE_CONTACT_EMAIL: ${VITE_CONTACT_EMAIL:-info@skillwharf.ru}
+        VITE_CONTACT_EMAIL: ${VITE_CONTACT_EMAIL:-skillwharf@iiruchating.ru}
         VITE_CLOUDTIPS_URL: ${VITE_CLOUDTIPS_URL:-}
         VITE_CLOUDTIPS_QR: ${VITE_CLOUDTIPS_QR:-}
     ports:

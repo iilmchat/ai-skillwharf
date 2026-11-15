@@ -8,7 +8,7 @@ interface ImportMetaEnv {
    * По умолчанию выключен: read-endpoint памяти ещё не задеплоен (KI-023).
    */
   readonly VITE_RAG_MEMORY_ENABLED?: string;
-  /** Адрес для формы «Связаться с нами». По умолчанию `info@skillwharf.ru`. */
+  /** Адрес для формы «Связаться с нами». По умолчанию `skillwharf@iiruchating.ru`. */
   readonly VITE_CONTACT_EMAIL?: string;
   /**
    * Страница CloudTips для секции «Поддержка». Пустое значение скрывает
