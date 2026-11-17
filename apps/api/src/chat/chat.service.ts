@@ -12,6 +12,7 @@ import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { MemoryService } from '../memory/memory.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
 import type { UserRole } from '../security/policy/policy.types.js';
+import { getToolPolicy } from '../security/policy/tool-policies.js';
 import { SkillsService } from '../skills/skills.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -104,6 +105,13 @@ export function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[]
     }
 
     for (const tool of parsed.data.dependencies?.tools ?? []) {
+      // Политика может сузить HITL навыка: читающие инструменты (например,
+      // `bitrix24_get_deal`) помечены `approval: 'none'` и не должны
+      // останавливать граф, даже если навык целиком требует подтверждения.
+      if (getToolPolicy(tool)?.approval === 'none') {
+        continue;
+      }
+
       tools.add(tool);
     }
   }

@@ -1191,8 +1191,8 @@
         "oauthHint": "A Google page will open. You can revoke access at any time."
       },
       "providers": {
-        "title": "Marketplaces & creative",
-        "description": "Ozon, Wildberries, and Midjourney keys are stored on the server.",
+        "title": "External services",
+        "description": "Ozon, Wildberries, Midjourney, Bitrix24, and MoySklad keys and webhooks are stored on the server.",
         "keySaved": "Stored on the server"
       },
       "ozon": {
@@ -1245,6 +1245,40 @@
         "invalidFields": "Enter the TT-API-KEY.",
         "connected": "Midjourney connected.",
         "disconnected": "Midjourney disconnected."
+      },
+      "bitrix24": {
+        "title": "Bitrix24",
+        "description": "Deals, contacts, and companies from your CRM — for wholesale and manufacturing (tracks K and L).",
+        "webhookUrl": "Webhook URL",
+        "webhookUrlPlaceholder": "https://portal.bitrix24.com/rest/1/xxxxxxxx/",
+        "webhookUrlHint": "Inbound portal webhook: CRM → Developer resources → Other → Inbound webhook. The address starts with https://, is stored on the server, and is not shown after connecting.",
+        "invalidFields": "Enter the Webhook URL.",
+        "invalidWebhookUrl": "Enter an absolute webhook URL that starts with https://.",
+        "connect": "Connect",
+        "connecting": "Checking the webhook…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "Webhook URL",
+        "keySaved": "Stored on the server",
+        "connected": "Bitrix24 connected.",
+        "disconnected": "Bitrix24 disconnected."
+      },
+      "moysklad": {
+        "title": "MoySklad",
+        "description": "Stock, shipments, and supplier orders — for wholesale and manufacturing (tracks K and L).",
+        "apiToken": "API Token",
+        "apiTokenPlaceholder": "MoySklad token",
+        "apiTokenHint": "Token from MoySklad “Settings → API”. It is stored on the server and is not shown after connecting.",
+        "invalidFields": "Enter the API Token.",
+        "invalidToken": "The token is too short. Copy it from MoySklad in full.",
+        "connect": "Connect",
+        "connecting": "Checking the token…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "API Token",
+        "keySaved": "Stored on the server",
+        "connected": "MoySklad connected.",
+        "disconnected": "MoySklad disconnected."
       },
       "errors": {
         "network": "The server is unreachable. Check your connection.",

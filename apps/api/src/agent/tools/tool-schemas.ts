@@ -53,6 +53,125 @@ export const WB_MCP_TOOL_DESCRIPTION =
   'Вызывает реальный MCP-сервер Wildberries Seller. Передайте имя MCP-инструмента в action (например, wb_cards_list) и аргументы в params';
 export const McpToolSchema = mcpToolCallSchema;
 
+/** ID сделки Битрикс24 (числовой идентификатор в строковом виде). */
+const bitrixDealIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^\d{1,20}$/, 'ID сделки Битрикс24 — число')
+  .describe('ID сделки Битрикс24');
+
+/** ID сущности МойСклад: UUID/код из JSON API 1.2. */
+const moyskladEntityIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^[A-Za-z0-9_-]+$/,
+    'ID МойСклад: буквы, цифры, дефис и подчёркивание',
+  )
+  .describe('ID сущности МойСклад');
+
+/** Получение сделки Битрикс24. */
+export const BITRIX24_GET_DEAL_TOOL_NAME = 'bitrix24_get_deal';
+export const BITRIX24_GET_DEAL_TOOL_DESCRIPTION =
+  'Получает сделку Битрикс24 по ID: название, стадию, сумму, валюту, комментарии, связанные компанию и контакт';
+export const Bitrix24GetDealToolSchema = z
+  .object({ dealId: bitrixDealIdSchema })
+  .strict();
+
+/** Обновление сделки Битрикс24 (HITL при переходе на «Успешно»). */
+export const BITRIX24_UPDATE_DEAL_TOOL_NAME = 'bitrix24_update_deal';
+export const BITRIX24_UPDATE_DEAL_TOOL_DESCRIPTION =
+  'Обновляет сделку Битрикс24: стадию и/или комментарий. Смена стадии на «Успешно» (WON) требует подтверждения пользователя';
+export const Bitrix24UpdateDealToolSchema = z
+  .object({
+    dealId: bitrixDealIdSchema,
+    stageId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(
+        /^[A-Za-z0-9:_-]+$/,
+        'ID стадии: буквы, цифры, двоеточие, дефис и подчёркивание',
+      )
+      .optional()
+      .describe('ID стадии сделки; WON — «Сделка успешна»'),
+    comments: z
+      .string()
+      .min(1)
+      .max(4_000)
+      .optional()
+      .describe('Комментарий к сделке'),
+  })
+  .strict()
+  .refine(
+    (input) => input.stageId !== undefined || input.comments !== undefined,
+    'укажите stageId или comments',
+  );
+
+/** Проверка остатка товара в МойСкладе. */
+export const MOYSKLAD_CHECK_STOCK_TOOL_NAME = 'moysklad_check_stock';
+export const MOYSKLAD_CHECK_STOCK_TOOL_DESCRIPTION =
+  'Проверяет доступный остаток товара МойСклад (за вычетом резерва) под нужное количество и сообщает, хватает ли его';
+export const MoyskladCheckStockToolSchema = z
+  .object({
+    productId: moyskladEntityIdSchema,
+    quantity: z
+      .number()
+      .positive()
+      .max(1_000_000)
+      .describe('Нужное количество единиц товара'),
+  })
+  .strict();
+
+/** Себестоимость товара МойСклад для расчёта маржи. */
+export const MOYSKLAD_GET_COST_TOOL_NAME = 'moysklad_get_cost';
+export const MOYSKLAD_GET_COST_TOOL_DESCRIPTION =
+  'Возвращает себестоимость (закупочную цену) единицы товара МойСклад в рублях — для расчёта маржи сделки';
+export const MoyskladGetCostToolSchema = z
+  .object({ productId: moyskladEntityIdSchema })
+  .strict();
+
+/** Создание заказа покупателя МойСклад по сделке Битрикс24. */
+export const MOYSKLAD_CREATE_ORDER_TOOL_NAME = 'moysklad_create_order';
+export const MOYSKLAD_CREATE_ORDER_TOOL_DESCRIPTION =
+  'Создаёт заказ покупателя МойСклад по сделке Битрикс24: позиции, количество и цены. Требует подтверждения пользователя';
+export const MoyskladOrderItemSchema = z
+  .object({
+    productId: moyskladEntityIdSchema,
+    quantity: z.number().positive().max(1_000_000).describe('Количество'),
+    price: z
+      .number()
+      .nonnegative()
+      .max(100_000_000)
+      .optional()
+      .describe('Цена за единицу в рублях; по умолчанию — цена продажи товара'),
+  })
+  .strict();
+export const MoyskladCreateOrderToolSchema = z
+  .object({
+    dealId: bitrixDealIdSchema,
+    items: z
+      .array(MoyskladOrderItemSchema)
+      .min(1)
+      .max(50)
+      .describe('Позиции заказа'),
+  })
+  .strict();
+
+export type Bitrix24GetDealArgs = z.infer<typeof Bitrix24GetDealToolSchema>;
+export type Bitrix24UpdateDealArgs = z.infer<
+  typeof Bitrix24UpdateDealToolSchema
+>;
+export type MoyskladCheckStockArgs = z.infer<
+  typeof MoyskladCheckStockToolSchema
+>;
+export type MoyskladGetCostArgs = z.infer<typeof MoyskladGetCostToolSchema>;
+export type MoyskladCreateOrderArgs = z.infer<
+  typeof MoyskladCreateOrderToolSchema
+>;
+
 /** Инструмент отправки сообщений в Telegram. */
 export const SEND_MESSAGE_TOOL_NAME = 'send_message';
 export const SEND_MESSAGE_TOOL_DESCRIPTION =
@@ -290,6 +409,26 @@ export const TOOL_REGISTRY = {
   [WB_MCP_TOOL_NAME]: {
     description: WB_MCP_TOOL_DESCRIPTION,
     schema: McpToolSchema,
+  },
+  [BITRIX24_GET_DEAL_TOOL_NAME]: {
+    description: BITRIX24_GET_DEAL_TOOL_DESCRIPTION,
+    schema: Bitrix24GetDealToolSchema,
+  },
+  [BITRIX24_UPDATE_DEAL_TOOL_NAME]: {
+    description: BITRIX24_UPDATE_DEAL_TOOL_DESCRIPTION,
+    schema: Bitrix24UpdateDealToolSchema,
+  },
+  [MOYSKLAD_CHECK_STOCK_TOOL_NAME]: {
+    description: MOYSKLAD_CHECK_STOCK_TOOL_DESCRIPTION,
+    schema: MoyskladCheckStockToolSchema,
+  },
+  [MOYSKLAD_GET_COST_TOOL_NAME]: {
+    description: MOYSKLAD_GET_COST_TOOL_DESCRIPTION,
+    schema: MoyskladGetCostToolSchema,
+  },
+  [MOYSKLAD_CREATE_ORDER_TOOL_NAME]: {
+    description: MOYSKLAD_CREATE_ORDER_TOOL_DESCRIPTION,
+    schema: MoyskladCreateOrderToolSchema,
   },
   [SEND_MESSAGE_TOOL_NAME]: {
     description: SEND_MESSAGE_TOOL_DESCRIPTION,

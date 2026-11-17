@@ -18,6 +18,8 @@ export const DEFAULT_OUTBOUND_ALLOWLIST: readonly string[] = [
   "api.ttapi.io",
   "api-performance.ozon.ru",
   "discounts-prices-api.wildberries.ru",
+  "*.bitrix24.ru",
+  "*.moysklad.ru",
   "api.tavily.com",
   "ocr.api.cloud.yandex.net",
   "llm.api.cloud.yandex.net",

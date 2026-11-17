@@ -1080,16 +1080,19 @@ docker compose up -d api
 
 ## 15. Подключение MCP-серверов
 
-Для Ozon и Wildberries используются Python MCP-серверы с транспортом SSE:
+Для Ozon/Wildberries используются Python MCP-серверы, для Битрикс24 и
+МойСклад — минимальные Node.js MCP-серверы с транспортом SSE:
 
-| Сервис | Пакет | Версия | Порт |
+| Сервис | Образ/пакет | Версия | Порт |
 | --- | --- | --- | --- |
 | `ozon-mcp` | `ozon-mcp-server` | 2.5.2 | 5001 |
 | `wb-mcp` | `wb-mcp-server` | 2.6.1 | 5002 |
+| `bitrix24-mcp` | `infra/mcp/bitrix24` | local | 5003 |
+| `moysklad-mcp` | `infra/mcp/moysklad` | local | 5004 |
 
-Оба сервиса описаны в `docker-compose.mcp.yml` и собираются из
-`infra/mcp/*.Dockerfile`. API обращается к ним по внутренней сети через
-`OZON_MCP_URL` и `WB_MCP_URL`, а ключи передаются только контейнерам MCP.
+Все сервисы описаны в `docker-compose.mcp.yml`. API обращается к ним по
+внутренней сети через `OZON_MCP_URL`, `WB_MCP_URL`, `BITRIX24_MCP_URL` и
+`MOYSKLAD_MCP_URL`, а ключи передаются только контейнерам MCP.
 
 ### Получение ключей
 
@@ -1120,6 +1123,28 @@ docker compose up -d api
 3. Токен действует 180 дней; срок можно проверить на странице
    `/diagnostics` WB MCP-сервера.
 
+**Битрикс24** (portal.bitrix24.ru):
+
+1. Разработчикам → Другое → Входящий вебхук (или Приложения → Вебхуки).
+2. Выдайте права на CRM (сделки, контакты, компании) и скопируйте URL
+   `https://<portal>.bitrix24.ru/rest/<user_id>/<webhook_token>/`.
+3. Заполните в `.env`:
+
+   ```text
+   BITRIX24_WEBHOOK_URL=https://<portal>.bitrix24.ru/rest/<user_id>/<token>/
+   ```
+
+**МойСклад** (moysklad.ru):
+
+1. Настройки → Пользователи/Сотрудники → Токены доступа.
+2. Создайте токен с доступом к товарам, остаткам, заказам и контрагентам.
+3. Заполните в `.env`:
+
+   ```text
+   MOYSKLAD_TOKEN=<токен>
+   MOYSKLAD_BASE_URL=https://api.moysklad.ru/api/remap/1.2
+   ```
+
 Для защиты `/sse` задайте общий токен:
 
 ```text
@@ -1140,7 +1165,13 @@ docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build
 ```bash
 curl http://localhost:5001/api/health
 curl http://localhost:5002/api/health
+curl http://localhost:5003/api/health
+curl http://localhost:5004/api/health
 ```
+
+Без ключей healthcheck возвращает `503`; для проверки контейнеров без реальных
+интеграций задайте `MCP_ALLOW_MISSING_KEYS=1` (только локально). Наличие
+`200` не подтверждает валидность токена — см. KI-078.
 
 Веб-панели MCP-серверов: <http://localhost:5001/shops> и
 <http://localhost:5002/shops>. Через них можно добавить магазин и проверить
@@ -1167,8 +1198,11 @@ MCP-инструмента из `tools/list`:
 
 ### Безопасность
 
-* Не публикуйте порты `5001`/`5002` в интернет: веб-панели MCP не защищены
-  `MCP_AUTH_TOKEN`.
+* Не публикуйте порты `5001`–`5004` в интернет: MCP-серверы и веб-панели
+  Ozon/WB не защищены `MCP_AUTH_TOKEN` на уровне reverse proxy.
+* Битрикс24 и МойСклад MCP не имеют веб-панели; их проверка — `/api/health`
+  и `tools/list` по SSE. Ключи Битрикс24/МойСклад передаются только MCP-
+  контейнерам и не попадают в API/логи.
 * Для удалённого доступа используйте VPN или reverse proxy с TLS.
 * Ключи маркетплейсов хранятся в зашифрованном виде в volume
   `ozon_mcp_data`/`wb_mcp_data`; не копируйте только `shops.json` без

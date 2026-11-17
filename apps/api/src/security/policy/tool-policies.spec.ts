@@ -2,6 +2,7 @@ import {
   KNOWN_TOOL_NAMES,
   TOOL_POLICIES,
   getToolPolicy,
+  requiresApprovalFor,
 } from './tool-policies.js';
 
 /** Валидные аргументы для каждого инструмента из tool-schemas.ts. */
@@ -11,6 +12,14 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
   exec: { command: 'gh --version' },
   ozon_mcp_call: { action: 'ozon_get_prices', params: { sku: ['1'] } },
   wb_mcp_call: { action: 'wb_cards_list', params: { limit: 10 } },
+  bitrix24_get_deal: { dealId: '42' },
+  bitrix24_update_deal: { dealId: '42', stageId: 'WON', comments: 'Готово' },
+  moysklad_check_stock: { productId: 'product-1', quantity: 9 },
+  moysklad_get_cost: { productId: 'product-1' },
+  moysklad_create_order: {
+    dealId: '42',
+    items: [{ productId: 'product-1', quantity: 2 }],
+  },
   send_message: {
     channel: 'telegram',
     to: '@user',
@@ -53,7 +62,7 @@ const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
   it('покрывает политикой все инструменты из tool-schemas.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(22);
+    expect(TOOL_NAMES).toHaveLength(27);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 
@@ -125,5 +134,60 @@ describe('tool-policies', () => {
       egress: 'none',
     });
     expect(TOOL_POLICIES.calculate_unit_economics.taint).toBe('block');
+  });
+
+  it('объявляет HITL для необратимых действий CRM и склада', () => {
+    expect(TOOL_POLICIES.bitrix24_update_deal.approval).toBe('final-stage');
+    expect(TOOL_POLICIES.moysklad_create_order.approval).toBe('always');
+    // Читающие инструменты навыка не должны останавливать граф.
+    expect(TOOL_POLICIES.bitrix24_get_deal.approval).toBe('none');
+    expect(TOOL_POLICIES.moysklad_check_stock.approval).toBe('none');
+    expect(TOOL_POLICIES.moysklad_get_cost.approval).toBe('none');
+  });
+
+  it('требует подтверждения только для финальной стадии сделки', () => {
+    expect(
+      requiresApprovalFor('bitrix24_update_deal', {
+        dealId: '42',
+        stageId: 'WON',
+      }),
+    ).toBe(true);
+    expect(
+      requiresApprovalFor('bitrix24_update_deal', {
+        dealId: '42',
+        stageId: 'C1:WON',
+      }),
+    ).toBe(true);
+    expect(
+      requiresApprovalFor('bitrix24_update_deal', {
+        dealId: '42',
+        stageId: 'EXECUTING',
+      }),
+    ).toBe(false);
+    expect(
+      requiresApprovalFor('bitrix24_update_deal', {
+        dealId: '42',
+        comments: 'Только комментарий',
+      }),
+    ).toBe(false);
+  });
+
+  it('требует подтверждения для создания заказа и не требует для чтения', () => {
+    expect(
+      requiresApprovalFor('moysklad_create_order', {
+        dealId: '42',
+        items: [{ productId: 'product-1', quantity: 1 }],
+      }),
+    ).toBe(true);
+    expect(requiresApprovalFor('bitrix24_get_deal', { dealId: '42' })).toBe(
+      false,
+    );
+    expect(
+      requiresApprovalFor('moysklad_check_stock', {
+        productId: 'product-1',
+        quantity: 1,
+      }),
+    ).toBe(false);
+    expect(requiresApprovalFor('unknown_tool', {})).toBe(false);
   });
 });

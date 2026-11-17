@@ -10,6 +10,14 @@ import {
   OcrDocumentToolSchema as OcrDocumentSchema,
   WriteDocxToolSchema as WriteDocxSchema,
 } from '../../agent/documents/document-tools.schemas.js';
+import { isFinalDealStage } from '../../agent/tools/erp-tools.js';
+import {
+  Bitrix24GetDealToolSchema as Bitrix24GetDealSchema,
+  Bitrix24UpdateDealToolSchema as Bitrix24UpdateDealSchema,
+  MoyskladCheckStockToolSchema as MoyskladCheckStockSchema,
+  MoyskladCreateOrderToolSchema as MoyskladCreateOrderSchema,
+  MoyskladGetCostToolSchema as MoyskladGetCostSchema,
+} from '../../agent/tools/tool-schemas.js';
 import type { UserRole } from './policy.types.js';
 
 /**
@@ -34,6 +42,16 @@ export type TaintMode = 'block' | 'mask' | 'none';
 /** Вид shell-кода для структурного анализа. */
 export type ShellKind = 'exec' | 'sandbox';
 
+/**
+ * HITL-режим инструмента.
+ *
+ * `final-stage` — подтверждение нужно только для необратимого перехода
+ * (сделка Битрикс24 → «Успешно»/`WON`); Runtime решает это по аргументам
+ * вызова. Worker пока останавливает граф по имени инструмента из манифеста,
+ * поэтому на промежуточных стадиях подтверждение тоже запрашивается (KI-079).
+ */
+export type ToolApprovalMode = 'none' | 'always' | 'final-stage';
+
 /** Политика одного инструмента. */
 export interface ToolPolicy {
   readonly name: string;
@@ -51,6 +69,8 @@ export interface ToolPolicy {
   readonly allowedRoles: readonly UserRole[];
   /** Какой аргумент анализировать как shell-код. */
   readonly shell?: ShellKind;
+  /** HITL-режим; отсутствует — подтверждение не требуется. */
+  readonly approval?: ToolApprovalMode;
 }
 
 const ALL_ROLES = [
@@ -170,6 +190,60 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
     egressRequested: false,
     taint: 'block',
     allowedRoles: ALL_ROLES,
+  },
+  // --- CRM Битрикс24 и склад МойСклад (Треки K/L) ---------------------------
+  bitrix24_get_deal: {
+    name: 'bitrix24_get_deal',
+    schema: Bitrix24GetDealSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // Чтение карточки сделки безопасно: явно снимает HITL навыка с записью.
+    approval: 'none',
+  },
+  bitrix24_update_deal: {
+    name: 'bitrix24_update_deal',
+    schema: Bitrix24UpdateDealSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // HITL ядра — смена стадии на «Успешно» (необратимый финал сделки).
+    approval: 'final-stage',
+  },
+  moysklad_check_stock: {
+    name: 'moysklad_check_stock',
+    schema: MoyskladCheckStockSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+  },
+  moysklad_get_cost: {
+    name: 'moysklad_get_cost',
+    schema: MoyskladGetCostSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+  },
+  moysklad_create_order: {
+    name: 'moysklad_create_order',
+    schema: MoyskladCreateOrderSchema,
+    requiredPermission: null,
+    egress: 'none',
+    egressRequested: false,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // Создание документа на складе — всегда необратимо: подтверждение HITL.
+    approval: 'always',
   },
   // --- Каналы отправки данных: taint блокирует эксфильтрацию --------------
   send_message: {
@@ -419,6 +493,36 @@ export const KNOWN_TOOL_NAMES: readonly string[] = Object.keys(TOOL_POLICIES);
 /** Политика инструмента или undefined, если инструмент неизвестен. */
 export function getToolPolicy(toolName: string): ToolPolicy | undefined {
   return TOOL_POLICIES[toolName];
+}
+
+/** Аргумент `bitrix24_update_deal`, по которому определяется финал сделки. */
+export const DEAL_STAGE_ARG = 'stageId';
+
+/**
+ * Нужно ли подтверждение пользователя для конкретного вызова инструмента.
+ *
+ * `always` — каждый вызов (создание заказа МойСклад); `final-stage` — только
+ * перевод сделки на «Успешно» (`WON`), потому что вернуть сделку из финала
+ * можно лишь вручную. Runtime использует эту функцию как гейт перед вызовом
+ * MCP, поэтому она не зависит от текста инструкций навыка.
+ */
+export function requiresApprovalFor(
+  toolName: string,
+  args: Readonly<Record<string, unknown>>,
+): boolean {
+  const approval = getToolPolicy(toolName)?.approval ?? 'none';
+
+  if (approval === 'always') {
+    return true;
+  }
+
+  if (approval !== 'final-stage') {
+    return false;
+  }
+
+  const stageId = args[DEAL_STAGE_ARG];
+
+  return typeof stageId === 'string' && isFinalDealStage(stageId);
 }
 
 /**

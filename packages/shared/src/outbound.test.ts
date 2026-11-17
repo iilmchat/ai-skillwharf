@@ -90,6 +90,27 @@ describe("outbound allowlist", () => {
     ).toThrow(/OUTBOUND_ALLOWLIST/);
   });
 
+  it("разрешает Битрикс24 и МойСклад по wildcard", () => {
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://portal.bitrix24.ru/rest/1/token/crm.deal.list.json",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://api.moysklad.ru/api/remap/1.2/entity/product",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertOutboundUrlAllowed(
+        "https://evil.example/bitrix24.ru",
+        DEFAULT_OUTBOUND_ALLOWLIST,
+      ),
+    ).toThrow(/OUTBOUND_ALLOWLIST/);
+  });
+
   it("разрешает Tavily для фактчекинга из default allowlist", () => {
     expect(() =>
       assertOutboundUrlAllowed(

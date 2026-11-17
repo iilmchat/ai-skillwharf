@@ -2,6 +2,7 @@ import { AxiosError, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import {
+  bitrix24WebhookUrlSchema,
   connectKeyIntegration,
   connectTelegram,
   disconnectKeyIntegration,
@@ -13,6 +14,7 @@ import {
   getWildberriesTokenExpiry,
   googleAuthorizationUrlSchema,
   integrationsSchema,
+  moyskladApiTokenSchema,
   telegramBotTokenSchema,
   type IntegrationsState,
 } from './integrations';
@@ -59,6 +61,8 @@ const ACTIVE_STATE: IntegrationsState = {
   ozon: { status: 'disconnected' },
   wildberries: { status: 'disconnected' },
   midjourney: { status: 'disconnected' },
+  bitrix24: { status: 'disconnected' },
+  moysklad: { status: 'disconnected' },
 };
 
 describe('integrationsSchema', () => {
@@ -75,6 +79,8 @@ describe('integrationsSchema', () => {
       ozon: { status: 'disconnected' },
       wildberries: { status: 'disconnected' },
       midjourney: { status: 'disconnected' },
+      bitrix24: { status: 'disconnected' },
+      moysklad: { status: 'disconnected' },
     });
   });
 
@@ -113,6 +119,25 @@ describe('integrationsSchema', () => {
     ).toBe('2027-05-12T00:00:00.000Z');
     expect(getWildberriesTokenExpiry({ status: 'active' })).toBeNull();
   });
+
+  it('считает Битрикс24 и МойСклад отключёнными, если API о них не знает', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'active' },
+      google: { status: 'active' },
+    });
+
+    expect(state.bitrix24).toEqual({ status: 'disconnected' });
+    expect(state.moysklad).toEqual({ status: 'disconnected' });
+
+    // Ошибку провайдера из API схема пропускает как есть.
+    expect(
+      integrationsSchema.parse({
+        telegram: { status: 'disconnected' },
+        google: { status: 'disconnected' },
+        bitrix24: { status: 'error', error: 'errors.bitrix24_webhook_expired' },
+      }).bitrix24,
+    ).toEqual({ status: 'error', error: 'errors.bitrix24_webhook_expired' });
+  });
 });
 
 describe('telegramBotTokenSchema', () => {
@@ -143,6 +168,50 @@ describe('googleAuthorizationUrlSchema', () => {
     expect(
       googleAuthorizationUrlSchema.safeParse('javascript:alert(1)').success,
     ).toBe(false);
+  });
+});
+
+describe('bitrix24WebhookUrlSchema', () => {
+  it('принимает только абсолютный https-вебхук', () => {
+    const webhook = 'https://portal.bitrix24.ru/rest/1/abc123def/';
+
+    expect(bitrix24WebhookUrlSchema.parse(webhook)).toBe(webhook);
+    expect(
+      bitrix24WebhookUrlSchema.safeParse(
+        'http://portal.bitrix24.ru/rest/1/abc123def/',
+      ).success,
+    ).toBe(false);
+    expect(
+      bitrix24WebhookUrlSchema.safeParse('portal.bitrix24.ru/rest/1/abc/')
+        .success,
+    ).toBe(false);
+    expect(
+      bitrix24WebhookUrlSchema.safeParse('javascript:alert(1)').success,
+    ).toBe(false);
+  });
+
+  it('не пропускает пустое значение и обрезает пробелы', () => {
+    expect(bitrix24WebhookUrlSchema.safeParse('').success).toBe(false);
+    expect(bitrix24WebhookUrlSchema.safeParse('   ').success).toBe(false);
+    expect(
+      bitrix24WebhookUrlSchema.parse(
+        '  https://portal.bitrix24.ru/rest/1/abc123def/ \n',
+      ),
+    ).toBe('https://portal.bitrix24.ru/rest/1/abc123def/');
+  });
+});
+
+describe('moyskladApiTokenSchema', () => {
+  it('отклоняет пустой и заведомо неполный токен', () => {
+    expect(moyskladApiTokenSchema.safeParse('').success).toBe(false);
+    expect(moyskladApiTokenSchema.safeParse('   ').success).toBe(false);
+    expect(moyskladApiTokenSchema.safeParse('short').success).toBe(false);
+  });
+
+  it('принимает токен и убирает пробелы по краям', () => {
+    expect(moyskladApiTokenSchema.parse('  ms-token-1234567890  ')).toBe(
+      'ms-token-1234567890',
+    );
   });
 });
 
@@ -241,6 +310,32 @@ describe('integration API', () => {
     });
     expect(deleteMock).toHaveBeenCalledWith('/integrations/midjourney');
   });
+
+  it('подключает Битрикс24 по вебхуку и отключает его', async () => {
+    await connectKeyIntegration({
+      provider: 'bitrix24',
+      webhookUrl: 'https://portal.bitrix24.ru/rest/1/abc123def/',
+    });
+    await disconnectKeyIntegration('bitrix24');
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/bitrix24', {
+      webhookUrl: 'https://portal.bitrix24.ru/rest/1/abc123def/',
+    });
+    expect(deleteMock).toHaveBeenCalledWith('/integrations/bitrix24');
+  });
+
+  it('подключает МойСклад по API Token и отключает его', async () => {
+    await connectKeyIntegration({
+      provider: 'moysklad',
+      apiToken: 'ms-token-1234567890',
+    });
+    await disconnectKeyIntegration('moysklad');
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/moysklad', {
+      apiToken: 'ms-token-1234567890',
+    });
+    expect(deleteMock).toHaveBeenCalledWith('/integrations/moysklad');
+  });
 });
 
 describe('getActiveIntegrationChannels', () => {
@@ -256,6 +351,8 @@ describe('getActiveIntegrationChannels', () => {
         ozon: { status: 'disconnected' },
         wildberries: { status: 'disconnected' },
         midjourney: { status: 'disconnected' },
+        bitrix24: { status: 'disconnected' },
+        moysklad: { status: 'disconnected' },
       }),
     ).toEqual(['telegram']);
     expect(getActiveIntegrationChannels(undefined)).toEqual([]);
@@ -357,7 +454,7 @@ describe('getIntegrationErrorDetails', () => {
     ).toBe('invalidToken');
   });
 
-  it('маппит ошибки Ozon/WB/Midjourney в invalidCredentials', () => {
+  it('маппит ошибки Ozon/WB/Midjourney/Б24/МС в invalidCredentials', () => {
     expect(
       getIntegrationErrorDetails(
         axiosErrorWith(
@@ -391,6 +488,21 @@ describe('getIntegrationErrorDetails', () => {
         'midjourneyConnect',
       ).kind,
     ).toBe('sessionExpired');
+
+    // Треки K/L: Битрикс24 и МойСклад отвечают тем же invalidCredentials.
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Bad webhook' }, 400),
+        'bitrix24Connect',
+      ).kind,
+    ).toBe('invalidCredentials');
+
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ code: 'errors.provider_auth_required' }, 502),
+        'moyskladConnect',
+      ).kind,
+    ).toBe('invalidCredentials');
   });
 
   it('маппит provider_unavailable в unavailable', () => {

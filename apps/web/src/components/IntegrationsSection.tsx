@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useIntegrations } from '../hooks/useIntegrations';
 import {
+  bitrix24WebhookUrlSchema,
   connectKeyIntegration,
   connectTelegram,
   disconnectGoogle,
@@ -13,17 +14,16 @@ import {
   getTelegramDisplayName,
   getWildberriesTokenExpiry,
   integrationsQueryKey,
+  moyskladApiTokenSchema,
   telegramBotTokenSchema,
   type IntegrationErrorKind,
   type IntegrationOperation,
   type IntegrationStatus,
+  type IntegrationsState,
   type GoogleIntegration,
   type KeyIntegrationConnectInput,
   type KeyIntegrationProvider,
-  type MidjourneyIntegration,
-  type OzonIntegration,
   type TelegramIntegration,
-  type WildberriesIntegration,
 } from '../lib/integrations';
 import {
   IntegrationIcon,
@@ -492,6 +492,8 @@ const KEY_CONNECT_OPERATIONS: Record<
   ozon: 'ozonConnect',
   wildberries: 'wildberriesConnect',
   midjourney: 'midjourneyConnect',
+  bitrix24: 'bitrix24Connect',
+  moysklad: 'moyskladConnect',
 };
 
 const KEY_DISCONNECT_OPERATIONS: Record<
@@ -501,7 +503,114 @@ const KEY_DISCONNECT_OPERATIONS: Record<
   ozon: 'ozonDisconnect',
   wildberries: 'wildberriesDisconnect',
   midjourney: 'midjourneyDisconnect',
+  bitrix24: 'bitrix24Disconnect',
+  moysklad: 'moyskladDisconnect',
 };
+
+/**
+ * Поле секрета в карточке провайдера: ключи i18n строятся как
+ * `settings.integrations.<provider>.<label>`.
+ */
+interface KeyProviderFields {
+  /** Суффиксы ключей i18n: подпись, placeholder и подсказка. */
+  label: string;
+  placeholder: string;
+  hint: string;
+  /** `name` и суффикс `id` поля ввода. */
+  name: string;
+  fieldSuffix: string;
+  /** Вебхук виден при вводе: пользователь сверяет адрес портала. */
+  inputType: 'password' | 'text';
+  inputMode?: 'url';
+}
+
+const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
+  ozon: {
+    label: 'apiKey',
+    placeholder: 'apiKeyPlaceholder',
+    hint: 'apiKeyHint',
+    name: 'apiKey',
+    fieldSuffix: 'api-key',
+    inputType: 'password',
+  },
+  wildberries: {
+    label: 'apiToken',
+    placeholder: 'apiTokenPlaceholder',
+    hint: 'apiTokenHint',
+    name: 'apiToken',
+    fieldSuffix: 'api-token',
+    inputType: 'password',
+  },
+  midjourney: {
+    label: 'ttApiKey',
+    placeholder: 'ttApiKeyPlaceholder',
+    hint: 'ttApiKeyHint',
+    name: 'apiKey',
+    fieldSuffix: 'api-key',
+    inputType: 'password',
+  },
+  bitrix24: {
+    label: 'webhookUrl',
+    placeholder: 'webhookUrlPlaceholder',
+    hint: 'webhookUrlHint',
+    name: 'webhookUrl',
+    fieldSuffix: 'webhook-url',
+    inputType: 'text',
+    inputMode: 'url',
+  },
+  moysklad: {
+    label: 'apiToken',
+    placeholder: 'apiTokenPlaceholder',
+    hint: 'apiTokenHint',
+    name: 'apiToken',
+    fieldSuffix: 'api-token',
+    inputType: 'password',
+  },
+};
+
+/** Ключ ошибки формата секрета в локали `<prefix>.<key>`. */
+const SECRET_ERROR_KEYS: Record<KeyIntegrationProvider, string> = {
+  ozon: 'invalidFields',
+  wildberries: 'invalidFields',
+  midjourney: 'invalidFields',
+  bitrix24: 'invalidWebhookUrl',
+  moysklad: 'invalidToken',
+};
+
+/**
+ * Проверка формата секрета до запроса к API: Битрикс24 принимает только
+ * абсолютный `https://`-вебхук, МойСклад — токен разумной длины. Формат
+ * ключей Ozon/Wildberries/Midjourney проверяет провайдер.
+ */
+const SECRET_VALIDATORS: Record<
+  KeyIntegrationProvider,
+  (value: string) => boolean
+> = {
+  ozon: () => true,
+  wildberries: () => true,
+  midjourney: () => true,
+  bitrix24: (value) => bitrix24WebhookUrlSchema.safeParse(value).success,
+  moysklad: (value) => moyskladApiTokenSchema.safeParse(value).success,
+};
+
+/** Тело `POST /integrations/<provider>`: набор полей зависит от провайдера. */
+function buildKeyConnectInput(
+  provider: KeyIntegrationProvider,
+  clientId: string,
+  secret: string,
+): KeyIntegrationConnectInput {
+  switch (provider) {
+    case 'ozon':
+      return { provider, clientId, apiKey: secret };
+    case 'wildberries':
+    case 'moysklad':
+      return { provider, apiToken: secret };
+    case 'bitrix24':
+      return { provider, webhookUrl: secret };
+    case 'midjourney':
+      return { provider, apiKey: secret };
+  }
+}
 
 function formatIntegrationDate(value: string, language: string): string {
   const date = new Date(value);
@@ -522,11 +631,7 @@ function ProviderKeyCard({
   onRefresh,
 }: {
   provider: KeyIntegrationProvider;
-  integration:
-    | OzonIntegration
-    | WildberriesIntegration
-    | MidjourneyIntegration
-    | undefined;
+  integration: IntegrationsState[KeyIntegrationProvider] | undefined;
   onRefresh: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -547,24 +652,11 @@ function ProviderKeyCard({
       ? (getWildberriesTokenExpiry(integration) ?? null)
       : null;
   const prefix = `settings.integrations.${provider}`;
-  const secretLabelKey = isOzon
-    ? `${prefix}.apiKey`
-    : isWildberries
-      ? `${prefix}.apiToken`
-      : `${prefix}.ttApiKey`;
-  const secretPlaceholderKey = isOzon
-    ? `${prefix}.apiKeyPlaceholder`
-    : isWildberries
-      ? `${prefix}.apiTokenPlaceholder`
-      : `${prefix}.ttApiKeyPlaceholder`;
-  const secretHintKey = isOzon
-    ? `${prefix}.apiKeyHint`
-    : isWildberries
-      ? `${prefix}.apiTokenHint`
-      : `${prefix}.ttApiKeyHint`;
-  const secretFieldId = isWildberries
-    ? `${provider}-api-token`
-    : `${provider}-api-key`;
+  const fields = KEY_PROVIDER_FIELDS[provider];
+  const secretLabelKey = `${prefix}.${fields.label}`;
+  const secretPlaceholderKey = `${prefix}.${fields.placeholder}`;
+  const secretHintKey = `${prefix}.${fields.hint}`;
+  const secretFieldId = `${provider}-${fields.fieldSuffix}`;
 
   const connectMutation = useMutation({
     mutationFn: (input: KeyIntegrationConnectInput) =>
@@ -600,16 +692,15 @@ function ProviderKeyCard({
       return;
     }
 
+    if (!SECRET_VALIDATORS[provider](trimmedSecret)) {
+      setFieldError(t(`${prefix}.${SECRET_ERROR_KEYS[provider]}`));
+      return;
+    }
+
     setFieldError(null);
-
-    const input: KeyIntegrationConnectInput =
-      provider === 'ozon'
-        ? { provider, clientId: trimmedClientId, apiKey: trimmedSecret }
-        : provider === 'wildberries'
-          ? { provider, apiToken: trimmedSecret }
-          : { provider, apiKey: trimmedSecret };
-
-    connectMutation.mutate(input);
+    connectMutation.mutate(
+      buildKeyConnectInput(provider, trimmedClientId, trimmedSecret),
+    );
   }
 
   function handleClientIdChange(value: string): void {
@@ -725,8 +816,9 @@ function ProviderKeyCard({
             </label>
             <input
               id={secretFieldId}
-              name={isWildberries ? 'apiToken' : 'apiKey'}
-              type="password"
+              name={fields.name}
+              type={fields.inputType}
+              inputMode={fields.inputMode}
               autoComplete="off"
               spellCheck={false}
               value={secret}
@@ -961,6 +1053,16 @@ export function IntegrationsSection() {
               <ProviderKeyCard
                 provider="midjourney"
                 integration={data.midjourney}
+                onRefresh={refreshIntegrations}
+              />
+              <ProviderKeyCard
+                provider="bitrix24"
+                integration={data.bitrix24}
+                onRefresh={refreshIntegrations}
+              />
+              <ProviderKeyCard
+                provider="moysklad"
+                integration={data.moysklad}
                 onRefresh={refreshIntegrations}
               />
             </div>

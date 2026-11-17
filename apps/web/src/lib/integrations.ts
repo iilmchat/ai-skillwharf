@@ -29,7 +29,10 @@ import { api } from './api';
  * - `POST/DELETE /api/v1/integrations/wildberries` — `{ apiToken }`,
  *   срок действия 180 дней (`tokenExpiresAt`/`expiresAt` в статусе);
  * - `POST/DELETE /api/v1/integrations/midjourney` — `{ apiKey }`
- *   (TT-API-KEY через TTAPI).
+ *   (TT-API-KEY через TTAPI);
+ * - `POST/DELETE /api/v1/integrations/bitrix24` — `{ webhookUrl }`, входящий
+ *   вебхук портала (Трек K/L);
+ * - `POST/DELETE /api/v1/integrations/moysklad` — `{ apiToken }` (Трек K/L).
  *
  * Ответы валидируются Zod: UI не показывает частично распарсенное состояние
  * и не подставляет вымышленные имена ботов/email. Если endpoint ещё не
@@ -40,11 +43,13 @@ export const INTEGRATION_PROVIDERS = ['telegram', 'google'] as const;
 
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
 
-/** Провайдеры, которые подключаются ключами (Sprint 19). */
+/** Провайдеры, которые подключаются ключами (Sprint 19, Треки K/L). */
 export const KEY_INTEGRATION_PROVIDERS = [
   'ozon',
   'wildberries',
   'midjourney',
+  'bitrix24',
+  'moysklad',
 ] as const;
 
 export type KeyIntegrationProvider =
@@ -114,6 +119,25 @@ export type MidjourneyIntegration = z.infer<
   typeof midjourneyIntegrationSchema
 >;
 
+/**
+ * Битрикс24 (Треки K/L): входящий вебхук портала. Сам URL — секрет, поэтому
+ * после подключения API его не возвращает, а статус ограничен `status`.
+ */
+export const bitrix24IntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  error: integrationErrorTextSchema,
+});
+
+export type Bitrix24Integration = z.infer<typeof bitrix24IntegrationSchema>;
+
+/** МойСклад (Треки K/L): API Token учётной системы. */
+export const moyskladIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  error: integrationErrorTextSchema,
+});
+
+export type MoyskladIntegration = z.infer<typeof moyskladIntegrationSchema>;
+
 export const integrationsSchema = z.object({
   telegram: telegramIntegrationSchema,
   google: googleIntegrationSchema,
@@ -121,6 +145,8 @@ export const integrationsSchema = z.object({
   ozon: ozonIntegrationSchema.default({ status: 'disconnected' }),
   wildberries: wildberriesIntegrationSchema.default({ status: 'disconnected' }),
   midjourney: midjourneyIntegrationSchema.default({ status: 'disconnected' }),
+  bitrix24: bitrix24IntegrationSchema.default({ status: 'disconnected' }),
+  moysklad: moyskladIntegrationSchema.default({ status: 'disconnected' }),
 });
 
 export type IntegrationsState = z.infer<typeof integrationsSchema>;
@@ -142,8 +168,8 @@ export const telegramBotTokenSchema = z
   .max(256)
   .regex(/^\d+:[A-Za-z0-9_-]+$/, 'ожидается токен вида 123456789:AA...');
 
-/** Абсолютный https-URL OAuth; другие схемы отклоняются. */
-export const googleAuthorizationUrlSchema = z.string().url().refine(
+/** Абсолютный https-URL; относительные пути и другие схемы отклоняются. */
+export const httpsAbsoluteUrlSchema = z.string().trim().url().refine(
   (value) => {
     try {
       return new URL(value).protocol === 'https:';
@@ -153,6 +179,25 @@ export const googleAuthorizationUrlSchema = z.string().url().refine(
   },
   { message: 'ожидается абсолютный https URL' },
 );
+
+/** Абсолютный https-URL OAuth; другие схемы отклоняются. */
+export const googleAuthorizationUrlSchema = httpsAbsoluteUrlSchema;
+
+/**
+ * Вебхук Битрикс24 (Треки K/L): только абсолютный `https://`-URL.
+ *
+ * Протокол проверяется через `URL.protocol`, поэтому `http://`, `javascript:`
+ * и относительные пути отклоняются до запроса к API. Код вебхука лежит в
+ * пути URL, то есть сам адрес — секрет: после подключения он не возвращается,
+ * а в интерфейсе показывается только пометка «сохранён на сервере».
+ */
+export const bitrix24WebhookUrlSchema = httpsAbsoluteUrlSchema;
+
+/**
+ * API Token МойСклада (Треки K/L): формат проверяет провайдер, UI отсекает
+ * пустые и заведомо неполные значения.
+ */
+export const moyskladApiTokenSchema = z.string().trim().min(10).max(2048);
 
 const googleAuthorizationResponseSchema = z.union([
   z.object({ url: z.string() }).transform((value) => value.url),
@@ -191,9 +236,14 @@ export async function disconnectGoogle(): Promise<void> {
 export type KeyIntegrationConnectInput =
   | { provider: 'ozon'; clientId: string; apiKey: string }
   | { provider: 'wildberries'; apiToken: string }
-  | { provider: 'midjourney'; apiKey: string };
+  | { provider: 'midjourney'; apiKey: string }
+  | { provider: 'bitrix24'; webhookUrl: string }
+  | { provider: 'moysklad'; apiToken: string };
 
-/** Подключение Ozon/WB/Midjourney; тело зависит от провайдера. */
+/**
+ * Подключение Ozon/WB/Midjourney/Битрикс24/МойСклад; тело зависит от
+ * провайдера.
+ */
 export async function connectKeyIntegration(
   input: KeyIntegrationConnectInput,
 ): Promise<void> {
@@ -258,7 +308,11 @@ export type IntegrationOperation =
   | 'wildberriesConnect'
   | 'wildberriesDisconnect'
   | 'midjourneyConnect'
-  | 'midjourneyDisconnect';
+  | 'midjourneyDisconnect'
+  | 'bitrix24Connect'
+  | 'bitrix24Disconnect'
+  | 'moyskladConnect'
+  | 'moyskladDisconnect';
 
 export type IntegrationErrorKind =
   | 'network'
@@ -327,6 +381,8 @@ const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
   'ozonConnect',
   'wildberriesConnect',
   'midjourneyConnect',
+  'bitrix24Connect',
+  'moyskladConnect',
 ];
 
 function isKeyConnectOperation(operation: IntegrationOperation): boolean {
@@ -380,7 +436,8 @@ export function getIntegrationErrorDetails(
     return { kind: 'oauthUnavailable', serverMessage };
   }
 
-  // Ozon/WB/Midjourney: provider_auth_required — неверные ключи провайдера,
+  // Ozon/WB/Midjourney/Битрикс24/МойСклад: provider_auth_required — неверные
+  // ключи провайдера,
   // а не истёкшая сессия SkillWharf (provider-http отдаёт его при 401/403
   // внешнего API, но как 502 для нашего клиента).
   if (

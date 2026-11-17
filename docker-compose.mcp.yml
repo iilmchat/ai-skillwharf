@@ -1,10 +1,11 @@
-# MCP-серверы Ozon и Wildberries (Python, SSE).
+# MCP-серверы Ozon/Wildberries (Python/SSE) и Битрикс24/МойСклад (Node/SSE).
 # Запуск вместе с основным стеком:
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build
 #
 # Ключи берутся из .env:
 #   OZON_CLIENT_ID, OZON_API_KEY, OZON_PERF_CLIENT_ID, OZON_PERF_CLIENT_SECRET
 #   WB_API_TOKEN
+#   BITRIX24_WEBHOOK_URL, MOYSKLAD_TOKEN, MOYSKLAD_BASE_URL
 #   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
 services:
   api:
@@ -15,6 +16,8 @@ services:
     environment:
       OZON_MCP_URL: http://ozon-mcp:5001
       WB_MCP_URL: http://wb-mcp:5002
+      BITRIX24_MCP_URL: http://bitrix24-mcp:5003
+      MOYSKLAD_MCP_URL: http://moysklad-mcp:5004
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
 
   ozon-mcp:
@@ -72,6 +75,53 @@ services:
         [
           'CMD-SHELL',
           'python /usr/local/bin/mcp-healthcheck.py wb http://127.0.0.1:5002/api/health',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bitrix24-mcp:
+    build:
+      context: ./infra/mcp/bitrix24
+    environment:
+      PORT: 5003
+      BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL:-}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+    ports:
+      # Только localhost: MCP-сервер не публикуется во внешнюю сеть.
+      - '127.0.0.1:5003:5003'
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:5003/api/health >/dev/null || exit 1',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  moysklad-mcp:
+    build:
+      context: ./infra/mcp/moysklad
+    environment:
+      PORT: 5004
+      MOYSKLAD_TOKEN: ${MOYSKLAD_TOKEN:-}
+      MOYSKLAD_BASE_URL: ${MOYSKLAD_BASE_URL:-https://api.moysklad.ru/api/remap/1.2}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+    ports:
+      # Только localhost: MCP-сервер не публикуется во внешнюю сеть.
+      - '127.0.0.1:5004:5004'
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:5004/api/health >/dev/null || exit 1',
         ]
       interval: 15s
       timeout: 5s

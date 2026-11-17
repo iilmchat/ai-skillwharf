@@ -21,6 +21,8 @@
 | `pdf-extractor` | [`16-documents/pdf-extractor`](16-documents/pdf-extractor/SKILL.md) | Текст и таблицы из PDF | Pay-per-Call, 30 RUB за файл | `filesystem` | `extract_pdf` |
 | `docx-writer` | [`16-documents/docx-writer`](16-documents/docx-writer/SKILL.md) | Отчёт в Word (DOCX) | Pay-per-Call, 10 RUB за файл | `filesystem` | `write_docx` |
 | `ocr-smart-engine` | [`16-documents/ocr-smart-engine`](16-documents/ocr-smart-engine/SKILL.md) | Распознавание сканов (Smart Document Engine / Tesseract) | Pay-per-Call, 50 RUB за документ | `filesystem`, `network` | `ocr_document` |
+| `bitrix24-crm` | [`17-crm/bitrix24-crm`](17-crm/bitrix24-crm/SKILL.md) | Сделки Битрикс24: карточка, стадия, комментарии, закрытие с HITL | Pay-per-Call, 15 RUB за вызов | `network` | `bitrix24_get_deal`, `bitrix24_update_deal` |
+| `moysklad-warehouse` | [`18-erp/moysklad-warehouse`](18-erp/moysklad-warehouse/SKILL.md) | Склад МойСклада: остатки, себестоимость, заказ покупателя с HITL | Pay-per-Call, 15 RUB за вызов | `network` | `moysklad_check_stock`, `moysklad_get_cost`, `moysklad_create_order` |
 
 ## Модели монетизации
 

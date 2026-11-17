@@ -22,7 +22,17 @@ import { MidjourneyService } from './finance/midjourney.service.js';
 import type { McpProvider } from './tools/mcp-gateway.js';
 import { MarketplaceMcpService } from './tools/marketplace-mcp.service.js';
 import {
+  bitrix24GetDeal,
+  bitrix24UpdateDeal,
+  moyskladCheckStock,
+  moyskladCreateOrder,
+  moyskladGetCost,
+  type ErpToolContext,
+} from './tools/erp-tools.js';
+import {
   AUDIT_FRAUD_RISK_TOOL_NAME,
+  BITRIX24_GET_DEAL_TOOL_NAME,
+  BITRIX24_UPDATE_DEAL_TOOL_NAME,
   CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
   CHECK_FACTS_TOOL_NAME,
   DETECT_PROFIT_LEAKS_TOOL_NAME,
@@ -34,6 +44,9 @@ import {
   GOOGLE_DOCS_CREATE_TOOL_NAME,
   GOOGLE_SHEETS_APPEND_TOOL_NAME,
   MONITOR_COMPETITOR_PRICES_TOOL_NAME,
+  MOYSKLAD_CHECK_STOCK_TOOL_NAME,
+  MOYSKLAD_CREATE_ORDER_TOOL_NAME,
+  MOYSKLAD_GET_COST_TOOL_NAME,
   OCR_DOCUMENT_TOOL_NAME,
   OZON_MCP_TOOL_NAME,
   PUBLISH_TO_DZEN_TOOL_NAME,
@@ -51,6 +64,8 @@ import {
 } from './tools/tool-schemas.js';
 import {
   AuditFraudRiskToolSchema,
+  Bitrix24GetDealToolSchema,
+  Bitrix24UpdateDealToolSchema,
   CalculateUnitEconomicsToolSchema,
   DetectProfitLeaksToolSchema,
   ExecToolSchema,
@@ -60,6 +75,9 @@ import {
   GoogleSheetsAppendToolSchema,
   McpToolSchema,
   MonitorCompetitorPricesToolSchema,
+  MoyskladCheckStockToolSchema,
+  MoyskladCreateOrderToolSchema,
+  MoyskladGetCostToolSchema,
   PublishToDzenToolSchema,
   RunWorkflowToolSchema,
   SandboxToolSchema,
@@ -158,6 +176,11 @@ export class AgentToolsService {
     const optional: Array<[string, ToolName]> = [
       [OZON_MCP_TOOL_NAME, OZON_MCP_TOOL_NAME],
       [WB_MCP_TOOL_NAME, WB_MCP_TOOL_NAME],
+      [BITRIX24_GET_DEAL_TOOL_NAME, BITRIX24_GET_DEAL_TOOL_NAME],
+      [BITRIX24_UPDATE_DEAL_TOOL_NAME, BITRIX24_UPDATE_DEAL_TOOL_NAME],
+      [MOYSKLAD_CHECK_STOCK_TOOL_NAME, MOYSKLAD_CHECK_STOCK_TOOL_NAME],
+      [MOYSKLAD_GET_COST_TOOL_NAME, MOYSKLAD_GET_COST_TOOL_NAME],
+      [MOYSKLAD_CREATE_ORDER_TOOL_NAME, MOYSKLAD_CREATE_ORDER_TOOL_NAME],
       [SEND_MESSAGE_TOOL_NAME, SEND_MESSAGE_TOOL_NAME],
       [GOOGLE_SHEETS_APPEND_TOOL_NAME, GOOGLE_SHEETS_APPEND_TOOL_NAME],
       [GOOGLE_DOCS_CREATE_TOOL_NAME, GOOGLE_DOCS_CREATE_TOOL_NAME],
@@ -260,6 +283,56 @@ export class AgentToolsService {
 
       case WB_MCP_TOOL_NAME:
         return this.executeMarketplaceMcp('wb', args, options);
+
+      case BITRIX24_GET_DEAL_TOOL_NAME: {
+        const input = Bitrix24GetDealToolSchema.parse(args);
+
+        return bitrix24GetDeal(
+          this.marketplace,
+          input,
+          this.erpContext(options),
+        );
+      }
+
+      case BITRIX24_UPDATE_DEAL_TOOL_NAME: {
+        const input = Bitrix24UpdateDealToolSchema.parse(args);
+
+        return bitrix24UpdateDeal(
+          this.marketplace,
+          input,
+          this.erpContext(options),
+        );
+      }
+
+      case MOYSKLAD_CHECK_STOCK_TOOL_NAME: {
+        const input = MoyskladCheckStockToolSchema.parse(args);
+
+        return moyskladCheckStock(
+          this.marketplace,
+          input,
+          this.erpContext(options),
+        );
+      }
+
+      case MOYSKLAD_GET_COST_TOOL_NAME: {
+        const input = MoyskladGetCostToolSchema.parse(args);
+
+        return moyskladGetCost(
+          this.marketplace,
+          input,
+          this.erpContext(options),
+        );
+      }
+
+      case MOYSKLAD_CREATE_ORDER_TOOL_NAME: {
+        const input = MoyskladCreateOrderToolSchema.parse(args);
+
+        return moyskladCreateOrder(
+          this.marketplace,
+          input,
+          this.erpContext(options),
+        );
+      }
 
       case SEND_MESSAGE_TOOL_NAME: {
         const input = SendMessageToolSchema.parse(args);
@@ -537,6 +610,24 @@ export class AgentToolsService {
 
       return null;
     }
+  }
+
+  /**
+   * Контекст ERP-инструмента: endpoint из манифеста навыка и списание
+   * Pay-per-Call после успешного ответа MCP.
+   */
+  private erpContext(options: McpToolOptions): ErpToolContext {
+    return {
+      ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
+      ...(options.authToken === undefined
+        ? {}
+        : { authToken: options.authToken }),
+      ...(options.skills === undefined ? {} : { skills: options.skills }),
+      ...(options.userId === undefined ? {} : { userId: options.userId }),
+      ...(options.beforeExecute === undefined
+        ? {}
+        : { beforeExecute: options.beforeExecute }),
+    };
   }
 
   private async executeMarketplaceMcp(

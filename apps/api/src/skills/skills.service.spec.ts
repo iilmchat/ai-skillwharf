@@ -275,13 +275,14 @@ version: 1
 
       const seeded = await service.seedStarterSkills();
 
-      expect(seeded).toBe(22);
+      expect(seeded).toBe(24);
 
       const names = (prisma.installedSkill.upsert.mock.calls as [UpsertArgs][])
         .map(([args]) => args.where.name)
         .sort();
 
       expect(names).toEqual([
+        'bitrix24-crm',
         'code-runner',
         'cron-automation',
         'document-analyzer',
@@ -293,6 +294,7 @@ version: 1
         'google-workspace',
         'messenger-connector',
         'midjourney-api',
+        'moysklad-warehouse',
         'ocr-smart-engine',
         'ozon-seller',
         'pdf-extractor',

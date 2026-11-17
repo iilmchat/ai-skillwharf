@@ -30,8 +30,30 @@ import {
 
 export type { McpToolDescriptor } from './mcp-client.js';
 
-/** MCP-провайдер, с которым работает gateway. */
-export type McpProvider = 'ozon' | 'wb';
+/**
+ * MCP-провайдер, с которым работает gateway.
+ *
+ * `bitrix24` и `moysklad` — коннекторы Треков K (Опт) и L (Производство);
+ * их действия описаны в `infra/mcp/bitrix24` и `infra/mcp/moysklad`.
+ */
+export type McpProvider = 'ozon' | 'wb' | 'bitrix24' | 'moysklad';
+
+/**
+ * Действия MCP-сервера Битрикс24 (реальные имена из `tools/list`).
+ *
+ * Имена зафиксированы контрактом `infra/mcp/bitrix24/server.mjs`: Gateway не
+ * хардкодит REST-методы, а вызывает инструмент MCP-сервера.
+ */
+export const BITRIX24_MCP_ACTIONS = {
+  dealGet: 'crm_deal_get',
+  dealUpdate: 'crm_deal_update',
+} as const;
+
+/** Действия MCP-сервера МойСклад (реальные имена из `tools/list`). */
+export const MOYSKLAD_MCP_ACTIONS = {
+  productGet: 'product_get',
+  customerOrderCreate: 'customer_order_create',
+} as const;
 
 /** Таймаут одной попытки вызова MCP-сервера. */
 export const MCP_DEFAULT_TIMEOUT_MS = 15_000;
@@ -85,6 +107,26 @@ export const mcpToolCallSchema = z
     action: mcpActionSchema,
     params: z
       .record(mcpParamKeySchema, mcpParamValueSchema)
+      .refine((params) => Object.keys(params).length <= MCP_MAX_PARAMS_KEYS, {
+        message: `не более ${MCP_MAX_PARAMS_KEYS} ключей в params`,
+      }),
+  })
+  .strict();
+
+/**
+ * Конверт вызова действия с вложенными параметрами (Битрикс24, МойСклад).
+ *
+ * Структурная схема с плоскими примитивами не подходит действиям, где
+ * провайдер ждёт объект (`fields`, `payload`). Для них форма проверяется
+ * здесь (только имя действия и объект параметров), а семантика — строгой
+ * схемой конкретного действия из `KNOWN_ACTION_SCHEMAS`. Неизвестные
+ * действия по-прежнему проходят старую плоскую проверку.
+ */
+const mcpActionEnvelopeSchema = z
+  .object({
+    action: mcpActionSchema,
+    params: z
+      .record(z.string().min(1).max(64), z.unknown())
       .refine((params) => Object.keys(params).length <= MCP_MAX_PARAMS_KEYS, {
         message: `не более ${MCP_MAX_PARAMS_KEYS} ключей в params`,
       }),
@@ -289,10 +331,78 @@ const WB_ACTION_SCHEMAS = {
   }),
 };
 
+/** ID сделки Битрикс24: числовой или строковый (как в REST). */
+const bitrixDealIdSchema = z.union([
+  z.string().min(1).max(64),
+  z.number().int().positive(),
+]);
+
+/**
+ * ID сущности МойСклад: ровно тот формат, который принимает MCP-сервер
+ * (`safeEntityId`: буквы, цифры, дефис и подчёркивание).
+ */
+const moyskladEntityIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{1,64}$/, 'ожидается ID сущности МойСклад');
+
+/** Ссылка на сущность МойСклад: `{ meta: { href, type, mediaType } }`. */
+const moyskladMetaSchema = z.strictObject({
+  meta: z.strictObject({
+    href: z.url().max(2048),
+    type: z.string().min(1).max(64).optional(),
+    mediaType: z.string().min(1).max(64).optional(),
+  }),
+});
+
+/** Позиция заказа покупателя: цена уже в копейках, как ждёт JSON API 1.2. */
+const moyskladOrderPositionSchema = z.strictObject({
+  quantity: z.number().positive().max(1_000_000),
+  price: z.number().int().nonnegative().max(10_000_000_000),
+  assortment: moyskladMetaSchema,
+});
+
+/** Тело заказа покупателя (`POST /entity/customerorder`). */
+const moyskladCustomerOrderPayloadSchema = z.strictObject({
+  name: z.string().min(1).max(255).optional(),
+  description: z.string().max(2_000).optional(),
+  organization: moyskladMetaSchema.optional(),
+  agent: moyskladMetaSchema.optional(),
+  positions: z.array(moyskladOrderPositionSchema).min(1).max(50),
+});
+
+/**
+ * Строгие схемы действий Битрикс24. `fields` — объект, поэтому для этих
+ * действий конверт проверяется отдельно, а семантику задаёт эта схема.
+ */
+const BITRIX24_ACTION_SCHEMAS = {
+  [BITRIX24_MCP_ACTIONS.dealGet]: z.strictObject({
+    id: bitrixDealIdSchema,
+  }),
+  [BITRIX24_MCP_ACTIONS.dealUpdate]: z.strictObject({
+    id: bitrixDealIdSchema,
+    fields: z.strictObject({
+      STAGE_ID: z.string().min(1).max(64).optional(),
+      COMMENTS: z.string().max(4_000).optional(),
+    }),
+  }),
+};
+
+/** Строгие схемы действий МойСклад. */
+const MOYSKLAD_ACTION_SCHEMAS = {
+  [MOYSKLAD_MCP_ACTIONS.productGet]: z.strictObject({
+    id: moyskladEntityIdSchema,
+  }),
+  [MOYSKLAD_MCP_ACTIONS.customerOrderCreate]: z.strictObject({
+    payload: moyskladCustomerOrderPayloadSchema,
+  }),
+};
+
 /** Реестр известных действий по провайдерам. */
 const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
   ozon: OZON_ACTION_SCHEMAS,
   wb: WB_ACTION_SCHEMAS,
+  bitrix24: BITRIX24_ACTION_SCHEMAS,
+  moysklad: MOYSKLAD_ACTION_SCHEMAS,
 };
 
 /** Опции создания gateway. */
@@ -376,11 +486,12 @@ export class McpGateway {
    * Валидирует аргументы и вызывает MCP-инструмент. Возвращает текстовый
    * результат как есть, а любые сбои превращает в `ApiException`.
    *
-   * Порядок проверок: структурная Zod-схема → discovery-проверка действия →
+   * Порядок проверок: конверт вызова (плоская или вложенная форма в
+   * зависимости от известности действия) → discovery-проверка действия →
    * строгая схема известного действия → `client.callTool`.
    */
   async call(input: unknown): Promise<string> {
-    const { action, params } = validateMcpCall(input);
+    const { action, params } = this.validateEnvelope(input);
     await this.assertDiscoveredAction(action);
     const validatedParams = this.validateKnownAction(action, params);
 
@@ -467,6 +578,27 @@ export class McpGateway {
         message,
       }),
     );
+  }
+
+  /**
+   * Проверяет конверт вызова. Для известного действия (есть строгая схема)
+   * достаточно имени действия и объекта параметров: форму задаёт эта схема.
+   * Для неизвестного действия остаётся плоская структурная проверка.
+   */
+  private validateEnvelope(input: unknown): {
+    action: string;
+    params: Record<string, unknown>;
+  } {
+    const envelope = mcpActionEnvelopeSchema.safeParse(input);
+
+    if (
+      envelope.success &&
+      KNOWN_ACTION_SCHEMAS[this.provider][envelope.data.action] !== undefined
+    ) {
+      return envelope.data;
+    }
+
+    return validateMcpCall(input);
   }
 
   /** Применяет строгую схему известного действия; неизвестное пропускает. */

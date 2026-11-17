@@ -7,6 +7,14 @@ import { readPositiveEnvNumber } from './persistence-env.js';
 /** TTL ожидания решения по умолчанию: сутки. */
 export const DEFAULT_APPROVAL_TTL_HOURS = 24;
 
+/**
+ * Сколько действует HITL-одобрение после решения пользователя.
+ *
+ * Граф возобновляется сразу после `approve`, поэтому окно маленькое: оно не
+ * даёт повторно выполнить необратимый инструмент спустя произвольное время.
+ */
+export const APPROVAL_GRANT_TTL_MS = 10 * 60 * 1000;
+
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 /** Причины ожидания пользовательского решения. */
@@ -220,6 +228,37 @@ export class PendingApprovalService {
     }
 
     return records;
+  }
+
+  /**
+   * Есть ли у диалога свежее одобрение конкретного инструмента.
+   *
+   * HITL-гейт необратимых действий: Runtime выполняет вызов только при
+   * `approved`-записи моложе `APPROVAL_GRANT_TTL_MS`, в списке `tools` которой
+   * есть этот инструмент. Запись переживает рестарт API, поэтому гейт
+   * работает и при нескольких репликах Gateway.
+   */
+  async hasApprovedGrant(
+    conversationId: string,
+    toolName: string,
+    now: Date = new Date(),
+    ttlMs: number = APPROVAL_GRANT_TTL_MS,
+  ): Promise<boolean> {
+    const row = await this.prisma.pendingApproval.findFirst({
+      where: {
+        conversationId,
+        status: 'approved',
+        resolvedAt: { gte: new Date(now.getTime() - ttlMs) },
+      },
+    });
+
+    if (row === null) {
+      return false;
+    }
+
+    const record = this.parseRow(row);
+
+    return record !== null && record.tools.includes(toolName);
   }
 
   /**

@@ -5,6 +5,7 @@
 ## Документы раздела
 
 - [C4 Level 1: Контекст](C4-Level1-Context.md)
+- [MCP-коннекторы Битрикс24 и МойСклад (треки K/L)](MCP-ERP-Connectors.md)
 - [ADR 0001: Выбор паттерна Hub-and-Spoke](ADR/0001-hub-and-spoke.md)
 - [ADR 0002: Технологический стек](ADR/0002-tech-stack.md)
 - [ADR 0003: AI-Офис как опциональный плагин](ADR/0003-ai-office-plugin.md)

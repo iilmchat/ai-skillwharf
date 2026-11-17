@@ -4,6 +4,75 @@
 
 ## [Unreleased]
 
+### Web: интеграции Битрикс24 и МойСклад (треки K/L)
+
+- В разделе «Настройки → Интеграции» появились карточки «Битрикс24» и
+  «МойСклад»: поле `Webhook URL` и `API Token` соответственно, кнопки
+  «Подключить» / «Отключить», статус, подсказки и локализованные ошибки
+  (RU/EN). Группа провайдеров переименована в «Внешние сервисы».
+- Контракт UI (`apps/web/src/lib/integrations.ts`) расширен провайдерами
+  `bitrix24` и `moysklad`: `POST/DELETE /api/v1/integrations/bitrix24`
+  (`{ webhookUrl }`) и `POST/DELETE /api/v1/integrations/moysklad`
+  (`{ apiToken }`). Если `GET /api/v1/integrations` этих ключей не отдаёт,
+  Zod-схема подставляет `disconnected`, поэтому старый API продолжает
+  работать.
+- Валидация до запроса: вебхук обязан быть абсолютным `https://`-URL
+  (`http://`, `javascript:` и относительные пути отклоняются), токен
+  МойСклада — непустая строка разумной длины; пробелы по краям обрезаются,
+  пустые значения не отправляются.
+- API-маршрутов под новые провайдеры пока нет: до их появления подключение
+  отвечает 404 «Интеграция пока недоступна» (KI-075).
+
+**Новые известные проблемы:** KI-075, KI-076.
+
+### Tracks K & L: Bitrix24 + MoySklad MCP
+
+- Добавлены минимальные MCP-серверы `bitrix24-mcp` (5003) и `moysklad-mcp` (5004) в `docker-compose.mcp.yml` с healthcheck и общим `MCP_AUTH_TOKEN`. Транспорт — MCP HTTP/SSE, совместимый с `McpClient`; ключи передаются только MCP-контейнерам.
+- `bitrix24-mcp`: Inbound Webhook `BITRIX24_WEBHOOK_URL`; реальные методы `crm.deal.list/get/add/update`, `crm.contact.list`, `crm.company.list`. Внешний URL — только `https` и `*.bitrix24.ru`, путь обязан содержать `/rest/`; локальные адреса разрешены для smoke-тестов.
+- `moysklad-mcp`: JSON API 1.2 (`MOYSKLAD_BASE_URL`, Bearer `MOYSKLAD_TOKEN`); инструменты `product_list/get`, `stock_report`, `customer_order_list/get/create`, `counterparty_list`. Внешний base URL — только `https`/`*.moysklad.ru`.
+- Egress allowlist расширен на `*.bitrix24.ru` и `*.moysklad.ru` в `DEFAULT_OUTBOUND_ALLOWLIST` и в env-примерах API/LLM worker. `GETSTARTED.md` и Runbook описывают получение вебхука и токена, запуск и проверку MCP. Остаточные ограничения — KI-077/KI-078.
+
+### Agent: инструменты CRM и склада (треки K/L)
+
+- Новые инструменты агента: `bitrix24_get_deal`, `bitrix24_update_deal`,
+  `moysklad_check_stock`, `moysklad_get_cost`, `moysklad_create_order`.
+  Вызовы идут через `MarketplaceMcpService` в MCP-серверы Битрикс24 и
+  МойСклада (действия `crm_deal_get`, `crm_deal_update`, `product_get`,
+  `customer_order_create`); endpoint берётся из `mcp_endpoint` навыка,
+  fallback — `BITRIX24_MCP_URL`/`MOYSKLAD_MCP_URL`.
+- Строгие Zod-схемы аргументов в `tool-schemas.ts` и политики в
+  `tool-policies.ts`: лишние ключи, неверные типы и слишком длинные строки
+  отклоняются до вызова MCP. Ответы провайдеров тоже проходят Zod:
+  сделку и заказ агент получает нормализованными (`dealId`, `stageId`,
+  `stageFinal`, `available`, `cost` в рублях, `orderId`).
+- HITL: оба навыка помечены `requiresApproval`, но в подтверждение попадают
+  только пишущие инструменты — чтение сделки, остатков и себестоимости граф не
+  останавливает. Политика `tool-policies.ts` сужает необратимый случай до
+  перехода в «Успешно» (`WON`), а `moysklad_create_order` подтверждается
+  всегда. Runtime выполняет необратимый вызов только при свежем (10 минут)
+  `approved`-решении `PendingApproval` для этого инструмента и диалога; ошибка
+  чтения БД трактуется как «одобрения нет» (fail-closed). Из-за гранулярности
+  HITL по имени инструмента подтверждение для `bitrix24_update_deal`
+  запрашивается и на промежуточную стадию (KI-079).
+- Секреты Битрикс24/МойСклада в API не нужны: вебхук и токен читает
+  MCP-контейнер, гейт проверяет только endpoint (`BITRIX24_MCP_URL`/
+  `MOYSKLAD_MCP_URL` или `mcp_endpoint` навыка). Без endpoint'а инструмент
+  отвечает 503 `errors.marketplace_unavailable` с подсказкой, какую
+  переменную задать.
+- Pay-per-Call: `bitrix24-crm` и `moysklad-warehouse` стоят 15 ₽ за вызов,
+  списание идёт после успешного ответа MCP, а не до него.
+- Ошибки провайдера (401/429, не-JSON ответ) маппятся в 502
+  `errors.mcp_provider` с сохранением HTTP-статуса в сообщении; 4xx не
+  ретраятся.
+- Конверт MCP-вызова: для известных действий с вложенными параметрами
+  (`crm_deal_update.fields`, `customer_order_create.payload`) действует
+  строгая схема действия, неизвестные действия остаются на плоской
+  структурной схеме.
+- Контракт «инструмент → действие MCP» зафиксирован в
+  `docs/architecture/MCP-ERP-Connectors.md`.
+
+**Новые известные проблемы:** KI-079, KI-080, KI-081.
+
 ### Billing: честный лог повторной доставки webhook
 
 - `BillingService.addFunds` возвращает `replayed: true`, если ключ

@@ -9,6 +9,8 @@ import {
   type McpProvider,
 } from './mcp-gateway.js';
 import {
+  BITRIX24_GET_DEAL_TOOL_NAME,
+  MOYSKLAD_CHECK_STOCK_TOOL_NAME,
   OZON_MCP_TOOL_NAME,
   WB_MCP_TOOL_NAME,
 } from './tool-schemas.js';
@@ -42,13 +44,54 @@ export interface MarketplaceCredentials {
 const PROVIDER_TOOL: Readonly<Record<McpProvider, string>> = {
   ozon: OZON_MCP_TOOL_NAME,
   wb: WB_MCP_TOOL_NAME,
+  bitrix24: BITRIX24_GET_DEAL_TOOL_NAME,
+  moysklad: MOYSKLAD_CHECK_STOCK_TOOL_NAME,
 };
 
 /** Переменные окружения с ключами провайдера. */
 const PROVIDER_KEY_ENV: Readonly<Record<McpProvider, readonly string[]>> = {
   ozon: ['OZON_CLIENT_ID', 'OZON_API_KEY'],
   wb: ['WB_API_TOKEN'],
+  bitrix24: ['BITRIX24_WEBHOOK_URL'],
+  moysklad: ['MOYSKLAD_TOKEN'],
 };
+
+/** Переменная окружения с адресом MCP-сервера провайдера. */
+const PROVIDER_MCP_URL_ENV: Readonly<Record<McpProvider, string>> = {
+  ozon: 'OZON_MCP_URL',
+  wb: 'WB_MCP_URL',
+  bitrix24: 'BITRIX24_MCP_URL',
+  moysklad: 'MOYSKLAD_MCP_URL',
+};
+
+/** Человеческое имя провайдера для сообщений об ошибке. */
+const PROVIDER_LABEL: Readonly<Record<McpProvider, string>> = {
+  ozon: 'Ozon',
+  wb: 'Wildberries',
+  bitrix24: 'Битрикс24',
+  moysklad: 'МойСклад',
+};
+
+/** Названия ключей провайдера для подсказки в сообщении об ошибке. */
+const PROVIDER_KEY_HINT: Readonly<Record<McpProvider, string>> = {
+  ozon: 'Client ID и API Key',
+  wb: 'API Token',
+  bitrix24: 'входящий webhook',
+  moysklad: 'токен API',
+};
+
+/**
+ * Провайдеры, чьи секреты живут только в окружении MCP-контейнера.
+ *
+ * Для Битрикс24 и МойСклада (Треки K/L) API не хранит ключи: вебхук и токен
+ * читает MCP-сервер (KI-077), поэтому гейт проверяет наличие endpoint'а, а не
+ * секретов в процессе API. Для Ozon/WB ключи приходят из `ProviderKeysService`
+ * (подключение пользователя) либо из env — их гейт остаётся прежним (KI-064).
+ */
+const CONTAINER_ONLY_CREDENTIALS: ReadonlySet<McpProvider> = new Set([
+  'bitrix24',
+  'moysklad',
+]);
 
 /**
  * Адрес MCP-сервера: явный endpoint → `mcp_endpoint` навыка → env.
@@ -65,8 +108,7 @@ export function resolveMcpEndpoint(
     return fromManifest;
   }
 
-  const fromEnv =
-    platform === 'ozon' ? process.env.OZON_MCP_URL : process.env.WB_MCP_URL;
+  const fromEnv = process.env[PROVIDER_MCP_URL_ENV[platform]];
 
   return fromEnv === undefined || fromEnv.trim() === '' ? null : fromEnv.trim();
 }
@@ -75,7 +117,8 @@ export function resolveMcpEndpoint(
  * Endpoint провайдера по манифестам навыков.
  *
  * Ищем навык, который объявляет MCP-инструмент провайдера
- * (`ozon_mcp_call`/`wb_mcp_call`) и задаёт `mcp_endpoint`.
+ * (`ozon_mcp_call`, `wb_mcp_call`, `bitrix24_get_deal`,
+ * `moysklad_check_stock`) и задаёт `mcp_endpoint`.
  */
 export function resolveProviderEndpointFromSkills(
   platform: McpProvider,
@@ -116,7 +159,7 @@ function hasProviderKeys(platform: McpProvider): boolean {
 }
 
 /**
- * Единая точка вызова MCP-провайдеров (Ozon/WB).
+ * Единая точка вызова MCP-провайдеров (Ozon, WB, Битрикс24, МойСклад).
  *
  * Кеширует клиент по endpoint и gateway по клиенту: discovery `tools/list`
  * ленивый, повторное создание gateway на каждый вызов делало бы лишний
@@ -133,9 +176,11 @@ export class MarketplaceMcpService {
     @Optional() private readonly providerKeys?: ProviderKeysService,
   ) {}
 
-  /** Доступен ли провайдер по ключам окружения. */
+  /** Доступен ли провайдер: ключи в env (Ozon/WB) или endpoint MCP-сервера. */
   isConfigured(platform: McpProvider): boolean {
-    return hasProviderKeys(platform);
+    return CONTAINER_ONLY_CREDENTIALS.has(platform)
+      ? resolveMcpEndpoint(platform) !== null
+      : hasProviderKeys(platform);
   }
 
   /**
@@ -160,7 +205,7 @@ export class MarketplaceMcpService {
             apiKey: resolved.apiKey,
           };
         }
-      } else {
+      } else if (platform === 'wb') {
         const resolved = await this.providerKeys.wildberriesToken(userId);
 
         if (resolved !== null) {
@@ -196,33 +241,39 @@ export class MarketplaceMcpService {
     params: Record<string, unknown>,
     options: MarketplaceCallOptions = {},
   ): Promise<string> {
-    const credentials = await this.credentialsFor(platform, options.userId);
+    if (CONTAINER_ONLY_CREDENTIALS.has(platform)) {
+      // Секреты Битрикс24/МойСклада живут в MCP-контейнере (KI-077): без
+      // endpoint'а вызывать нечего, а ключи API знать не обязан.
+      if (this.endpointFor(platform, options) === null) {
+        throw marketplaceUnavailableError(
+          `${PROVIDER_LABEL[platform]} не подключён: задайте ${PROVIDER_MCP_URL_ENV[platform]} или mcp_endpoint навыка`,
+        );
+      }
+    } else {
+      const credentials = await this.credentialsFor(platform, options.userId);
 
-    if (credentials === null) {
-      throw marketplaceUnavailableError(
-        platform === 'ozon'
-          ? 'Ozon не подключён: добавьте Client ID и API Key в разделе «Интеграции» или задайте OZON_CLIENT_ID/OZON_API_KEY'
-          : 'Wildberries не подключён: добавьте API Token в разделе «Интеграции» или задайте WB_API_TOKEN',
+      if (credentials === null) {
+        throw marketplaceUnavailableError(
+          `${PROVIDER_LABEL[platform]} не подключён: добавьте ${PROVIDER_KEY_HINT[platform]} в разделе «Интеграции» или задайте ${PROVIDER_KEY_ENV[platform].join('/')}`,
+        );
+      }
+
+      if (!hasProviderKeys(platform)) {
+        // Ключи пользователя не могут аутентифицировать MCP-контейнер: он
+        // читает ключи провайдера из своего окружения (один набор на сервер).
+        throw marketplaceUnavailableError(
+          `Ключи ${PROVIDER_LABEL[platform]} сохранены, но MCP-сервер не сконфигурирован: задайте ${PROVIDER_KEY_ENV[platform].join('/')} в окружении MCP-контейнера (KI-064)`,
+        );
+      }
+
+      this.logger.debug(
+        JSON.stringify({
+          event: 'mcp.credentials',
+          provider: platform,
+          source: credentials.source,
+        }),
       );
     }
-
-    if (!hasProviderKeys(platform)) {
-      // Ключи пользователя не могут аутентифицировать MCP-контейнер: он читает
-      // Ozon/WB-ключи из своего окружения (один набор на сервер).
-      throw marketplaceUnavailableError(
-        platform === 'ozon'
-          ? 'Ключи Ozon сохранены, но MCP-сервер не сконфигурирован: задайте OZON_CLIENT_ID/OZON_API_KEY в окружении MCP-контейнера (KI-064)'
-          : 'Токен WB сохранён, но MCP-сервер не сконфигурирован: задайте WB_API_TOKEN в окружении MCP-контейнера (KI-064)',
-      );
-    }
-
-    this.logger.debug(
-      JSON.stringify({
-        event: 'mcp.credentials',
-        provider: platform,
-        source: credentials.source,
-      }),
-    );
 
     const gateway = this.gateway(platform, options);
 

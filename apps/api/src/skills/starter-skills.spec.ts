@@ -35,6 +35,8 @@ const STARTER_SKILLS = [
   '16-documents/pdf-extractor/SKILL.md',
   '16-documents/docx-writer/SKILL.md',
   '16-documents/ocr-smart-engine/SKILL.md',
+  '17-crm/bitrix24-crm/SKILL.md',
+  '18-erp/moysklad-warehouse/SKILL.md',
 ] as const;
 
 describe('starter skills', () => {

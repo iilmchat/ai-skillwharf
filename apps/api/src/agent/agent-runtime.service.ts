@@ -16,6 +16,7 @@ import {
 import { AgentToolsService } from './agent-tools.service.js';
 import type { AgentSkillSnapshot } from './agent-tools.service.js';
 import { BackgroundJobsService } from '../jobs/background-jobs.service.js';
+import { requiresApprovalFor } from '../security/policy/tool-policies.js';
 import type {
   ApprovalPrepareRequest,
   ApprovalPrepareResponse,
@@ -35,6 +36,15 @@ const TAINT_SOURCE_TOOLS = new Set([
   OZON_MCP_TOOL_NAME,
   WB_MCP_TOOL_NAME,
 ]);
+
+/**
+ * Ответ агенту, когда необратимый инструмент пришёл без HITL-одобрения.
+ *
+ * Текст намеренно не раскрывает аргументы и не предлагает «обойти» проверку:
+ * подтверждение запрашивается только через штатный HITL-диалог.
+ */
+export const APPROVAL_REQUIRED_MESSAGE =
+  'Действие требует подтверждения пользователя (HITL). Запросите подтверждение явно; без него необратимый вызов не выполняется.';
 
 interface ToolPrice {
   price: number;
@@ -172,6 +182,22 @@ export class AgentRuntimeService {
         }
 
         const decision = this.evaluate(call, request);
+
+        // HITL-гейт: необратимый вызов выполняется только при свежем
+        // одобрении пользователя (запись PendingApproval со статусом
+        // `approved`), а не по одному лишь имени инструмента.
+        if (
+          requiresApprovalFor(call.name, decision.args) &&
+          !(await this.hasApprovalGrant(request.conversationId, call.name))
+        ) {
+          return {
+            toolCallId: call.id,
+            name: call.name,
+            content: APPROVAL_REQUIRED_MESSAGE,
+            status: 'error' as const,
+          };
+        }
+
         const outcome = request.outcomePrices[call.name];
         let holdEntryId = request.preAuthorizedHolds[call.id];
 
@@ -352,5 +378,34 @@ export class AgentRuntimeService {
     };
 
     return this.agentGateway.validateToolCall(call.name, call.args, context);
+  }
+
+  /**
+   * Свежее HITL-одобрение инструмента в диалоге.
+   *
+   * Ошибку чтения БД трактуем как «одобрения нет» (fail-closed): необратимое
+   * действие без подтверждения выполнять нельзя.
+   */
+  private async hasApprovalGrant(
+    conversationId: string,
+    toolName: string,
+  ): Promise<boolean> {
+    try {
+      return await this.pendingApprovals.hasApprovedGrant(
+        conversationId,
+        toolName,
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'hitl.grant_check_failed',
+          conversationId,
+          toolName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
+      return false;
+    }
   }
 }

@@ -148,8 +148,13 @@ Egress песочницы задается полем `egress_allowlist` в ма
 | `OZON_PERF_CLIENT_ID` | пусто | Client ID Ozon Performance API (реклама). |
 | `OZON_PERF_CLIENT_SECRET` | пусто | Client Secret Ozon Performance API. |
 | `WB_API_TOKEN` | пусто | Токен Wildberries Seller/Marketplace и Pricing API. |
+| `BITRIX24_WEBHOOK_URL` | пусто | Inbound Webhook Битрикс24 вида `https://<portal>.bitrix24.ru/rest/<user_id>/<token>/`. |
+| `MOYSKLAD_TOKEN` | пусто | Bearer-токен JSON API 1.2 МойСклада. |
+| `MOYSKLAD_BASE_URL` | `https://api.moysklad.ru/api/remap/1.2` | Base URL JSON API 1.2. |
+| `BITRIX24_MCP_URL` | `http://bitrix24-mcp:5003` | Внутренний адрес MCP-сервера Битрикс24 (в `docker-compose.mcp.yml`). |
+| `MOYSKLAD_MCP_URL` | `http://moysklad-mcp:5004` | Внутренний адрес MCP-сервера МойСклада. |
 | `MCP_AUTH_TOKEN` | пусто | Общий Bearer-токен для `/sse` MCP-серверов; пусто — без авторизации. |
-| `MCP_ALLOW_MISSING_KEYS` | `0` | `0` — healthcheck MCP требует ключи Ozon/WB; `1` — разрешает пустые ключи. |
+| `MCP_ALLOW_MISSING_KEYS` | `0` | `0` — healthcheck MCP требует ключи Ozon/WB/Битрикс24/МойСклад; `1` — разрешает пустые ключи. |
 | `OZON_API_BASE_URL` | `https://api-seller.ozon.ru` | Хост Ozon Seller API. |
 | `OZON_API_TEST_PATH` | `/v1/product/import/prices` | Тестовый write-метод для `scripts/test-integrations.sh`. |
 | `OZON_PERFORMANCE_API_BASE_URL` | `https://api-performance.ozon.ru` | Хост Ozon Performance API. |
@@ -289,6 +294,26 @@ Egress песочницы задается полем `egress_allowlist` в ма
 - Прямой Yandex Vision API с этим контрактом не работает: ему нужны `x-folder-id` и `languageCodes` (KI-071). Используйте SDE-совместимый прокси/сервис.
 - Без `OCR_API_URL` работает локальный Tesseract (`OCR_TESSERACT_ENABLED=true`, языки `OCR_TESSERACT_LANG`), внешняя сеть не нужна.
 - **Проверка:** `bash scripts/test-integrations.sh --ocr` и `bash scripts/test-documents.sh`.
+
+### 4.10. Битрикс24 (треки K и L)
+
+- В портале Битрикс24 откройте **Разработчикам → Другое → Входящий вебхук** (или «Приложения → Вебхуки» в зависимости от версии).
+- Выдайте вебхуку права на CRM (сделки, контакты, компании) и скопируйте URL вида:
+
+  ```text
+  https://<portal>.bitrix24.ru/rest/<user_id>/<webhook_token>/
+  ```
+
+- Заполните `BITRIX24_WEBHOOK_URL` — токен является секретом, не коммитьте его. Для локальной проверки без реального портала можно задать `MCP_ALLOW_MISSING_KEYS=1`, но healthcheck MCP тогда не требует ключ.
+- MCP-сервер `bitrix24-mcp` принимает SSE на `http://bitrix24-mcp:5003/sse` и вызывает методы `crm.deal.list/get/add/update`, `crm.contact.list`, `crm.company.list`. Внутренний адрес — `BITRIX24_MCP_URL`.
+- **Проверка:** `docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build bitrix24-mcp` и `curl -fsS http://127.0.0.1:5003/api/health`. С реальным вебхуком запрос к `crm.deal.list` вернёт сделки портала.
+
+### 4.11. МойСклад (треки K и L)
+
+- В [МойСклад](https://www.moysklad.ru/) откройте **Настройки → Пользователи → Сотрудники** (или профиль владельца) → **Токены доступа** и создайте токен с доступом к товарам, остаткам, заказам и контрагентам.
+- Заполните `MOYSKLAD_TOKEN`. Base URL по умолчанию — `https://api.moysklad.ru/api/remap/1.2` (`MOYSKLAD_BASE_URL`), менять его нужно только для прокси/тестового стенда.
+- MCP-сервер `moysklad-mcp` принимает SSE на `http://moysklad-mcp:5004/sse` и вызывает `product_list`, `product_get`, `stock_report`, `customer_order_list/get/create`, `counterparty_list` через JSON API 1.2 с `Authorization: Bearer`.
+- **Проверка:** `docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build moysklad-mcp` и `curl -fsS http://127.0.0.1:5004/api/health`. С реальным токеном `product_list` вернёт товары.
 
 ## 5. Проверка работоспособности
 

@@ -1191,8 +1191,8 @@
         "oauthHint": "Откроется страница Google. Права можно отозвать в любой момент."
       },
       "providers": {
-        "title": "Маркетплейсы и креатив",
-        "description": "Ключи Ozon, Wildberries и Midjourney хранятся на сервере.",
+        "title": "Внешние сервисы",
+        "description": "Ключи и вебхуки Ozon, Wildberries, Midjourney, Битрикс24 и МойСклад хранятся на сервере.",
         "keySaved": "Сохранён на сервере"
       },
       "ozon": {
@@ -1245,6 +1245,40 @@
         "invalidFields": "Введите TT-API-KEY.",
         "connected": "Midjourney подключён.",
         "disconnected": "Midjourney отключён."
+      },
+      "bitrix24": {
+        "title": "Битрикс24",
+        "description": "Сделки, контакты и компании из вашей CRM — для оптовой торговли и производства (треки K и L).",
+        "webhookUrl": "Webhook URL",
+        "webhookUrlPlaceholder": "https://портал.bitrix24.ru/rest/1/xxxxxxxx/",
+        "webhookUrlHint": "Входящий вебхук портала: CRM → Разработчикам → Другое → Входящий вебхук. Адрес начинается с https://, хранится на сервере и не показывается после подключения.",
+        "invalidFields": "Введите Webhook URL.",
+        "invalidWebhookUrl": "Введите абсолютный адрес вебхука, начинающийся с https://.",
+        "connect": "Подключить",
+        "connecting": "Проверяем вебхук…",
+        "disconnect": "Отключить",
+        "disconnecting": "Отключаем…",
+        "connectedAs": "Webhook URL",
+        "keySaved": "Сохранён на сервере",
+        "connected": "Битрикс24 подключён.",
+        "disconnected": "Битрикс24 отключён."
+      },
+      "moysklad": {
+        "title": "МойСклад",
+        "description": "Остатки, отгрузки и заказы поставщикам — для оптовой торговли и производства (треки K и L).",
+        "apiToken": "API Token",
+        "apiTokenPlaceholder": "Токен МойСклада",
+        "apiTokenHint": "Токен из раздела «Настройки → API» МойСклада. Хранится на сервере и не показывается после подключения.",
+        "invalidFields": "Введите API Token.",
+        "invalidToken": "Токен слишком короткий. Скопируйте его целиком из МойСклада.",
+        "connect": "Подключить",
+        "connecting": "Проверяем токен…",
+        "disconnect": "Отключить",
+        "disconnecting": "Отключаем…",
+        "connectedAs": "API Token",
+        "keySaved": "Сохранён на сервере",
+        "connected": "МойСклад подключён.",
+        "disconnected": "МойСклад отключён."
       },
       "errors": {
         "network": "Сервер недоступен. Проверьте соединение.",

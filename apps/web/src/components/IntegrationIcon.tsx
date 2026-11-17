@@ -3,11 +3,10 @@ import type {
   KeyIntegrationProvider,
 } from '../lib/integrations';
 
+/** Каналы и провайдеры, для которых есть SVG-иконка или текстовый бейдж. */
 export type IntegrationLogoProvider =
   | IntegrationProvider
-  | KeyIntegrationProvider
-  | 'bitrix24'
-  | 'moysklad';
+  | KeyIntegrationProvider;
 
 /** Бейджи провайдеров без отдельной SVG-иконки. */
 const PROVIDER_BADGE: Record<
