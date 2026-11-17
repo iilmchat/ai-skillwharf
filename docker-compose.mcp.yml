@@ -6,6 +6,7 @@
 #   OZON_CLIENT_ID, OZON_API_KEY, OZON_PERF_CLIENT_ID, OZON_PERF_CLIENT_SECRET
 #   WB_API_TOKEN
 #   BITRIX24_WEBHOOK_URL, MOYSKLAD_TOKEN, MOYSKLAD_BASE_URL
+#   MOYSKLAD_DEFAULT_ORGANIZATION_ID, MOYSKLAD_DEFAULT_AGENT_ID
 #   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
 services:
   api:
@@ -19,6 +20,10 @@ services:
       BITRIX24_MCP_URL: http://bitrix24-mcp:5003
       MOYSKLAD_MCP_URL: http://moysklad-mcp:5004
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      # Обязательные поля заказа покупателя МойСклада (KI-080).
+      MOYSKLAD_DEFAULT_ORGANIZATION_ID: ${MOYSKLAD_DEFAULT_ORGANIZATION_ID:-}
+      MOYSKLAD_DEFAULT_AGENT_ID: ${MOYSKLAD_DEFAULT_AGENT_ID:-}
+      MOYSKLAD_BASE_URL: ${MOYSKLAD_BASE_URL:-https://api.moysklad.ru/api/remap/1.2}
 
   ozon-mcp:
     build:

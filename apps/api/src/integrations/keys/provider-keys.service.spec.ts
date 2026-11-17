@@ -99,6 +99,8 @@ describe('ProviderKeysService: хранение и шифрование', () => 
     delete process.env.OZON_API_KEY;
     delete process.env.WB_API_TOKEN;
     delete process.env.MIDJOURNEY_API_KEY;
+    delete process.env.BITRIX24_WEBHOOK_URL;
+    delete process.env.MOYSKLAD_TOKEN;
   });
 
   it('Ozon: секреты в БД зашифрованы envelope v1 и не содержат открытых значений', async () => {
@@ -176,6 +178,101 @@ describe('ProviderKeysService: хранение и шифрование', () => 
     );
     await expect(service.describe('user-1')).resolves.toMatchObject({
       midjourney: { status: 'active', source: 'user' },
+    });
+  });
+
+  it('Битрикс24: вебхук шифруется целиком и не попадает в БД открытым', async () => {
+    const { service, rows } = createHarness();
+    const webhookUrl = 'https://portal.bitrix24.ru/rest/1/secret-webhook-code/';
+
+    const state = await service.connectBitrix24('user-1', { webhookUrl });
+
+    expect(state).toEqual({ status: 'active', source: 'user' });
+
+    const stored = rows.get('user-1::bitrix24');
+
+    expect(stored?.secret.startsWith('v1:')).toBe(true);
+    expect(stored?.secret).not.toContain('secret-webhook-code');
+    // Сам вебхук — секрет: наружу отдаётся только статус.
+    await expect(service.describe('user-1')).resolves.toEqual({
+      ozon: { status: 'disconnected' },
+      wildberries: { status: 'disconnected' },
+      midjourney: { status: 'disconnected' },
+      bitrix24: { status: 'active', source: 'user' },
+      moysklad: { status: 'disconnected' },
+    });
+  });
+
+  it('МойСклад: токен шифруется, статус active без раскрытия значения', async () => {
+    const { service, rows } = createHarness();
+
+    await service.connectMoysklad('user-1', {
+      apiToken: 'moysklad-api-token-secret',
+    });
+
+    const stored = rows.get('user-1::moysklad');
+
+    expect(stored?.secret.startsWith('v1:')).toBe(true);
+    expect(stored?.secret).not.toContain('moysklad-api-token-secret');
+    await expect(service.describe('user-1')).resolves.toMatchObject({
+      moysklad: { status: 'active', source: 'user' },
+    });
+  });
+
+  it('Битрикс24: небезопасный или чужой вебхук отклоняется до сохранения', async () => {
+    const { service, rows } = createHarness();
+
+    for (const webhookUrl of [
+      'http://portal.bitrix24.ru/rest/1/token/',
+      'https://example.com/rest/1/token/',
+      'https://portal.bitrix24.ru/crm/deal/',
+    ]) {
+      await expect(
+        service.connectBitrix24('user-1', { webhookUrl }),
+      ).rejects.toThrow();
+    }
+
+    expect(rows.size).toBe(0);
+  });
+
+  it('МойСклад: слишком короткий токен отклоняется', async () => {
+    const { service, rows } = createHarness();
+
+    await expect(
+      service.connectMoysklad('user-1', { apiToken: 'short' }),
+    ).rejects.toThrow();
+    expect(rows.size).toBe(0);
+  });
+
+  it('Битрикс24/МойСклад: статус из env, если подключения пользователя нет', async () => {
+    const { service } = createHarness();
+
+    process.env.BITRIX24_WEBHOOK_URL =
+      'https://portal.bitrix24.ru/rest/1/token/';
+    process.env.MOYSKLAD_TOKEN = 'moysklad-env-token';
+
+    await expect(service.describe('user-1')).resolves.toMatchObject({
+      bitrix24: { status: 'active', source: 'env' },
+      moysklad: { status: 'active', source: 'env' },
+    });
+  });
+
+  it('disconnect Битрикс24/МойСклада удаляет только свою запись', async () => {
+    const { service } = createHarness();
+
+    await service.connectBitrix24('user-1', {
+      webhookUrl: 'https://portal.bitrix24.ru/rest/1/token/',
+    });
+    await service.connectMoysklad('user-1', {
+      apiToken: 'moysklad-api-token-secret',
+    });
+
+    await expect(service.disconnect('user-1', 'bitrix24')).resolves.toBe(true);
+    await expect(service.disconnect('user-1', 'moysklad')).resolves.toBe(true);
+    await expect(service.disconnect('user-1', 'bitrix24')).resolves.toBe(false);
+    await expect(service.describe('user-1')).resolves.toMatchObject({
+      bitrix24: { status: 'disconnected' },
+      moysklad: { status: 'disconnected' },
     });
   });
 

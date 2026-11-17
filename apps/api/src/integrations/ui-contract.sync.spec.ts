@@ -44,6 +44,8 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
         ozon: { status: 'disconnected' },
         wildberries: { status: 'disconnected' },
         midjourney: { status: 'disconnected' },
+        bitrix24: { status: 'disconnected' },
+        moysklad: { status: 'disconnected' },
       }),
     });
 
@@ -55,6 +57,8 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
       ozon: { status: 'disconnected' },
       wildberries: { status: 'disconnected' },
       midjourney: { status: 'disconnected' },
+      bitrix24: { status: 'disconnected' },
+      moysklad: { status: 'disconnected' },
     });
   });
 
@@ -72,6 +76,8 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
           source: 'user',
         },
         midjourney: { status: 'active', source: 'user' },
+        bitrix24: { status: 'active', source: 'user' },
+        moysklad: { status: 'active', source: 'env' },
       }),
     });
 
@@ -84,6 +90,8 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
     expect(parsed.wildberries.status).toBe('active');
     expect(parsed.wildberries.tokenExpiresAt).toBe('2027-05-12T12:00:00.000Z');
     expect(parsed.midjourney.status).toBe('active');
+    expect(parsed.bitrix24).toMatchObject({ status: 'active', source: 'user' });
+    expect(parsed.moysklad).toMatchObject({ status: 'active', source: 'env' });
   });
 
   it('системные ключи и ошибки расшифровки тоже валидны для UI', async () => {
@@ -100,6 +108,11 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
           status: 'error',
           error: 'Ключи сохранены, но не расшифровываются',
         },
+        bitrix24: {
+          status: 'error',
+          error: 'Ключи сохранены, но не расшифровываются',
+        },
+        moysklad: { status: 'disconnected' },
       }),
     });
 
@@ -110,5 +123,7 @@ describe('GET /integrations совместим с Zod-схемой UI', () => {
     expect(parsed.wildberries.status).toBe('error');
     expect(parsed.wildberries.error).toContain('истёк');
     expect(parsed.midjourney.status).toBe('error');
+    expect(parsed.bitrix24.status).toBe('error');
+    expect(parsed.moysklad.status).toBe('disconnected');
   });
 });

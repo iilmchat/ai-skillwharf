@@ -4,15 +4,21 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { TokenCipherService } from '../google/token-cipher.service.js';
 import {
   WB_TOKEN_TTL_DAYS,
+  bitrix24KeysSchema,
+  bitrix24SecretSchema,
   midjourneyKeysSchema,
   midjourneySecretSchema,
+  moyskladKeysSchema,
+  moyskladSecretSchema,
   ozonKeysSchema,
   ozonSecretSchema,
   providerMetadataSchema,
   wildberriesKeysSchema,
   wildberriesSecretSchema,
+  type Bitrix24Keys,
   type KeyProvider,
   type MidjourneyKeys,
+  type MoyskladKeys,
   type OzonKeys,
   type WildberriesKeys,
 } from './provider-keys.schemas.js';
@@ -41,10 +47,29 @@ export interface MidjourneyIntegrationState {
   readonly error?: string;
 }
 
+/**
+ * Битрикс24 (Треки K/L): сам вебхук — секрет, поэтому в статусе его нет.
+ * `source` показывает, работают ли ключи пользователя или системные (env).
+ */
+export interface Bitrix24IntegrationState {
+  readonly status: ProviderIntegrationStatus;
+  readonly source?: 'user' | 'env';
+  readonly error?: string;
+}
+
+/** МойСклад (Треки K/L): токен не возвращается, виден только статус. */
+export interface MoyskladIntegrationState {
+  readonly status: ProviderIntegrationStatus;
+  readonly source?: 'user' | 'env';
+  readonly error?: string;
+}
+
 export interface ProviderIntegrationStates {
   readonly ozon: OzonIntegrationState;
   readonly wildberries: WildberriesIntegrationState;
   readonly midjourney: MidjourneyIntegrationState;
+  readonly bitrix24: Bitrix24IntegrationState;
+  readonly moysklad: MoyskladIntegrationState;
 }
 
 /** Ключи провайдера и источник, из которого они получены. */
@@ -66,13 +91,17 @@ const CIPHER_ERROR =
   'Ключи сохранены, но не расшифровываются: проверьте TOKEN_ENCRYPTION_KEY или подключите интеграцию заново';
 
 /**
- * Хранение ключей Ozon/Wildberries/Midjourney.
+ * Хранение ключей Ozon/Wildberries/Midjourney/Битрикс24/МойСклад.
  *
  * Секреты шифруются `TokenCipherService` (AES-256-GCM) и попадают в
  * `ProviderCredential.secret` только в виде envelope
  * `v1:<iv>:<tag>:<ciphertext>`. Инструменты (`MarketplaceMcpService`,
- * `MidjourneyService`) читают ключи по `userId` и падают обратно на env
- * (системные ключи для ботов/локальной разработки).
+ * `MidjourneyService`) читают ключи Ozon/WB/Midjourney по `userId` и падают
+ * обратно на env (системные ключи для ботов/локальной разработки).
+ *
+ * Ключи Битрикс24/МойСклада (Треки K/L) сохраняются тем же способом, но
+ * MCP-серверы пока читают общий env-секрет контейнера — per-user вызовы это
+ * отдельный шаг (KI-077).
  */
 @Injectable()
 export class ProviderKeysService {
@@ -148,6 +177,42 @@ export class ProviderKeysService {
     return { status: 'active', source: 'user' };
   }
 
+  /**
+   * Сохраняет входящий вебхук Битрикс24 (Треки K/L).
+   *
+   * Весь URL — секрет (код вебхука в пути), поэтому в логах и статусе его нет:
+   * наружу отдаётся только `active`. MCP-сервер Битрикс24 продолжает читать
+   * `BITRIX24_WEBHOOK_URL` из своего окружения (KI-077).
+   */
+  async connectBitrix24(
+    userId: string,
+    keys: Bitrix24Keys,
+  ): Promise<Bitrix24IntegrationState> {
+    const parsed = bitrix24KeysSchema.parse(keys);
+
+    await this.save(userId, 'bitrix24', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.bitrix24_connected', userId }),
+    );
+
+    return { status: 'active', source: 'user' };
+  }
+
+  /** Сохраняет токен МойСклада (Треки K/L); в логи попадает только событие. */
+  async connectMoysklad(
+    userId: string,
+    keys: MoyskladKeys,
+  ): Promise<MoyskladIntegrationState> {
+    const parsed = moyskladKeysSchema.parse(keys);
+
+    await this.save(userId, 'moysklad', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.moysklad_connected', userId }),
+    );
+
+    return { status: 'active', source: 'user' };
+  }
+
   /** Удаляет ключи провайдера; `true` — если запись действительно была. */
   async disconnect(userId: string, provider: KeyProvider): Promise<boolean> {
     const { count } = await this.prisma.providerCredential.deleteMany({
@@ -167,7 +232,7 @@ export class ProviderKeysService {
     return count > 0;
   }
 
-  /** Состояние трёх провайдеров для `GET /integrations`. */
+  /** Состояние пяти провайдеров для `GET /integrations`. */
   async describe(userId: string): Promise<ProviderIntegrationStates> {
     const rows = await this.prisma.providerCredential.findMany({
       where: { userId },
@@ -177,11 +242,15 @@ export class ProviderKeysService {
     const ozonRow = byProvider.get('ozon');
     const wbRow = byProvider.get('wildberries');
     const mjRow = byProvider.get('midjourney');
+    const bitrixRow = byProvider.get('bitrix24');
+    const moyskladRow = byProvider.get('moysklad');
 
     return {
       ozon: this.describeOzon(ozonRow),
       wildberries: this.describeWildberries(wbRow),
       midjourney: this.describeMidjourney(mjRow),
+      bitrix24: this.describeBitrix24(bitrixRow),
+      moysklad: this.describeMoysklad(moyskladRow),
     };
   }
 
@@ -373,6 +442,42 @@ export class ProviderKeysService {
     const secret = this.decrypt(row.secret, 'midjourney');
 
     if (secret === null || !midjourneySecretSchema.safeParse(secret).success) {
+      return { status: 'error', error: CIPHER_ERROR };
+    }
+
+    return { status: 'active', source: 'user' };
+  }
+
+  private describeBitrix24(
+    row: { secret: string } | undefined,
+  ): Bitrix24IntegrationState {
+    if (row === undefined) {
+      return readEnv('BITRIX24_WEBHOOK_URL') === null
+        ? { status: 'disconnected' }
+        : { status: 'active', source: 'env' };
+    }
+
+    const secret = this.decrypt(row.secret, 'bitrix24');
+
+    if (secret === null || !bitrix24SecretSchema.safeParse(secret).success) {
+      return { status: 'error', error: CIPHER_ERROR };
+    }
+
+    return { status: 'active', source: 'user' };
+  }
+
+  private describeMoysklad(
+    row: { secret: string } | undefined,
+  ): MoyskladIntegrationState {
+    if (row === undefined) {
+      return readEnv('MOYSKLAD_TOKEN') === null
+        ? { status: 'disconnected' }
+        : { status: 'active', source: 'env' };
+    }
+
+    const secret = this.decrypt(row.secret, 'moysklad');
+
+    if (secret === null || !moyskladSecretSchema.safeParse(secret).success) {
       return { status: 'error', error: CIPHER_ERROR };
     }
 

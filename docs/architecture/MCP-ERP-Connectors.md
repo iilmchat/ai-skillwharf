@@ -24,7 +24,7 @@
 | `bitrix24_update_deal` | `crm_deal_update` | `{ id, fields: { STAGE_ID?, COMMENTS? } }` | `{ result: true }` |
 | `moysklad_check_stock` | `product_get` | `{ id }` | карточка товара (`stock`, `reserve`) |
 | `moysklad_get_cost` | `product_get` | `{ id }` | карточка товара (`buyPrice.value`, копейки) |
-| `moysklad_create_order` | `customer_order_create` | `{ payload: { description, positions[] } }` | созданный заказ (`id`, `name`, `sum`) |
+| `moysklad_create_order` | `customer_order_create` | `{ payload: { description, organization, agent, positions[] } }` | созданный заказ (`id`, `name`, `sum`) |
 
 Имена действий должны совпадать с `tools/list` MCP-сервера: Gateway
 отклоняет вызов действия, которого нет в discovery (KI-027).
@@ -59,7 +59,9 @@
 
 - HITL включается по имени инструмента, поэтому `bitrix24_update_deal`
   спрашивает подтверждение и для промежуточных стадий (KI-079).
-- Заказ создаётся без организации и контрагента — JSON API 1.2 их требует
-  (KI-080).
+- Заказ создаётся с организацией и контрагентом из
+  `MOYSKLAD_DEFAULT_ORGANIZATION_ID`/`MOYSKLAD_DEFAULT_AGENT_ID`; без них
+  инструмент отвечает 503 `errors.provider_not_configured` (автоматический
+  маппинг контрагента из сделки — следующий шаг).
 - Остаток берётся из карточки товара, без разбивки по складам (KI-081).
 - Credentials общие на контейнер, без per-user подключения (KI-077).

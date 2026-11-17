@@ -121,18 +121,21 @@ export type MidjourneyIntegration = z.infer<
 
 /**
  * Битрикс24 (Треки K/L): входящий вебхук портала. Сам URL — секрет, поэтому
- * после подключения API его не возвращает, а статус ограничен `status`.
+ * после подключения API его не возвращает, а статус ограничен `status`
+ * (+ `source`: ключи пользователя или системные из env).
  */
 export const bitrix24IntegrationSchema = z.object({
   status: integrationStatusSchema,
+  source: z.enum(['user', 'env']).nullable().optional(),
   error: integrationErrorTextSchema,
 });
 
 export type Bitrix24Integration = z.infer<typeof bitrix24IntegrationSchema>;
 
-/** МойСклад (Треки K/L): API Token учётной системы. */
+/** МойСклад (Треки K/L): API Token учётной системы (тоже не возвращается). */
 export const moyskladIntegrationSchema = z.object({
   status: integrationStatusSchema,
+  source: z.enum(['user', 'env']).nullable().optional(),
   error: integrationErrorTextSchema,
 });
 

@@ -299,7 +299,8 @@ model TelegramChatLink {
 /// для UI (например, срок действия токена WB).
 model ProviderCredential {
   userId    String
-  /// `ozon` | `wildberries` | `midjourney` (валидируется Zod в сервисе).
+  /// `ozon` | `wildberries` | `midjourney` | `bitrix24` | `moysklad`
+  /// (валидируется Zod в сервисе; отдельная миграция не нужна).
   provider  String
   secret    String
   metadata  Json?

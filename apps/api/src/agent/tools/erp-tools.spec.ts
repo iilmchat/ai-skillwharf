@@ -43,6 +43,8 @@ const BITRIX_WEBHOOK = 'https://portal.bitrix24.ru/rest/1/token/';
 const BITRIX_API = 'https://portal.bitrix24.ru';
 const MOYSKLAD_API = 'https://api.moysklad.ru';
 const MOYSKLAD_REMAP = '/api/remap/1.2';
+const MOYSKLAD_ORGANIZATION_ID = 'organization-1';
+const MOYSKLAD_AGENT_ID = 'counterparty-1';
 
 /** MCP-серверы, поднятые в процессе теста. */
 const servers: Server[] = [];
@@ -71,6 +73,9 @@ async function listen(server: Server): Promise<string> {
 beforeAll(async () => {
   process.env.BITRIX24_WEBHOOK_URL = BITRIX_WEBHOOK;
   process.env.MOYSKLAD_TOKEN = 'moysklad-test-token';
+  // Конфигурация MCP-сервера читается при импорте: фиксируем базовый URL
+  // JSON API, чтобы nock-моки и подсказки ссылок совпадали.
+  delete process.env.MOYSKLAD_BASE_URL;
   delete process.env.MCP_AUTH_TOKEN;
 
   const bitrix = await loadMcpServer('infra/mcp/bitrix24/server.mjs');
@@ -97,6 +102,10 @@ beforeEach(() => {
   // Секреты провайдеров в API не нужны: их читает MCP-контейнер.
   delete process.env.BITRIX24_MCP_URL;
   delete process.env.MOYSKLAD_MCP_URL;
+  // Заказ покупателя требует организацию и контрагента (KI-080).
+  process.env.MOYSKLAD_DEFAULT_ORGANIZATION_ID = MOYSKLAD_ORGANIZATION_ID;
+  process.env.MOYSKLAD_DEFAULT_AGENT_ID = MOYSKLAD_AGENT_ID;
+  process.env.MOYSKLAD_BASE_URL = `${MOYSKLAD_API}${MOYSKLAD_REMAP}`;
   nock.disableNetConnect();
   // MCP-серверы слушают localhost: их запросы пропускаем, всё остальное
   // должно быть замокано.
@@ -106,6 +115,9 @@ beforeEach(() => {
 afterEach(() => {
   nock.cleanAll();
   nock.enableNetConnect();
+  delete process.env.MOYSKLAD_DEFAULT_ORGANIZATION_ID;
+  delete process.env.MOYSKLAD_DEFAULT_AGENT_ID;
+  delete process.env.MOYSKLAD_BASE_URL;
 });
 
 /** Новый сервис на каждый тест: у него свой кеш MCP-клиентов. */
@@ -379,6 +391,20 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
     const order = nock(MOYSKLAD_API)
       .post(`${MOYSKLAD_REMAP}/entity/customerorder`, {
         description: 'Заказ по сделке Битрикс24 #42',
+        organization: {
+          meta: {
+            href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/organization/${MOYSKLAD_ORGANIZATION_ID}`,
+            type: 'organization',
+            mediaType: 'application/json',
+          },
+        },
+        agent: {
+          meta: {
+            href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/counterparty/${MOYSKLAD_AGENT_ID}`,
+            type: 'counterparty',
+            mediaType: 'application/json',
+          },
+        },
         positions: [
           {
             quantity: 2,
@@ -442,6 +468,45 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
       code: ERROR_KEYS.mcpProvider,
     });
     expect((error as Error).message).toContain('HTTP 429');
+  });
+
+  it('заказ без организации и контрагента в env — 503 provider_not_configured', async () => {
+    delete process.env.MOYSKLAD_DEFAULT_ORGANIZATION_ID;
+    delete process.env.MOYSKLAD_DEFAULT_AGENT_ID;
+
+    const error = await captureApiError(
+      moyskladCreateOrder(
+        createService(),
+        { dealId: '42', items: [{ productId: 'product-1', quantity: 1 }] },
+        { endpoint: moyskladMcpUrl },
+      ),
+    );
+
+    expect(error.getResponse()).toMatchObject({
+      statusCode: 503,
+      code: ERROR_KEYS.providerNotConfigured,
+    });
+    expect((error as Error).message).toContain(
+      'MOYSKLAD_DEFAULT_ORGANIZATION_ID',
+    );
+    expect((error as Error).message).toContain('MOYSKLAD_DEFAULT_AGENT_ID');
+  });
+
+  it('заказ с некорректным ID организации — 503 до вызова MCP', async () => {
+    process.env.MOYSKLAD_DEFAULT_ORGANIZATION_ID = 'https://evil.example/org';
+
+    const error = await captureApiError(
+      moyskladCreateOrder(
+        createService(),
+        { dealId: '42', items: [{ productId: 'product-1', quantity: 1 }] },
+        { endpoint: moyskladMcpUrl },
+      ),
+    );
+
+    expect(error.getResponse()).toMatchObject({
+      statusCode: 503,
+      code: ERROR_KEYS.providerNotConfigured,
+    });
   });
 
   it('транспорт MCP: 429 на /sse не ретраится и даёт 502', async () => {

@@ -24,14 +24,18 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { GoogleOAuthService } from './google/google-oauth.service.js';
 import {
   KEY_PROVIDERS,
+  bitrix24KeysSchema,
   midjourneyKeysSchema,
+  moyskladKeysSchema,
   ozonKeysSchema,
   wildberriesKeysSchema,
   type KeyProvider,
 } from './keys/provider-keys.schemas.js';
 import {
   ProviderKeysService,
+  type Bitrix24IntegrationState,
   type MidjourneyIntegrationState,
+  type MoyskladIntegrationState,
   type OzonIntegrationState,
   type WildberriesIntegrationState,
 } from './keys/provider-keys.service.js';
@@ -49,7 +53,7 @@ const telegramConnectSchema = z
 /**
  * Состояние интеграции для UI (контракт `GET /integrations`).
  *
- * Поля `ozon`/`wildberries`/`midjourney` совпадают с
+ * Поля всех провайдеров совпадают с
  * `apps/web/src/lib/integrations.ts`; лишнее поле `source` показывает,
  * работают ли ключи пользователя или системные (env).
  */
@@ -68,13 +72,16 @@ export interface IntegrationsState {
   readonly ozon: OzonIntegrationState;
   readonly wildberries: WildberriesIntegrationState;
   readonly midjourney: MidjourneyIntegrationState;
+  readonly bitrix24: Bitrix24IntegrationState;
+  readonly moysklad: MoyskladIntegrationState;
 }
 
 /**
  * Раздел «Интеграции»: сводный статус провайдеров и управление ими.
  *
  * Контракт совпадает с `apps/web/src/lib/integrations.ts`:
- * `GET /integrations`, `POST/DELETE /integrations/{telegram|ozon|wildberries|midjourney}`.
+ * `GET /integrations` и `POST/DELETE` для
+ * `telegram|ozon|wildberries|midjourney|bitrix24|moysklad`.
  */
 @ApiTags('Integrations')
 @ApiBearerAuth()
@@ -129,6 +136,8 @@ export class IntegrationsController {
       ozon: providers.ozon,
       wildberries: providers.wildberries,
       midjourney: providers.midjourney,
+      bitrix24: providers.bitrix24,
+      moysklad: providers.moysklad,
     };
   }
 
@@ -367,6 +376,122 @@ export class IntegrationsController {
       disconnected: await this.providerKeys.disconnect(
         requireUserId(request),
         'midjourney',
+      ),
+    };
+  }
+
+  /**
+   * Подключает входящий вебхук Битрикс24 (Треки K/L): `{ webhookUrl }`.
+   *
+   * Формат проверяется до сохранения: только `https://`-адрес портала
+   * `*.bitrix24.ru` с путём `/rest/<id>/<token>/`. Сам вебхук — секрет, в
+   * ответе и логах его нет.
+   */
+  @Post('bitrix24')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить вебхук Битрикс24' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Вебхук Битрикс24 сохранён в зашифрованном виде.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается корректный { webhookUrl }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  async connectBitrix24(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<Bitrix24IntegrationState> {
+    const userId = requireUserId(request);
+    const parsed = bitrix24KeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError(
+        'Ожидается { webhookUrl } вида https://<портал>.bitrix24.ru/rest/<id>/<token>/',
+      );
+    }
+
+    return this.providerKeys.connectBitrix24(userId, parsed.data);
+  }
+
+  /** Удаляет вебхук Битрикс24 пользователя. */
+  @Delete('bitrix24')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Битрикс24' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Вебхук Битрикс24 удалён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  async disconnectBitrix24(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'bitrix24',
+      ),
+    };
+  }
+
+  /** Подключает токен МойСклада (Треки K/L): `{ apiToken }`. */
+  @Post('moysklad')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить токен МойСклада' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Токен МойСклада сохранён в зашифрованном виде.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Ожидается { apiToken }.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  async connectMoysklad(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<MoyskladIntegrationState> {
+    const userId = requireUserId(request);
+    const parsed = moyskladKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { apiToken }');
+    }
+
+    return this.providerKeys.connectMoysklad(userId, parsed.data);
+  }
+
+  /** Удаляет токен МойСклада пользователя. */
+  @Delete('moysklad')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить МойСклад' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Токен МойСклада удалён.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'JWT отсутствует или недействителен.',
+  })
+  async disconnectMoysklad(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'moysklad',
       ),
     };
   }

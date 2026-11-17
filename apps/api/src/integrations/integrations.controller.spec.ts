@@ -18,6 +18,8 @@ interface Harness {
     connectOzon: MockFn;
     connectWildberries: MockFn;
     connectMidjourney: MockFn;
+    connectBitrix24: MockFn;
+    connectMoysklad: MockFn;
     disconnect: MockFn;
   };
 }
@@ -66,6 +68,11 @@ function createHarness(): Harness {
         source: 'user' as const,
       },
       midjourney: { status: 'disconnected' as const },
+      bitrix24: {
+        status: 'active' as const,
+        source: 'user' as const,
+      },
+      moysklad: { status: 'disconnected' as const },
     })),
     connectOzon: vi.fn(async () => ({
       status: 'active' as const,
@@ -78,6 +85,14 @@ function createHarness(): Harness {
       source: 'user' as const,
     })),
     connectMidjourney: vi.fn(async () => ({
+      status: 'active' as const,
+      source: 'user' as const,
+    })),
+    connectBitrix24: vi.fn(async () => ({
+      status: 'active' as const,
+      source: 'user' as const,
+    })),
+    connectMoysklad: vi.fn(async () => ({
       status: 'active' as const,
       source: 'user' as const,
     })),
@@ -118,6 +133,8 @@ describe('IntegrationsController (контракт UI)', () => {
         source: 'user',
       },
       midjourney: { status: 'disconnected' },
+      bitrix24: { status: 'active', source: 'user' },
+      moysklad: { status: 'disconnected' },
     });
   });
 
@@ -128,6 +145,8 @@ describe('IntegrationsController (контракт UI)', () => {
       ozon: { status: 'disconnected' },
       wildberries: { status: 'disconnected' },
       midjourney: { status: 'disconnected' },
+      bitrix24: { status: 'disconnected' },
+      moysklad: { status: 'disconnected' },
     });
 
     const state = await controller.status(request());
@@ -135,6 +154,8 @@ describe('IntegrationsController (контракт UI)', () => {
     expect(state.ozon.status).toBe('disconnected');
     expect(state.wildberries.status).toBe('disconnected');
     expect(state.midjourney.status).toBe('disconnected');
+    expect(state.bitrix24.status).toBe('disconnected');
+    expect(state.moysklad.status).toBe('disconnected');
   });
 
   it('POST /integrations/telegram проверяет токен и возвращает бота', async () => {
@@ -218,6 +239,56 @@ describe('IntegrationsController (контракт UI)', () => {
     });
   });
 
+  it('POST /integrations/bitrix24 сохраняет вебхук портала', async () => {
+    const { controller, keys } = createHarness();
+    const webhookUrl = 'https://portal.bitrix24.ru/rest/1/token/';
+
+    await expect(
+      controller.connectBitrix24(request(), { webhookUrl }),
+    ).resolves.toMatchObject({ status: 'active', source: 'user' });
+    expect(keys.connectBitrix24).toHaveBeenCalledWith('user-1', {
+      webhookUrl,
+    });
+  });
+
+  it('POST /integrations/bitrix24 отклоняет небезопасный вебхук', async () => {
+    const { controller, keys } = createHarness();
+    const invalid = [
+      'http://portal.bitrix24.ru/rest/1/token/',
+      'https://example.com/rest/1/token/',
+      'https://portal.bitrix24.ru/crm/deal/',
+      'not-a-url',
+    ];
+
+    for (const webhookUrl of invalid) {
+      await expect(
+        controller.connectBitrix24(request(), { webhookUrl }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+
+    expect(keys.connectBitrix24).not.toHaveBeenCalled();
+  });
+
+  it('POST /integrations/moysklad сохраняет токен API', async () => {
+    const { controller, keys } = createHarness();
+
+    await expect(
+      controller.connectMoysklad(request(), { apiToken: 'moysklad-token-1' }),
+    ).resolves.toMatchObject({ status: 'active', source: 'user' });
+    expect(keys.connectMoysklad).toHaveBeenCalledWith('user-1', {
+      apiToken: 'moysklad-token-1',
+    });
+  });
+
+  it('POST /integrations/moysklad требует непустой apiToken', async () => {
+    const { controller, keys } = createHarness();
+
+    await expect(
+      controller.connectMoysklad(request(), { apiToken: '' }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(keys.connectMoysklad).not.toHaveBeenCalled();
+  });
+
   it('DELETE /integrations/{provider} удаляет ключи только своего провайдера', async () => {
     const { controller, keys } = createHarness();
 
@@ -230,11 +301,19 @@ describe('IntegrationsController (контракт UI)', () => {
     await expect(controller.disconnectMidjourney(request())).resolves.toEqual({
       disconnected: true,
     });
+    await expect(controller.disconnectBitrix24(request())).resolves.toEqual({
+      disconnected: true,
+    });
+    await expect(controller.disconnectMoysklad(request())).resolves.toEqual({
+      disconnected: true,
+    });
 
     expect(keys.disconnect.mock.calls).toEqual([
       ['user-1', 'ozon'],
       ['user-1', 'wildberries'],
       ['user-1', 'midjourney'],
+      ['user-1', 'bitrix24'],
+      ['user-1', 'moysklad'],
     ]);
   });
 
@@ -252,6 +331,11 @@ describe('IntegrationsController (контракт UI)', () => {
     ).rejects.toMatchObject({ status: 401 });
     await expect(
       controller.disconnectMidjourney({} as unknown as Request),
+    ).rejects.toMatchObject({ status: 401 });
+    await expect(
+      controller.connectBitrix24({} as unknown as Request, {
+        webhookUrl: 'https://portal.bitrix24.ru/rest/1/token/',
+      }),
     ).rejects.toMatchObject({ status: 401 });
   });
 });

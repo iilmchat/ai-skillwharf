@@ -12,7 +12,10 @@
  * REST-вызовы, таймауты и retry остаются за `MarketplaceMcpService`.
  */
 import { z } from 'zod';
-import type { ApiException } from '../../common/api-error.js';
+import {
+  providerNotConfiguredError,
+  type ApiException,
+} from '../../common/api-error.js';
 import {
   BITRIX24_MCP_ACTIONS,
   MOYSKLAD_MCP_ACTIONS,
@@ -303,23 +306,109 @@ export async function moyskladGetCost(
   });
 }
 
+/** Ссылка на сущность МойСклада для тела JSON API 1.2. */
+type MoyskladMetaLink = {
+  meta: { href: string; type: string; mediaType: string };
+};
+
+/** Обязательные поля заказа покупателя: организация и контрагент. */
+interface MoyskladOrderDefaults {
+  readonly organization: MoyskladMetaLink;
+  readonly agent: MoyskladMetaLink;
+}
+
+/** Базовый URL JSON API 1.2, если `MOYSKLAD_BASE_URL` не задан. */
+const DEFAULT_MOYSKLAD_BASE_URL = 'https://api.moysklad.ru/api/remap/1.2';
+
+/** ID сущности МойСклада: UUID/код, ровно как в `meta.href`. */
+const MOYSKLAD_ENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Читает непустое значение окружения или `null`. */
+function readOptionalEnv(name: string): string | null {
+  const value = process.env[name]?.trim() ?? '';
+
+  return value === '' ? null : value;
+}
+
+/**
+ * Организация и контрагент по умолчанию для заказа покупателя.
+ *
+ * JSON API 1.2 требует оба поля, а в сделке Битрикс24 лежат только ID
+ * компании/контакта CRM, которые не являются сущностями МойСклада. Для
+ * пилота берём дефолтные ID из окружения API (KI-080); если их нет или
+ * формат неверный — понятная 503 `errors.provider_not_configured`, а не 412
+ * от МойСклада после успешного сбора позиций.
+ */
+function resolveMoyskladOrderDefaults(): MoyskladOrderDefaults {
+  const organizationId = readOptionalEnv('MOYSKLAD_DEFAULT_ORGANIZATION_ID');
+  const agentId = readOptionalEnv('MOYSKLAD_DEFAULT_AGENT_ID');
+  const missing: string[] = [];
+
+  if (organizationId === null) {
+    missing.push('MOYSKLAD_DEFAULT_ORGANIZATION_ID');
+  }
+
+  if (agentId === null) {
+    missing.push('MOYSKLAD_DEFAULT_AGENT_ID');
+  }
+
+  if (missing.length > 0) {
+    throw providerNotConfiguredError(
+      `МойСклад: заказ покупателя требует организацию и контрагента. Задайте ${missing.join(', ')} (ID сущностей МойСклада)`,
+    );
+  }
+
+  if (
+    !MOYSKLAD_ENTITY_ID_PATTERN.test(organizationId ?? '') ||
+    !MOYSKLAD_ENTITY_ID_PATTERN.test(agentId ?? '')
+  ) {
+    throw providerNotConfiguredError(
+      'МойСклад: MOYSKLAD_DEFAULT_ORGANIZATION_ID и MOYSKLAD_DEFAULT_AGENT_ID должны быть ID сущностей (буквы, цифры, дефис и подчёркивание)',
+    );
+  }
+
+  const base = (
+    readOptionalEnv('MOYSKLAD_BASE_URL') ?? DEFAULT_MOYSKLAD_BASE_URL
+  ).replace(/\/+$/, '');
+
+  return {
+    organization: {
+      meta: {
+        href: `${base}/entity/organization/${organizationId}`,
+        type: 'organization',
+        mediaType: 'application/json',
+      },
+    },
+    agent: {
+      meta: {
+        href: `${base}/entity/counterparty/${agentId}`,
+        type: 'counterparty',
+        mediaType: 'application/json',
+      },
+    },
+  };
+}
+
 /**
  * Создаёт заказ покупателя МойСклад по сделке Битрикс24.
  *
  * Позиции собираются по ID товаров: `product_get` даёт `meta.href` (без него
  * JSON API 1.2 не принимает позицию) и цену продажи, если её не передали.
- * Заказ создаётся без организации и контрагента: их должен подставлять
- * MCP-сервер из своего окружения (см. KI-080).
+ * Организация и контрагент — обязательные поля заказа: для пилота они берутся
+ * из `MOYSKLAD_DEFAULT_ORGANIZATION_ID`/`MOYSKLAD_DEFAULT_AGENT_ID`, иначе
+ * вызов падает с 503 `errors.provider_not_configured` (KI-080).
  */
 export async function moyskladCreateOrder(
   mcp: MarketplaceMcpService,
   args: MoyskladCreateOrderArgs,
   context: ErpToolContext = {},
 ): Promise<string> {
+  // Проверяем конфигурацию до вызовов MCP: не собираем позиции впустую.
+  const defaults = resolveMoyskladOrderDefaults();
   const positions: Array<{
     quantity: number;
     price: number;
-    assortment: { meta: { href: string; type: string; mediaType: string } };
+    assortment: MoyskladMetaLink;
   }> = [];
 
   for (const item of args.items) {
@@ -370,6 +459,8 @@ export async function moyskladCreateOrder(
     {
       payload: {
         description: `Заказ по сделке Битрикс24 #${args.dealId}`,
+        organization: defaults.organization,
+        agent: defaults.agent,
         positions,
       },
     },

@@ -116,8 +116,9 @@ Google Workspace активен, в карточках агентов и в бо
 
 Страница `/app/settings` содержит три независимых блока:
 
-- «Интеграции» — Telegram, Google Workspace, Ozon, Wildberries и Midjourney:
-  подключение, статус и отзыв доступа (см. раздел «Интеграции» ниже).
+- «Интеграции» — Telegram, Google Workspace, Ozon, Wildberries, Midjourney,
+  Битрикс24 и МойСклад: подключение, статус и отзыв доступа (см. раздел
+  «Интеграции» ниже).
 - «Долговременная память» — кнопка «Забыть меня» вызывает
   `DELETE /api/v1/chat/memory` и показывает тост об успехе или ошибке.
 - «Память» — список записей RAG-памяти. Раздел управляется feature-флагом
@@ -198,6 +199,21 @@ docker build -f apps/web/Dockerfile \
   `POST /api/v1/integrations/midjourney` (`{ apiKey }`); подпись в карточке
   явно сообщает, что используется TTAPI, а не официальный API Midjourney.
   Отключение — `DELETE /api/v1/integrations/midjourney`.
+- **Битрикс24 (треки K/L).** Поле `Webhook URL` принимает только абсолютный
+  `https://`-адрес входящего вебхука портала: проверка формата выполняется
+  Zod-схемой `bitrix24WebhookUrlSchema` до запроса, поэтому `http://`,
+  `javascript:` и относительные пути отклоняются с локализованной ошибкой.
+  Адрес обрезается по краям и уходит в
+  `POST /api/v1/integrations/bitrix24` (`{ webhookUrl }`); отключение —
+  `DELETE /api/v1/integrations/bitrix24`. Вебхук — секрет: после подключения
+  он не возвращается, карточка показывает только «Сохранён на сервере»
+  (см. KI-076). Маршруты в API ещё не реализованы (KI-075).
+- **МойСклад (треки K/L).** Поле `API Token` проверяется схемой
+  `moyskladApiTokenSchema` (непустая строка разумной длины) и отправляется в
+  `POST /api/v1/integrations/moysklad` (`{ apiToken }`); отключение —
+  `DELETE /api/v1/integrations/moysklad`. Маршруты в API ещё не реализованы
+  (KI-075), поэтому до их появления карточки показывают «Интеграция пока
+  недоступна».
 - **Ошибки.** Коды `errors.provider_auth_required`,
   `errors.provider_not_configured`, `errors.provider_unavailable`,
   `errors.provider_rate_limited`, а также `errors.invalid_telegram_token` и

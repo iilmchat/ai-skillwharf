@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### Integrations: ключи Битрикс24/МойСклада и обязательные поля заказа (KI-075, KI-080)
+
+- `POST/DELETE /api/v1/integrations/bitrix24` (`{ webhookUrl }`) и
+  `POST/DELETE /api/v1/integrations/moysklad` (`{ apiToken }`): секреты
+  шифруются `TokenCipherService` (AES-256-GCM) в `ProviderCredential`, в
+  ответе и логах открытых значений нет. `GET /integrations` отдаёт
+  `bitrix24`/`moysklad` со статусом `active`/`disconnected`/`error` и
+  `source` (`user`|`env`). Вебхук проверяется до сохранения: только
+  `https://`, домен `*.bitrix24.ru` и путь `/rest/`; токен МойСклада — от 10
+  символов.
+- `moysklad_create_order` передаёт обязательные `organization` и `agent` из
+  `MOYSKLAD_DEFAULT_ORGANIZATION_ID`/`MOYSKLAD_DEFAULT_AGENT_ID` (ссылки
+  `meta.href` собираются от `MOYSKLAD_BASE_URL`). Если переменные не заданы
+  или некорректны — 503 `errors.provider_not_configured` до вызова MCP;
+  реальный заказ больше не падает с 412 от JSON API 1.2.
+- Zod-схемы UI (`apps/web/src/lib/integrations.ts`) и API-ответ сверены
+  тестом `ui-contract.sync.spec.ts`; переменные заказа добавлены в
+  `.env.example` и прокинуты в API-контейнер `docker-compose.mcp.yml`.
+
+**Известные проблемы:** KI-075 и KI-080 закрыты; KI-076 (поле вебхука
+открытым текстом) и KI-077 (общий env-секрет MCP) остаются открытыми.
+
 ### Web: интеграции Битрикс24 и МойСклад (треки K/L)
 
 - В разделе «Настройки → Интеграции» появились карточки «Битрикс24» и
