@@ -3,7 +3,7 @@
     "title": "SkillWharf — Workspace",
     "description": "SkillWharf is a workspace for autonomous AI agents.",
     "landingTitle": "SkillWharf — a managed AI Office for your business",
-    "landingDescription": "10 ready-made business scenarios, pay only for outcomes, data stays on your server."
+    "landingDescription": "12 ready-made business scenarios, pay only for outcomes, data stays on your server."
   },
   "common": {
     "closeNotification": "Close notification",
@@ -221,11 +221,11 @@
     "titleLead": "A managed",
     "titleAccent": "AI Office",
     "titleTail": "for your business",
-    "subtitle": "10 ready-made business scenarios. Pay only for results. Your data stays on your server.",
+    "subtitle": "12 ready-made business scenarios. Pay only for results. Your data stays on your server.",
     "primaryCta": "Request a pilot",
     "secondaryCta": "Watch demo",
     "meta": {
-      "tracks": "10 tracks",
+      "tracks": "12 tracks",
       "outcome": "Pay per outcome",
       "hosted": "Self-Hosted"
     },
@@ -254,7 +254,7 @@
     },
     "tracks": {
       "eyebrow": "Tracks",
-      "title": "10 ready-made scenarios",
+      "title": "12 ready-made scenarios",
       "featureLabel": "Highlight",
       "details": {
         "open": "View details",
@@ -622,6 +622,75 @@
             "pro": "6990 ₽/month",
             "payPerCall": "300–800 ₽ per audit"
           }
+        },
+        "wholesale": {
+          "name": "Wholesale (Bitrix24 + MoySklad)",
+          "description": "Sales in CRM, stock in MoySklad. No double entry and no selling below zero.",
+          "feature": "Stock and debt are checked before shipment.",
+          "agents": {
+            "sales": {
+              "name": "Sales assistant",
+              "role": "CRM orders"
+            },
+            "operations": {
+              "name": "Operations specialist",
+              "role": "MoySklad shipments"
+            },
+            "credit": {
+              "name": "Credit controller",
+              "role": "debt control"
+            },
+            "margin": {
+              "name": "Margin analyst",
+              "role": "deal margins"
+            }
+          },
+          "steps": {
+            "s1": "Stock check",
+            "s2": "Debt control",
+            "s3": "Shipment creation",
+            "s4": "Margin analysis"
+          },
+          "pricing": {
+            "free": "2 agents",
+            "team": "1490 ₽/month",
+            "payPerCall": "50 ₽ per call"
+          }
+        },
+        "production": {
+          "name": "Manufacturing (Bitrix24 + MoySklad)",
+          "description": "From request to finished-goods shipment. Managing specifications and components.",
+          "feature": "Shortage check before ordering from a supplier.",
+          "agents": {
+            "configurator": {
+              "name": "Configuration engineer",
+              "role": "specifications"
+            },
+            "procurement": {
+              "name": "Procurement specialist",
+              "role": "supplier orders"
+            },
+            "technologist": {
+              "name": "Technologist",
+              "role": "assembly routing"
+            },
+            "quality": {
+              "name": "Quality controller",
+              "role": "HITL acceptance"
+            }
+          },
+          "steps": {
+            "s1": "Specification",
+            "s2": "Shortage check",
+            "s3": "Supplier order",
+            "s4": "Assembly control",
+            "s5": "Shipment"
+          },
+          "pricing": {
+            "free": "2 agents",
+            "pro": "3990 ₽/month",
+            "payPerOutcome": "100 ₽ per order"
+          }
         }
       }
     },
@@ -636,7 +705,9 @@
         "wildberries": "Wildberries",
         "midjourney": "Midjourney",
         "tavily": "Tavily (Search)",
-        "tesseract": "Tesseract (OCR)"
+        "tesseract": "Tesseract (OCR)",
+        "bitrix24": "Bitrix24",
+        "moysklad": "MoySklad"
       }
     },
     "marketplace": {

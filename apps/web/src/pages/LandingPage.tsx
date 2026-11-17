@@ -26,6 +26,8 @@ type PlatformId =
   | 'google'
   | 'ozon'
   | 'wildberries'
+  | 'bitrix24'
+  | 'moysklad'
   | 'midjourney'
   | 'tavily'
   | 'tesseract';
@@ -95,6 +97,8 @@ const PLATFORMS: readonly LandingPlatform[] = [
   { id: 'google', labelKey: 'landing.ecosystem.items.google' },
   { id: 'ozon', labelKey: 'landing.ecosystem.items.ozon' },
   { id: 'wildberries', labelKey: 'landing.ecosystem.items.wildberries' },
+  { id: 'bitrix24', labelKey: 'landing.ecosystem.items.bitrix24' },
+  { id: 'moysklad', labelKey: 'landing.ecosystem.items.moysklad' },
   { id: 'midjourney', labelKey: 'landing.ecosystem.items.midjourney' },
   { id: 'tavily', labelKey: 'landing.ecosystem.items.tavily' },
   { id: 'tesseract', labelKey: 'landing.ecosystem.items.tesseract' },
@@ -105,6 +109,8 @@ const KNOWN_PROVIDERS: readonly IntegrationLogoProvider[] = [
   'google',
   'ozon',
   'wildberries',
+  'bitrix24',
+  'moysklad',
   'midjourney',
 ];
 

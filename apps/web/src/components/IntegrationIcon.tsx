@@ -5,7 +5,21 @@ import type {
 
 export type IntegrationLogoProvider =
   | IntegrationProvider
-  | KeyIntegrationProvider;
+  | KeyIntegrationProvider
+  | 'bitrix24'
+  | 'moysklad';
+
+/** Бейджи провайдеров без отдельной SVG-иконки. */
+const PROVIDER_BADGE: Record<
+  Exclude<IntegrationLogoProvider, IntegrationProvider>,
+  { label: string; className: string }
+> = {
+  ozon: { label: 'OZ', className: 'bg-[#005BFF] text-white' },
+  wildberries: { label: 'WB', className: 'bg-[#CB11AB] text-white' },
+  midjourney: { label: 'MJ', className: 'bg-slate-900 text-white' },
+  bitrix24: { label: 'B24', className: 'bg-[#0B66C3] text-white' },
+  moysklad: { label: 'MS', className: 'bg-[#D6001C] text-white' },
+};
 
 /** Иконки каналов: узнаваемые, без внешних ассетов и сетевых запросов. */
 export function IntegrationIcon({
@@ -51,20 +65,14 @@ export function IntegrationIcon({
     );
   }
 
-  const label = provider === 'ozon' ? 'OZ' : provider === 'wildberries' ? 'WB' : 'MJ';
-  const colors =
-    provider === 'ozon'
-      ? 'bg-[#005BFF] text-white'
-      : provider === 'wildberries'
-        ? 'bg-[#CB11AB] text-white'
-        : 'bg-slate-900 text-white';
+  const badge = PROVIDER_BADGE[provider];
 
   return (
     <span
       aria-hidden="true"
-      className={`inline-grid place-items-center rounded-md text-[8px] font-bold leading-none ${colors} ${className}`}
+      className={`inline-grid place-items-center rounded-md text-[8px] font-bold leading-none ${badge.className} ${className}`}
     >
-      {label}
+      {badge.label}
     </span>
   );
 }

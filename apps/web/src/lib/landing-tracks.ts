@@ -15,7 +15,9 @@ export type TrackId =
   | 'hr'
   | 'documents'
   | 'ocr'
-  | 'finance';
+  | 'finance'
+  | 'wholesale'
+  | 'production';
 
 export type TrackPricingKey =
   'free' | 'pro' | 'team' | 'enterprise' | 'payPerCall' | 'payPerOutcome';
@@ -155,6 +157,30 @@ export const LANDING_TRACKS: readonly LandingTrack[] = [
       { plan: 'Free', key: 'free' },
       { plan: 'Pro', key: 'pro' },
       { plan: 'Pay-per-Call', key: 'payPerCall' },
+    ],
+  },
+  {
+    id: 'wholesale',
+    letter: 'K',
+    icon: '🏬',
+    agentKeys: ['sales', 'operations', 'credit', 'margin'],
+    stepKeys: ['s1', 's2', 's3', 's4'],
+    pricing: [
+      { plan: 'Free', key: 'free' },
+      { plan: 'Team', key: 'team' },
+      { plan: 'Pay-per-Call', key: 'payPerCall' },
+    ],
+  },
+  {
+    id: 'production',
+    letter: 'L',
+    icon: '🏭',
+    agentKeys: ['configurator', 'procurement', 'technologist', 'quality'],
+    stepKeys: ['s1', 's2', 's3', 's4', 's5'],
+    pricing: [
+      { plan: 'Free', key: 'free' },
+      { plan: 'Pro', key: 'pro' },
+      { plan: 'Pay-per-Outcome', key: 'payPerOutcome' },
     ],
   },
 ];
