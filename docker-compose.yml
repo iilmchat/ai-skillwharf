@@ -176,6 +176,11 @@ services:
       # Строгие лимиты по умолчанию; E2E может ослабить их через env.
       AUTH_LOGIN_LIMIT: ${AUTH_LOGIN_LIMIT:-5}
       AUTH_REGISTER_LIMIT: ${AUTH_REGISTER_LIMIT:-10}
+      # KI-073: open | invite | closed. Для пилота по умолчанию invite.
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-invite}
+      REGISTRATION_INVITE_CODE: ${REGISTRATION_INVITE_CODE:-}
+      # KI-075: live-проверка ключей при подключении; true — только изолированный стенд.
+      SKIP_INTEGRATION_LIVE_CHECK: ${SKIP_INTEGRATION_LIVE_CHECK:-false}
     extra_hosts:
       # Доступ к LM Studio и другим сервисам на хосте из контейнера.
       # host-gateway нужен на Linux; на Windows и macOS работает из коробки.

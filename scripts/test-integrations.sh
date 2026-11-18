@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 #
-# Проверка внешних коннекторов Sprint 19-20: Ozon, Wildberries, Midjourney
-# и OCR (Smart Document Engine).
+# Проверка внешних коннекторов Sprint 19-23: Ozon, Wildberries, Midjourney,
+# OCR (Smart Document Engine), Битрикс24 и МойСклад.
 #
 #   bash scripts/test-integrations.sh
 #   bash scripts/test-integrations.sh --ozon --wb
+#   bash scripts/test-integrations.sh --bitrix24 --moysklad
 #
-# Скрипт читает .env, но никогда не печатает значения ключей. Если ключи
-# сервиса не заданы — проверка пропускается (SKIP). Если заданы — выполняется
-# реальный HTTP-запрос; 401/403 и 5xx считаются ошибкой.
+# Скрипт читает .env, но никогда не печатает значения ключей, webhook URL
+# или тела ответов с персональными данными. Если ключи сервиса не заданы —
+# проверка пропускается (SKIP). Если заданы — выполняется безопасный
+# read-only HTTP-запрос; 401/403 и 5xx считаются ошибкой.
 #
 # Переопределяемые endpoint'ы (см. .env.example):
 #   OZON_API_BASE_URL, OZON_API_TEST_PATH
 #   WB_PRICING_API_BASE_URL, WB_API_TEST_PATH
 #   MIDJOURNEY_BASE_URL, MIDJOURNEY_TEST_PATH, MIDJOURNEY_TEST_METHOD
 #   OCR_API_URL, OCR_API_KEY, OCR_API_AUTH_HEADER, OCR_API_AUTH_PREFIX
+#   BITRIX24_WEBHOOK_URL, MOYSKLAD_TOKEN, MOYSKLAD_BASE_URL
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,12 +40,17 @@ OCR_API_URL="${OCR_API_URL:-}"
 OCR_API_KEY="${OCR_API_KEY:-}"
 OCR_API_AUTH_HEADER="${OCR_API_AUTH_HEADER:-Authorization}"
 OCR_API_AUTH_PREFIX="${OCR_API_AUTH_PREFIX:-Bearer}"
+BITRIX24_WEBHOOK_URL="${BITRIX24_WEBHOOK_URL:-}"
+MOYSKLAD_TOKEN="${MOYSKLAD_TOKEN:-}"
+MOYSKLAD_BASE_URL="${MOYSKLAD_BASE_URL:-https://api.moysklad.ru/api/remap/1.2}"
 CURL_TIMEOUT="${INTEGRATIONS_CURL_TIMEOUT:-15}"
 
 CHECK_OZON=1
 CHECK_WB=1
 CHECK_MIDJOURNEY=1
 CHECK_OCR=1
+CHECK_BITRIX24=1
+CHECK_MOYSKLAD=1
 
 usage() {
   cat <<'EOF'
@@ -52,6 +60,8 @@ usage() {
   --wb            проверить только Wildberries
   --midjourney    проверить только Midjourney
   --ocr           проверить только OCR (Smart Document Engine)
+  --bitrix24      проверить только Битрикс24 (Inbound Webhook)
+  --moysklad      проверить только МойСклад (JSON API 1.2)
   -h, --help      показать справку
 
 Без опций проверяются все сервисы, у которых заданы ключи.
@@ -63,6 +73,8 @@ if [[ $# -gt 0 ]]; then
   CHECK_WB=0
   CHECK_MIDJOURNEY=0
   CHECK_OCR=0
+  CHECK_BITRIX24=0
+  CHECK_MOYSKLAD=0
 
   for arg in "$@"; do
     case "$arg" in
@@ -70,6 +82,8 @@ if [[ $# -gt 0 ]]; then
       --wb) CHECK_WB=1 ;;
       --midjourney) CHECK_MIDJOURNEY=1 ;;
       --ocr) CHECK_OCR=1 ;;
+      --bitrix24) CHECK_BITRIX24=1 ;;
+      --moysklad) CHECK_MOYSKLAD=1 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "FAIL: неизвестная опция $arg" >&2; usage; exit 2 ;;
     esac
@@ -126,6 +140,23 @@ body_excerpt() {
   local file="$1"
   # Не печатаем тело целиком: в нём может быть echo ключа/токена.
   tr '\n' ' ' <"$file" | cut -c1-240
+}
+
+# Проверяет, что JSON-ответ содержит поле result. Секреты и тело не печатаем.
+json_has_result() {
+  local file="$1"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -e 'has("result")' "$file" >/dev/null 2>&1
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json, sys; data = json.load(open(sys.argv[1], encoding="utf-8")); raise SystemExit(0 if "result" in data else 1)' "$file" >/dev/null 2>&1
+    return
+  fi
+
+  grep -Eq '"result"[[:space:]]*:' "$file"
 }
 
 check_ozon() {
@@ -274,11 +305,73 @@ check_ocr() {
   esac
 }
 
-echo "== Проверка интеграций Sprint 19-20 =="
+check_bitrix24() {
+  if [[ $CHECK_BITRIX24 -eq 0 ]]; then
+    return
+  fi
+
+  if [[ -z "${BITRIX24_WEBHOOK_URL:-}" ]]; then
+    skip "Битрикс24" "BITRIX24_WEBHOOK_URL"
+    return
+  fi
+
+  local url body code
+  # profile.json — безопасный read-only метод; сам webhook URL не печатаем.
+  url="${BITRIX24_WEBHOOK_URL%/}/profile.json"
+  body="$TMP_DIR/bitrix24.json"
+
+  code="$(curl -sS --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' \
+    -X POST "$url" \
+    -H 'Content-Type: application/json' \
+    -d '{}' 2>/dev/null || true)"
+
+  case "$code" in
+    2??)
+      if json_has_result "$body"; then
+        ok "Битрикс24" "HTTP $code, profile.json, result получен"
+      else
+        fail "Битрикс24" "HTTP $code, но JSON без поля result"
+      fi
+      ;;
+    401|403) fail "Битрикс24" "HTTP $code - вебхук/права отклонены API" ;;
+    000) fail "Битрикс24" "сеть/TLS недоступны" ;;
+    *) fail "Битрикс24" "HTTP $code" ;;
+  esac
+}
+
+check_moysklad() {
+  if [[ $CHECK_MOYSKLAD -eq 0 ]]; then
+    return
+  fi
+
+  if [[ -z "${MOYSKLAD_TOKEN:-}" ]]; then
+    skip "МойСклад" "MOYSKLAD_TOKEN"
+    return
+  fi
+
+  local url body code
+  url="$(url_join "$MOYSKLAD_BASE_URL" "/entity/organization?limit=1")"
+  body="$TMP_DIR/moysklad.json"
+
+  code="$(curl -sS --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' \
+    -X GET "$url" \
+    -H "Authorization: Bearer ${MOYSKLAD_TOKEN}" 2>/dev/null || true)"
+
+  case "$code" in
+    2??) ok "МойСклад" "HTTP $code, organization?limit=1" ;;
+    401|403) fail "МойСклад" "HTTP $code - токен/права отклонены API" ;;
+    000) fail "МойСклад" "сеть/TLS недоступны" ;;
+    *) fail "МойСклад" "HTTP $code" ;;
+  esac
+}
+
+echo "== Проверка интеграций Sprint 19-23 =="
 check_ozon
 check_wb
 check_midjourney
 check_ocr
+check_bitrix24
+check_moysklad
 
 echo "== Итог: OK=$PASSED FAIL=$FAILED SKIP=$SKIPPED =="
 
