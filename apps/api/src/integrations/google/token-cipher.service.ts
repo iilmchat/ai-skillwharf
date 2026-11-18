@@ -212,12 +212,13 @@ export class TokenCipherService {
   private readonly current: KeyManagementService | null;
   private readonly keys: ReadonlyMap<string, KeyManagementService>;
 
-  constructor(@Optional() key?: Buffer, options: TokenCipherOptions = {}) {
-    const env = options.env ?? process.env;
+  constructor(@Optional() key?: Buffer, @Optional() options?: TokenCipherOptions) {
+    const config = options ?? {};
+    const env = config.env ?? process.env;
     const activeKey = key ?? readKeyFromEnv(env);
-    const keyId = keyIdSchema.parse(options.keyId ?? readKeyIdFromEnv(env));
+    const keyId = keyIdSchema.parse(config.keyId ?? readKeyIdFromEnv(env));
     const previous =
-      options.previousKeys ?? parsePreviousKeys(env.TOKEN_ENCRYPTION_PREVIOUS_KEYS);
+      config.previousKeys ?? parsePreviousKeys(env.TOKEN_ENCRYPTION_PREVIOUS_KEYS);
     const available = new Map<string, KeyManagementService>();
 
     for (const [previousId, material] of previous) {
