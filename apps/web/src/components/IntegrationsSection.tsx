@@ -11,10 +11,12 @@ import {
   disconnectTelegram,
   fetchGoogleAuthorizationUrl,
   getIntegrationErrorDetails,
+  getProviderCredentialRejectionKey,
   getTelegramDisplayName,
   getWildberriesTokenExpiry,
   integrationsQueryKey,
   moyskladApiTokenSchema,
+  PROVIDER_AUTH_REQUIRED_CODE,
   telegramBotTokenSchema,
   type IntegrationErrorKind,
   type IntegrationOperation,
@@ -29,6 +31,7 @@ import {
   IntegrationIcon,
   type IntegrationLogoProvider,
 } from './IntegrationIcon';
+import { SecretField } from './SecretField';
 
 const SECTION_CLASSES =
   'rounded-2xl border border-outline-variant bg-surface-container p-5 shadow-sm sm:p-6';
@@ -115,10 +118,19 @@ function IntegrationErrorAlert({
     i18n.exists(details.serverMessage)
       ? t(details.serverMessage)
       : null;
+  // Live-проверка ключей: провайдер отклонил секрет конкретной карточки —
+  // показываем её формулировку вместо общего «Провайдер отклонил ключи».
+  const rejectionKey =
+    details.kind === 'invalidCredentials' &&
+    details.serverMessage === PROVIDER_AUTH_REQUIRED_CODE
+      ? getProviderCredentialRejectionKey(operation)
+      : null;
   const message =
-    translatedServerMessage !== null && !useKindMessage
-      ? translatedServerMessage
-      : t(ERROR_KEYS[details.kind]);
+    rejectionKey !== null
+      ? t(rejectionKey)
+      : translatedServerMessage !== null && !useKindMessage
+        ? translatedServerMessage
+        : t(ERROR_KEYS[details.kind]);
 
   return (
     <div
@@ -519,8 +531,11 @@ interface KeyProviderFields {
   /** `name` и суффикс `id` поля ввода. */
   name: string;
   fieldSuffix: string;
-  /** Вебхук виден при вводе: пользователь сверяет адрес портала. */
-  inputType: 'password' | 'text';
+  /**
+   * Показывать ли переключатель «Показать»/«Скрыть»: значение маскируется в
+   * любом случае, но вебхук Битрикс24 полезно сверить глазами.
+   */
+  revealable: boolean;
   inputMode?: 'url';
 }
 
@@ -531,7 +546,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
     hint: 'apiKeyHint',
     name: 'apiKey',
     fieldSuffix: 'api-key',
-    inputType: 'password',
+    revealable: false,
   },
   wildberries: {
     label: 'apiToken',
@@ -539,7 +554,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
     hint: 'apiTokenHint',
     name: 'apiToken',
     fieldSuffix: 'api-token',
-    inputType: 'password',
+    revealable: false,
   },
   midjourney: {
     label: 'ttApiKey',
@@ -547,7 +562,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
     hint: 'ttApiKeyHint',
     name: 'apiKey',
     fieldSuffix: 'api-key',
-    inputType: 'password',
+    revealable: false,
   },
   bitrix24: {
     label: 'webhookUrl',
@@ -555,7 +570,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
     hint: 'webhookUrlHint',
     name: 'webhookUrl',
     fieldSuffix: 'webhook-url',
-    inputType: 'text',
+    revealable: true,
     inputMode: 'url',
   },
   moysklad: {
@@ -564,7 +579,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
     hint: 'apiTokenHint',
     name: 'apiToken',
     fieldSuffix: 'api-token',
-    inputType: 'password',
+    revealable: false,
   },
 };
 
@@ -637,6 +652,7 @@ function ProviderKeyCard({
   const { t, i18n } = useTranslation();
   const [clientId, setClientId] = useState('');
   const [secret, setSecret] = useState('');
+  const [isSecretVisible, setIsSecretVisible] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const isOzon = provider === 'ozon';
@@ -666,6 +682,7 @@ function ProviderKeyCard({
     },
     onSuccess: () => {
       setSecret('');
+      setIsSecretVisible(false);
       setFieldError(null);
       setNotice(t(`${prefix}.connected`));
       onRefresh();
@@ -714,8 +731,6 @@ function ProviderKeyCard({
     setFieldError(null);
     connectMutation.reset();
   }
-
-  const secretHintId = `${provider}-secret-hint`;
 
   return (
     <article
@@ -807,40 +822,29 @@ function ProviderKeyCard({
             </div>
           )}
 
-          <div className="mt-4">
-            <label
-              htmlFor={secretFieldId}
-              className="block text-sm font-medium text-on-surface"
-            >
-              {t(secretLabelKey)}
-            </label>
-            <input
-              id={secretFieldId}
-              name={fields.name}
-              type={fields.inputType}
-              inputMode={fields.inputMode}
-              autoComplete="off"
-              spellCheck={false}
-              value={secret}
-              onChange={(event) => handleSecretChange(event.target.value)}
-              placeholder={t(secretPlaceholderKey)}
-              aria-invalid={fieldError !== null}
-              aria-describedby={secretHintId}
-              disabled={connectMutation.isPending}
-              className={INPUT_CLASSES}
-            />
-            <p
-              id={secretHintId}
-              className="mt-2 text-xs leading-relaxed text-on-surface-variant"
-            >
-              {t(secretHintKey)}
-            </p>
-            {fieldError !== null && (
-              <p role="alert" className="mt-2 text-sm text-error">
-                {fieldError}
-              </p>
-            )}
-          </div>
+          <SecretField
+            id={secretFieldId}
+            name={fields.name}
+            label={t(secretLabelKey)}
+            hint={t(secretHintKey)}
+            note={
+              provider === 'bitrix24'
+                ? t('settings.integrations.bitrix24.webhookUrlSecurityHint')
+                : undefined
+            }
+            placeholder={t(secretPlaceholderKey)}
+            value={secret}
+            onValueChange={handleSecretChange}
+            visible={isSecretVisible}
+            onVisibleChange={setIsSecretVisible}
+            revealable={fields.revealable}
+            revealLabel={t('settings.integrations.secret.show')}
+            concealLabel={t('settings.integrations.secret.hide')}
+            inputMode={fields.inputMode}
+            disabled={connectMutation.isPending}
+            error={fieldError}
+            className={INPUT_CLASSES}
+          />
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button

@@ -19,6 +19,12 @@ const LoginPage = lazy(() =>
   })),
 );
 
+const RegisterPage = lazy(() =>
+  import('./pages/RegisterPage').then((module) => ({
+    default: module.RegisterPage,
+  })),
+);
+
 const OfficePage = lazy(() =>
   import('./pages/OfficePage').then((module) => ({
     default: module.OfficePage,
@@ -98,6 +104,7 @@ function App() {
           <Route path="/welcome" element={<LandingPage />} />
           <Route path="/office" element={<OfficePage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
           <Route path="/app" element={<Navigate to="/app/chat" replace />} />
           <Route

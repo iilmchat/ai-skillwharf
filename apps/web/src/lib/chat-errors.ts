@@ -26,9 +26,28 @@ export const ERROR_CODES = {
   llmUnavailable: 'errors.llm_unavailable',
   /** Внешний marketplace недоступен (502/503). */
   marketplaceUnavailable: 'errors.marketplace_unavailable',
+  /** Регистрация новых пользователей закрыта (KI-073). */
+  registrationClosed: 'errors.registration_closed',
+  /** Неверный или недействительный инвайт-код (KI-073). */
+  invalidInviteCode: 'errors.invalid_invite_code',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+
+const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set(Object.values(ERROR_CODES));
+
+/**
+ * Ключ i18n для известного `errors.*`-кода (включая коды регистрации KI-073).
+ *
+ * `null` для незнакомого кода: форма показывает общий текст, а не сырое
+ * сообщение сервера. Возвращаемый ключ совпадает с кодом, потому что API
+ * использует сам код в качестве ключа словаря.
+ */
+export function getKnownErrorMessageKey(
+  code: string | undefined,
+): string | null {
+  return code !== undefined && KNOWN_ERROR_CODES.has(code) ? code : null;
+}
 
 /** Текст, который старый бэкенд присылал вместо кода ошибки. */
 const INSUFFICIENT_FUNDS_MARKER = 'Недостаточно средств';

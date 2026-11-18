@@ -3,6 +3,14 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import i18n from '../i18n';
 import { api, setAuthToken } from '../lib/api';
+import {
+  getErrorMetaFromError,
+  getKnownErrorMessageKey,
+} from '../lib/chat-errors';
+import {
+  registerAccount,
+  type RegisterFormValues,
+} from '../lib/registration';
 
 export interface AuthUser {
   id: string;
@@ -25,6 +33,7 @@ interface AuthState {
   error: string | null;
   initialize: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  register: (values: RegisterFormValues) => Promise<void>;
   logout: () => void;
   clearError: () => void;
 }
@@ -58,6 +67,16 @@ function toErrorMessage(error: unknown): string {
       return i18n.t('auth.errors.invalidCredentials');
     }
 
+    // Машиночитаемый `code` важнее свободного текста сервера: ключи
+    // `errors.*` (включая коды регистрации KI-073) уже есть в i18n.
+    const codeKey = getKnownErrorMessageKey(
+      getErrorMetaFromError(error).code,
+    );
+
+    if (codeKey !== null) {
+      return i18n.t(codeKey);
+    }
+
     const data: unknown = error.response.data;
 
     if (isApiErrorBody(data)) {
@@ -68,6 +87,29 @@ function toErrorMessage(error: unknown): string {
   }
 
   return i18n.t('auth.errors.loginFailed');
+}
+
+/** Ошибки регистрации: свои тексты вместо «Не удалось выполнить вход». */
+function toRegistrationErrorMessage(error: unknown): string {
+  if (isAxiosError(error)) {
+    if (error.response === undefined) {
+      return i18n.t('auth.errors.network');
+    }
+
+    if (error.response.status === 409) {
+      return i18n.t('auth.errors.emailTaken');
+    }
+
+    const codeKey = getKnownErrorMessageKey(
+      getErrorMetaFromError(error).code,
+    );
+
+    if (codeKey !== null) {
+      return i18n.t(codeKey);
+    }
+  }
+
+  return i18n.t('register.errors.submitFailed');
 }
 
 /** 429 показывает общий тост из interceptor, дублировать его в форме не нужно. */
@@ -168,6 +210,25 @@ export const useAuthStore = create<AuthState>()(
             user: null,
             isSubmitting: false,
             error: isRateLimited(error) ? null : toErrorMessage(error),
+          });
+
+          throw error;
+        }
+      },
+
+      register: async (values) => {
+        set({ isSubmitting: true, error: null });
+
+        try {
+          await registerAccount(values);
+          // Регистрация не выдаёт токены: пользователь входит на /login.
+          set({ isSubmitting: false });
+        } catch (error) {
+          set({
+            isSubmitting: false,
+            error: isRateLimited(error)
+              ? null
+              : toRegistrationErrorMessage(error),
           });
 
           throw error;

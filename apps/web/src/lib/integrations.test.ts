@@ -10,11 +10,13 @@ import {
   fetchIntegrations,
   getActiveIntegrationChannels,
   getIntegrationErrorDetails,
+  getProviderCredentialRejectionKey,
   getTelegramDisplayName,
   getWildberriesTokenExpiry,
   googleAuthorizationUrlSchema,
   integrationsSchema,
   moyskladApiTokenSchema,
+  PROVIDER_AUTH_REQUIRED_CODE,
   telegramBotTokenSchema,
   type IntegrationsState,
 } from './integrations';
@@ -564,5 +566,53 @@ describe('getIntegrationErrorDetails', () => {
         'telegramConnect',
       ).serverMessage,
     ).toBe('Первая ошибка; Вторая ошибка');
+  });
+});
+
+describe('getProviderCredentialRejectionKey', () => {
+  it('даёт отдельные сообщения для Битрикс24 и МойСклада', () => {
+    expect(getProviderCredentialRejectionKey('bitrix24Connect')).toBe(
+      'settings.integrations.bitrix24.webhookRejected',
+    );
+    expect(getProviderCredentialRejectionKey('moyskladConnect')).toBe(
+      'settings.integrations.moysklad.tokenRejected',
+    );
+  });
+
+  it('для остальных карточек оставляет общий текст', () => {
+    expect(getProviderCredentialRejectionKey('ozonConnect')).toBeNull();
+    expect(getProviderCredentialRejectionKey('wildberriesConnect')).toBeNull();
+    expect(getProviderCredentialRejectionKey('bitrix24Disconnect')).toBeNull();
+    expect(getProviderCredentialRejectionKey('load')).toBeNull();
+  });
+});
+
+describe('live-проверка ключей Битрикс24/МойСклад', () => {
+  it('400 errors.provider_auth_required → invalidCredentials с кодом', () => {
+    const error = axiosErrorWith(
+      { code: PROVIDER_AUTH_REQUIRED_CODE, message: 'Webhook rejected' },
+      400,
+    );
+
+    expect(getIntegrationErrorDetails(error, 'bitrix24Connect')).toEqual({
+      kind: 'invalidCredentials',
+      serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
+    });
+    expect(getIntegrationErrorDetails(error, 'moyskladConnect')).toEqual({
+      kind: 'invalidCredentials',
+      serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
+    });
+  });
+
+  it('502 errors.provider_unavailable → unavailable с локализуемым кодом', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ code: 'errors.provider_unavailable' }, 502),
+        'bitrix24Connect',
+      ),
+    ).toEqual({
+      kind: 'unavailable',
+      serverMessage: 'errors.provider_unavailable',
+    });
   });
 });

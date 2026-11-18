@@ -324,7 +324,13 @@ export function LoginPage() {
           </div>
 
           <p className="mt-6 text-center text-xs text-on-surface-variant">
-            {t('login.noAccount')}
+            {t('login.noAccount')}{' '}
+            <Link
+              to="/register"
+              className="font-semibold text-primary underline-offset-4 transition hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              {t('login.registerLink')}
+            </Link>
           </p>
         </div>
       </main>

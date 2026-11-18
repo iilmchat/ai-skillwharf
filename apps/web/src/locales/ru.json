@@ -75,7 +75,9 @@
     "provider_auth_required": "Провайдер отклонил учётные данные. Проверьте токен или подключите аккаунт заново.",
     "provider_not_configured": "Провайдер не настроен на сервере.",
     "provider_unavailable": "Провайдер временно недоступен. Попробуйте позже.",
-    "provider_rate_limited": "Провайдер временно ограничил запросы. Попробуйте позже."
+    "provider_rate_limited": "Провайдер временно ограничил запросы. Попробуйте позже.",
+    "registration_closed": "Регистрация новых пользователей временно закрыта",
+    "invalid_invite_code": "Неверный или недействительный код приглашения"
   },
   "nav": {
     "primary": "Основная навигация",
@@ -196,13 +198,39 @@
     "hidePassword": "Скрыть пароль",
     "submit": "Войти",
     "submitting": "Входим…",
-    "noAccount": "Нет аккаунта? Обратитесь к администратору платформы."
+    "noAccount": "Нет аккаунта?",
+    "registerLink": "Зарегистрироваться"
   },
   "auth": {
     "errors": {
       "network": "Сервер недоступен. Проверьте, что API запущен на localhost:3001.",
       "invalidCredentials": "Неверный email или пароль.",
-      "loginFailed": "Не удалось выполнить вход. Попробуйте ещё раз."
+      "loginFailed": "Не удалось выполнить вход. Попробуйте ещё раз.",
+      "emailTaken": "Аккаунт с таким email уже существует. Войдите или используйте другой адрес."
+    }
+  },
+  "register": {
+    "title": "Регистрация в SkillWharf",
+    "subtitle": "Создайте аккаунт, чтобы запускать агентов и подключать навыки.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Пароль",
+    "passwordPlaceholder": "••••••••",
+    "passwordHint": "Не короче 8 символов.",
+    "showPassword": "Показать пароль",
+    "hidePassword": "Скрыть пароль",
+    "inviteCodeLabel": "Код приглашения (Invite Code)",
+    "inviteCodePlaceholder": "Например, SW-2026-XXXX",
+    "inviteCodeHint": "Необязательно, если открыта свободная регистрация.",
+    "submit": "Создать аккаунт",
+    "submitting": "Создаём аккаунт…",
+    "haveAccount": "Уже есть аккаунт?",
+    "loginLink": "Войти",
+    "errors": {
+      "email": "Введите корректный email.",
+      "password": "Пароль должен быть от 8 до 128 символов.",
+      "inviteCode": "Код приглашения слишком длинный.",
+      "submitFailed": "Не удалось создать аккаунт. Попробуйте ещё раз."
     }
   },
   "landing": {
@@ -1195,6 +1223,10 @@
         "description": "Ключи и вебхуки Ozon, Wildberries, Midjourney, Битрикс24 и МойСклад хранятся на сервере.",
         "keySaved": "Сохранён на сервере"
       },
+      "secret": {
+        "show": "Показать",
+        "hide": "Скрыть"
+      },
       "ozon": {
         "title": "Ozon",
         "description": "Ozon Seller API: цены — v1, товары — v3.",
@@ -1252,8 +1284,10 @@
         "webhookUrl": "Webhook URL",
         "webhookUrlPlaceholder": "https://портал.bitrix24.ru/rest/1/xxxxxxxx/",
         "webhookUrlHint": "Входящий вебхук портала: CRM → Разработчикам → Другое → Входящий вебхук. Адрес начинается с https://, хранится на сервере и не показывается после подключения.",
+        "webhookUrlSecurityHint": "URL содержит секретный токен доступа — не показывайте его на демонстрациях экрана.",
         "invalidFields": "Введите Webhook URL.",
         "invalidWebhookUrl": "Введите абсолютный адрес вебхука, начинающийся с https://.",
+        "webhookRejected": "Портал Битрикс24 отклонил вебхук. Проверьте адрес и права доступа.",
         "connect": "Подключить",
         "connecting": "Проверяем вебхук…",
         "disconnect": "Отключить",
@@ -1271,6 +1305,7 @@
         "apiTokenHint": "Токен из раздела «Настройки → API» МойСклада. Хранится на сервере и не показывается после подключения.",
         "invalidFields": "Введите API Token.",
         "invalidToken": "Токен слишком короткий. Скопируйте его целиком из МойСклада.",
+        "tokenRejected": "МойСклад отклонил токен. Проверьте токен и права доступа.",
         "connect": "Подключить",
         "connecting": "Проверяем токен…",
         "disconnect": "Отключить",

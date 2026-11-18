@@ -1,10 +1,13 @@
 import { AxiosError, type AxiosResponse } from 'axios';
 import { describe, expect, it } from 'vitest';
+import en from '../locales/en.json';
+import ru from '../locales/ru.json';
 import {
   ERROR_CODES,
   classifyChatError,
   getErrorMeta,
   getErrorMetaFromError,
+  getKnownErrorMessageKey,
   isInsufficientFundsPayload,
 } from './chat-errors';
 
@@ -275,5 +278,45 @@ describe('isInsufficientFundsPayload', () => {
       false,
     );
     expect(isInsufficientFundsPayload(null)).toBe(false);
+  });
+});
+
+describe('коды ошибок регистрации (KI-073)', () => {
+  it('регистрирует коды регистрации в ERROR_CODES', () => {
+    expect(ERROR_CODES.registrationClosed).toBe('errors.registration_closed');
+    expect(ERROR_CODES.invalidInviteCode).toBe('errors.invalid_invite_code');
+  });
+
+  it('getKnownErrorMessageKey знает только коды из словаря', () => {
+    expect(getKnownErrorMessageKey(ERROR_CODES.registrationClosed)).toBe(
+      'errors.registration_closed',
+    );
+    expect(getKnownErrorMessageKey(ERROR_CODES.invalidInviteCode)).toBe(
+      'errors.invalid_invite_code',
+    );
+    expect(getKnownErrorMessageKey('errors.unknown_code')).toBeNull();
+    expect(getKnownErrorMessageKey(undefined)).toBeNull();
+  });
+
+  it('коды регистрации не подменяют категории ошибок чата', () => {
+    expect(
+      classifyChatError('Регистрация закрыта', {
+        code: ERROR_CODES.registrationClosed,
+        status: 403,
+      }),
+    ).toBeNull();
+  });
+
+  it('локализует оба кода на RU и EN', () => {
+    expect(ru.errors.registration_closed).toBe(
+      'Регистрация новых пользователей временно закрыта',
+    );
+    expect(en.errors.registration_closed).toBe(
+      'User registration is currently closed',
+    );
+    expect(ru.errors.invalid_invite_code).toBe(
+      'Неверный или недействительный код приглашения',
+    );
+    expect(en.errors.invalid_invite_code).toBe('Invalid invite code');
   });
 });

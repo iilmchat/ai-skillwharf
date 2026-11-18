@@ -75,7 +75,9 @@
     "provider_auth_required": "The provider rejected the credentials. Check the token or connect the account again.",
     "provider_not_configured": "The provider is not configured on the server.",
     "provider_unavailable": "The provider is temporarily unavailable. Please try again later.",
-    "provider_rate_limited": "The provider is temporarily rate-limiting requests. Please try again later."
+    "provider_rate_limited": "The provider is temporarily rate-limiting requests. Please try again later.",
+    "registration_closed": "User registration is currently closed",
+    "invalid_invite_code": "Invalid invite code"
   },
   "nav": {
     "primary": "Primary navigation",
@@ -196,13 +198,39 @@
     "hidePassword": "Hide password",
     "submit": "Sign in",
     "submitting": "Signing in…",
-    "noAccount": "No account? Contact your platform administrator."
+    "noAccount": "No account?",
+    "registerLink": "Create account"
   },
   "auth": {
     "errors": {
       "network": "The server is unreachable. Make sure the API is running on localhost:3001.",
       "invalidCredentials": "Invalid email or password.",
-      "loginFailed": "Could not sign in. Please try again."
+      "loginFailed": "Could not sign in. Please try again.",
+      "emailTaken": "An account with this email already exists. Sign in or use another address."
+    }
+  },
+  "register": {
+    "title": "Create a SkillWharf account",
+    "subtitle": "Create an account to run agents and connect skills.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "••••••••",
+    "passwordHint": "At least 8 characters.",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "inviteCodeLabel": "Invite Code",
+    "inviteCodePlaceholder": "For example, SW-2026-XXXX",
+    "inviteCodeHint": "Optional when open registration is enabled.",
+    "submit": "Create account",
+    "submitting": "Creating account…",
+    "haveAccount": "Already have an account?",
+    "loginLink": "Sign in",
+    "errors": {
+      "email": "Enter a valid email.",
+      "password": "The password must be 8 to 128 characters long.",
+      "inviteCode": "The invite code is too long.",
+      "submitFailed": "Could not create the account. Please try again."
     }
   },
   "landing": {
@@ -1195,6 +1223,10 @@
         "description": "Ozon, Wildberries, Midjourney, Bitrix24, and MoySklad keys and webhooks are stored on the server.",
         "keySaved": "Stored on the server"
       },
+      "secret": {
+        "show": "Show",
+        "hide": "Hide"
+      },
       "ozon": {
         "title": "Ozon",
         "description": "Ozon Seller API: prices v1, products v3.",
@@ -1252,8 +1284,10 @@
         "webhookUrl": "Webhook URL",
         "webhookUrlPlaceholder": "https://portal.bitrix24.com/rest/1/xxxxxxxx/",
         "webhookUrlHint": "Inbound portal webhook: CRM → Developer resources → Other → Inbound webhook. The address starts with https://, is stored on the server, and is not shown after connecting.",
+        "webhookUrlSecurityHint": "The URL contains a secret access token — do not show it during screen demos.",
         "invalidFields": "Enter the Webhook URL.",
         "invalidWebhookUrl": "Enter an absolute webhook URL that starts with https://.",
+        "webhookRejected": "The Bitrix24 portal rejected the webhook. Check the URL and access rights.",
         "connect": "Connect",
         "connecting": "Checking the webhook…",
         "disconnect": "Disconnect",
@@ -1271,6 +1305,7 @@
         "apiTokenHint": "Token from MoySklad “Settings → API”. It is stored on the server and is not shown after connecting.",
         "invalidFields": "Enter the API Token.",
         "invalidToken": "The token is too short. Copy it from MoySklad in full.",
+        "tokenRejected": "MoySklad rejected the token. Check the token and access rights.",
         "connect": "Connect",
         "connecting": "Checking the token…",
         "disconnect": "Disconnect",

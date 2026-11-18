@@ -388,8 +388,32 @@ const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
   'moyskladConnect',
 ];
 
+/**
+ * Код отказа провайдера при live-проверке ключей: provider-http возвращает его
+ * для внешнего 401/403, а API отдаёт клиенту как 400/502.
+ */
+export const PROVIDER_AUTH_REQUIRED_CODE = 'errors.provider_auth_required';
+
 function isKeyConnectOperation(operation: IntegrationOperation): boolean {
   return KEY_CONNECT_OPERATIONS.includes(operation);
+}
+
+/**
+ * Ключ i18n для отказа именно этой карточки: у Битрикс24 отклонён вебхук,
+ * у МойСклада — токен. `null` — карточка показывает общее сообщение
+ * `settings.integrations.errors.invalidCredentials`.
+ */
+export function getProviderCredentialRejectionKey(
+  operation: IntegrationOperation,
+): string | null {
+  switch (operation) {
+    case 'bitrix24Connect':
+      return 'settings.integrations.bitrix24.webhookRejected';
+    case 'moyskladConnect':
+      return 'settings.integrations.moysklad.tokenRejected';
+    default:
+      return null;
+  }
 }
 
 /**
@@ -425,7 +449,7 @@ export function getIntegrationErrorDetails(
   // истёкшая сессия пользователя.
   if (
     operation === 'telegramConnect' &&
-    (status === 401 || code === 'errors.provider_auth_required')
+    (status === 401 || code === PROVIDER_AUTH_REQUIRED_CODE)
   ) {
     return { kind: 'invalidToken', serverMessage };
   }
@@ -445,7 +469,7 @@ export function getIntegrationErrorDetails(
   // внешнего API, но как 502 для нашего клиента).
   if (
     isKeyConnectOperation(operation) &&
-    code === 'errors.provider_auth_required'
+    code === PROVIDER_AUTH_REQUIRED_CODE
   ) {
     return { kind: 'invalidCredentials', serverMessage };
   }
