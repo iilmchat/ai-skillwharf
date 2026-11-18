@@ -4,6 +4,88 @@
 
 ## [Unreleased]
 
+### Docs: синхронизация 12 треков, ROADMAP и staging-вебхуков
+
+- `SPRINTS-14-PLUS.md` помечен как архив со ссылкой на актуальный `ROADMAP.md`; исправлено правило markdownlint MD041.
+- В `ROADMAP.md` (Sprint 24) добавлены задачи `BILLING-24.5` (Hold -> Capture для Pay-per-Call) и `WEB-24.6` (превью-симулятор 12 треков и заявка Design Partner на `skillwharf.ru`).
+- `STAGING-DEPLOY.md`: вебхук ЮKassa переведён на `https://app.skillwharf.ru/api/v1/billing/webhook`, добавлено предупреждение о недоступности вебхуков ЮKassa/Telegram при выгрузке WSL2 или перезагрузке Windows без keep-alive.
+- `LANDING_CONCEPT.md` актуализирован под 12 треков A–L: добавлены OCR, финансовый аналитик маркетплейсов, оптовая торговля и производство.
+- `docs/README.md`: добавлены ссылки на единый гид по 12 трекам (`ecosystem/USE-CASES-GUIDE.md`) и `architecture/MCP-ERP-Connectors.md`.
+
+### Web: маскировка вебхука Битрикс24 и инвайт-код на регистрации (KI-076, KI-073)
+
+- KI-076: поле `Webhook URL` в карточке Битрикс24 маскируется по умолчанию
+  (`type="password"`). Рядом — кнопка-переключатель «Показать»/«Скрыть» с
+  иконкой глаза, `aria-label`, `aria-pressed` и `aria-controls`; под полем —
+  предупреждение «URL содержит секретный токен доступа — не показывайте его
+  на демонстрациях экрана» (RU/EN). Поле вынесено в
+  `apps/web/src/components/SecretField.tsx`, видимость сбрасывается после
+  подключения.
+- KI-073 (UI): новая страница `/register` (`RegisterPage`) с email, паролем и
+  необязательным полем «Код приглашения (Invite Code)». Zod-схема
+  `registerRequestSchema` (`apps/web/src/lib/registration.ts`) отправляет
+  `inviteCode` в `POST /api/v1/auth/register` только непустым (после
+  `.trim()`), поэтому `REGISTRATION_MODE=open` работает без кода; ссылка на
+  регистрацию добавлена на `/login`.
+- i18n ошибок: коды `errors.registration_closed` и
+  `errors.invalid_invite_code` (RU/EN) смапплены в `chat-errors.ts` и в
+  обработчике ошибок авторизации; live-проверка ключей Битрикс24/МойСклад
+  показывает «Портал Битрикс24 отклонил вебхук» / «МойСклад отклонил токен»
+  для 400 `errors.provider_auth_required`, а для 502
+  `errors.provider_unavailable` — локализованный текст «Провайдер временно
+  недоступен».
+- Тесты: `SecretField.test.ts` (маскировка и переключатель),
+  `registration.test.ts` (`inviteCode` только непустым, валидация формы),
+  дополнения в `chat-errors.test.ts` и `integrations.test.ts` (коды ошибок и
+  отказ провайдера).
+
+**Известные проблемы:** KI-076 и KI-073 закрыты; прогон live-проверок в CI
+остаётся за KI-083.
+
+### Post-Pilot: live-проверки интеграций и invite-only конфигурация
+
+- `scripts/test-integrations.sh` получил флаги `--bitrix24` и `--moysklad`, а также включил их в общий прогон. Битрикс24 проверяется read-only `POST ${BITRIX24_WEBHOOK_URL%/}/profile.json` с проверкой JSON-поля `result`; МойСклад — `GET /entity/organization?limit=1` с Bearer-токеном. Webhook URL, токены и тела ответов не печатаются; без ключей — `SKIP`, 401/403 — `FAIL`.
+- В `.env.example` и `docker-compose.yml` добавлены `REGISTRATION_MODE` (`open|invite|closed`) и `REGISTRATION_INVITE_CODE` для пилотной invite-only регистрации. Compose по умолчанию использует `invite` (для Design Partners), `open` остаётся для dev.
+- README и GETSTARTED актуализированы под 12 бизнес-треков A–L (включая Опт и Производство), добавлены ссылка на `https://skillwharf.ru`, раздел о режимах регистрации и команды проверки Битрикс24/МойСклада.
+- Остаточные ограничения — KI-083 (live-проверки не запускаются в CI без секретов).
+
+### Enterprise readiness: invite-only, live-проверка ключей и условный HITL (KI-073, KI-075, KI-079, KI-081)
+
+- Регистрация (KI-073): `AuthService.register` учитывает `REGISTRATION_MODE`
+  (`open`|`invite`|`closed`). Без переменной режим `open`, но при заданном
+  `REGISTRATION_INVITE_CODE` — `invite`. `closed` отдаёт 403
+  `errors.registration_closed`; `invite` сверяет `inviteCode` constant-time
+  (`timingSafeEqual`) и при несовпадении/отсутствии — 403
+  `errors.invalid_invite_code`. В Zod-схему и DTO добавлено
+  `inviteCode: z.string().trim().min(1).max(128).optional()`; проверка режима
+  идёт до обращения к БД.
+- Подключение Битрикс24/МойСклада (завершение KI-075): перед сохранением
+  `ProviderKeysService` выполняет live-проверку через `provider-http` с
+  таймаутом 5 секунд — `GET <webhook>/profile.json` и
+  `GET <MOYSKLAD_BASE_URL>/entity/organization?limit=1` с
+  `Authorization: Bearer`. 401/403 → 400 `errors.provider_auth_required`,
+  сеть/5xx → 502 `errors.provider_unavailable`; невалидные ключи в БД не
+  пишутся. Пропуск — только при `SKIP_INTEGRATION_LIVE_CHECK=true`.
+- `moysklad_check_stock` (KI-081): услуги/комплекты без `stock`/`reserve`
+  возвращают `{ tracked: false, available: true, stock: null, reserve: null,
+  reason: 'untracked_item' }` вместо 502. Для товаров с `article`
+  запрашивается `stock_report` (`filter=article=<article>`, `limit=100`) и
+  добавляется `warehouses: [{ name, stock }]`; при недоступном отчёте —
+  fallback на остаток карточки. Действие `stock_report` добавлено в строгие
+  схемы MCP Gateway.
+- Условный HITL (KI-079): `ToolPolicy` получил `approvalRule`, а
+  `GraphContext` — `approvalRules: [{ tool, arg, values }]`. Worker
+  фильтрует `approvalCalls` по аргументам: `bitrix24_update_deal`
+  останавливает граф только на `stageId = WON`/`*:WON`, промежуточные стадии
+  и комментарии выполняются без подтверждения. Runtime-гейт
+  `requiresApprovalFor` использует то же правило.
+- Тесты: nock-проверки live-подключения (успех/401/403/5xx/сеть/skip), режимы
+  регистрации, `tracked:false` и `warehouses` в `moysklad_check_stock`,
+  условный HITL в `llm-worker`.
+- Документация: `docs/KNOWN_ISSUES.md` (KI-073, KI-075, KI-079, KI-081,
+  KI-082 — «Исправлено»), `.env.example`
+  (`SKIP_INTEGRATION_LIVE_CHECK`).
+
 ### Integrations: ключи Битрикс24/МойСклада и обязательные поля заказа (KI-075, KI-080)
 
 - `POST/DELETE /api/v1/integrations/bitrix24` (`{ webhookUrl }`) и

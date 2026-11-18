@@ -1,6 +1,8 @@
 # 🚀 Быстрый старт SkillWharf (Руководство администратора)
 
-Это руководство поможет вам развернуть платформу SkillWharf с нуля и настроить все необходимые интеграции для работы 10 бизнес-треков.
+Это руководство поможет вам развернуть платформу SkillWharf с нуля и настроить все необходимые интеграции для работы 12 бизнес-треков (треки A–L, включая Опт и Производство).
+
+Официальный сайт: <https://skillwharf.ru>.
 
 ## 1. Системные требования
 
@@ -54,6 +56,21 @@ docker compose up -d --build
 | `JWT_SECRET` | `super_secret_jwt_key_change_me` | Подпись JWT; минимум 32 символа. |
 | `PORT` | `3000` | Порт API внутри контейнера; наружу опубликован `3001`. |
 | `DATABASE_URL` | `postgresql://...@localhost:5435/skillwharf_db?schema=public` | Подключение к БД для запуска Prisma с хоста. В compose переопределяется на `postgres:5432`. |
+| `REGISTRATION_MODE` | `invite` | Режим регистрации: `open`, `invite` или `closed` (KI-073). |
+| `REGISTRATION_INVITE_CODE` | пусто | Статический мастер-инвайт для пилота; используется в режиме `invite`, если нет одноразового кода из БД. |
+
+#### Режим регистрации (KI-073)
+
+- `open` — регистрация доступна всем; подходит только для локальной разработки.
+- `invite` — регистрация только по инвайту: `REGISTRATION_INVITE_CODE` или
+  одноразовый код из БД. Для Design Partners задайте режим `invite` и
+  уникальный мастер-код, не публикуйте его в репозитории.
+- `closed` — новые пользователи не регистрируются; существующие продолжают
+  входить.
+
+Мастер-инвайт — секрет: храните его в `.env`/менеджере секретов и меняйте при
+смене состава пилотной группы. Пустой код в режиме `invite` означает, что
+регистрация по статическому коду недоступна (только одноразовые коды из БД).
 
 ### 3.2. LLM и эмбеддинги
 
@@ -160,6 +177,19 @@ Egress песочницы задается полем `egress_allowlist` в ма
 | `OZON_PERFORMANCE_API_BASE_URL` | `https://api-performance.ozon.ru` | Хост Ozon Performance API. |
 | `WB_PRICING_API_BASE_URL` | `https://discounts-prices-api.wildberries.ru` | Отдельный хост WB Pricing API. |
 | `WB_API_TEST_PATH` | `/ping` | Проверка токена WB. |
+
+Проверка live-интеграций (read-only, без печати секретов):
+
+```bash
+bash scripts/test-integrations.sh --bitrix24
+bash scripts/test-integrations.sh --moysklad
+# оба сразу:
+bash scripts/test-integrations.sh --bitrix24 --moysklad
+```
+
+Без `BITRIX24_WEBHOOK_URL`/`MOYSKLAD_TOKEN` проверка завершается `SKIP`, а не
+`FAIL`. Для Битрикс24 используется `profile.json`, для МойСклада —
+`GET /entity/organization?limit=1`.
 
 ### 3.10. OCR и документы
 
@@ -333,7 +363,7 @@ Egress песочницы задается полем `egress_allowlist` в ма
    bash scripts/test-integrations.sh
    ```
 
-   Скрипт проверяет Ozon, Wildberries, Midjourney (TTAPI) и OCR. Без ключей проверка пропускается (SKIP), с неверным ключом — FAIL; секреты не печатаются.
+   Скрипт проверяет Ozon, Wildberries, Midjourney (TTAPI), OCR, Битрикс24 и МойСклад. Без ключей проверка пропускается (SKIP), с неверным ключом — FAIL; секреты, webhook URL и тела ответов с персональными данными не печатаются. Точечно: `bash scripts/test-integrations.sh --bitrix24` или `--moysklad`.
 
 4. **Документы и sandbox:**
 

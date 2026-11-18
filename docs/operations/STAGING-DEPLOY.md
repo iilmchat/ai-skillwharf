@@ -219,15 +219,17 @@ sudo systemctl enable --now cloudflared
 После правки CSP нужно пересобрать образ `web` — заголовок отдаёт Caddy.
 
 **ЮKassa:** в кабинете (Интеграция → HTTP-уведомления) указать
-`https://skillwharf.ru/api/v1/billing/webhook`, события `payment.succeeded` и
+`https://app.skillwharf.ru/api/v1/billing/webhook`, события `payment.succeeded` и
 `payment.canceled`. Через API это не настраивается: `POST /v3/webhooks` с ключом
 магазина отвечает `401` («Authentication type is not allowed») — нужен
 OAuth-токен партнёра. Обработчик сам перепроверяет платёж запросом в API ЮKassa,
 поэтому подделка уведомления не зачислит деньги; повторная доставка
 идемпотентна. `YOOKASSA_RETURN_URL` — `https://app.skillwharf.ru/app/chat`.
 
-Туннель зависит от живого дистрибутива: если WSL выгружен или Windows
-перезагружен без keep-alive (§5), сайт и webhook недоступны.
+> **Важно:** корень `skillwharf.ru` — статический лендинг на хостинге, API и
+> вебхуки живут на `app.skillwharf.ru`. При засыпании WSL2 или перезагрузке
+> Windows без keep-alive задачи вебхуки ЮKassa и Telegram временно недоступны,
+> пока стенд не поднимется снова.
 
 ### Витрина отдельно от приложения
 

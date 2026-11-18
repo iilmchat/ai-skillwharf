@@ -7,6 +7,7 @@
 - [C4 Level 1: Контекст](architecture/C4-Level1-Context.md)
 - [Спецификация Wharf Control Plane](architecture/Control-Plane-Specification.md)
 - [Специфика провайдеров LLM](architecture/LLM-Router-Providers.md)
+- [MCP/ERP-коннекторы](architecture/MCP-ERP-Connectors.md)
 - [ADR 0001: Hub-and-Spoke](architecture/ADR/0001-hub-and-spoke.md)
 - [ADR 0002: Технологический стек](architecture/ADR/0002-tech-stack.md)
 
@@ -14,6 +15,7 @@
 
 - [Спецификация Skill Manifest](ecosystem/Manifest-Specification.md)
 - [Матрица монетизации](ecosystem/Monetization-Matrix.md)
+- [Гид по 12 бизнес-трекам (A–L)](ecosystem/USE-CASES-GUIDE.md)
 - [Спецификации бизнес-треков (use-cases)](ecosystem/use-cases/)
 - [Трек F: Контент-конвейер](ecosystem/use-cases/track-f-content-pipeline.md)
 - [Трек G: HR-Рекрутинг](ecosystem/use-cases/track-g-hr-recruiting.md)
@@ -43,7 +45,7 @@
 
 ## 📣 Маркетинг и презентации (`marketing/`)
 
-- [Концепция AI-Офиса и Лендинга (треки A–E)](marketing/LANDING_CONCEPT.md)
+- [Концепция AI-Офиса и Лендинга (треки A–L)](marketing/LANDING_CONCEPT.md)
 
 ## 🐞 Релизы и баги
 
