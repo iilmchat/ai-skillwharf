@@ -159,6 +159,9 @@ services:
       # Ключ AES-256-GCM для refresh/access-токенов (base64, 32 байта).
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       TOKEN_ENCRYPTION_KEY_ID: ${TOKEN_ENCRYPTION_KEY_ID:-local-v1}
+      # Предыдущие ключи для ротации keyId: CLI pnpm --filter api keys:rotate
+      # должен видеть их и внутри контейнера (JSON/CSV, см. .env.example).
+      TOKEN_ENCRYPTION_PREVIOUS_KEYS: ${TOKEN_ENCRYPTION_PREVIOUS_KEYS:-}
       # Egress API: Telegram и Google — только эти домены.
       OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,ocr.api.cloud.yandex.net,api.tavily.com}
       # Повторы 429/5xx внешних провайдеров (экспоненциальный backoff).
@@ -300,6 +303,22 @@ services:
       # Только localhost: OTLP-приёмник не должен быть доступен из сети.
       - "127.0.0.1:4317:4317"
       - "127.0.0.1:4318:4318"
+    depends_on:
+      - tempo
+
+  # Tempo: постоянное хранилище трейсов из OTel Collector (OTLP/gRPC :4317).
+  # Блоки лежат в именованном томе, compactor держит retention 7 дней.
+  # Профиль monitoring; снаружи доступен только HTTP API на localhost.
+  tempo:
+    image: grafana/tempo:2.6.1
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo-config.yaml"]
+    volumes:
+      - ./infra/tempo/tempo-config.yaml:/etc/tempo-config.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
 
   # Мониторинг: Prometheus скрейпит api:3000/metrics, Grafana показывает
   # провижиненный дашборд. Профиль monitoring — в обычном dev/CI не поднимается:
@@ -378,6 +397,19 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # OIDC/OAuth2 опционален. Пока GRAFANA_OIDC_ENABLED пуст/false,
+      # включается только Basic Auth (fallback). При включённом OIDC Basic
+      # остаётся доступным, пока GRAFANA_BASIC_AUTH_ENABLED не выставлен в false.
+      GF_AUTH_BASIC_ENABLED: ${GRAFANA_BASIC_AUTH_ENABLED:-true}
+      GF_AUTH_GENERIC_OAUTH_ENABLED: ${GRAFANA_OIDC_ENABLED:-false}
+      GF_AUTH_GENERIC_OAUTH_NAME: ${GRAFANA_OIDC_NAME:-SSO}
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: ${GRAFANA_OIDC_CLIENT_ID:-}
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:-}
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: ${GRAFANA_OIDC_AUTH_URL:-}
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: ${GRAFANA_OIDC_TOKEN_URL:-}
+      GF_AUTH_GENERIC_OAUTH_API_URL: ${GRAFANA_OIDC_API_URL:-}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: ${GRAFANA_OIDC_SCOPES:-openid email profile}
+      GF_AUTH_GENERIC_OAUTH_ALLOW_ASSIGN_GRAFANA_ADMIN: ${GRAFANA_OIDC_ALLOW_ADMIN:-false}
       # Grafana ходит в Prometheus с теми же кредами, что и оператор.
       MONITORING_BASIC_AUTH_USER: ${MONITORING_BASIC_AUTH_USER:-}
       MONITORING_BASIC_AUTH_PASSWORD: ${MONITORING_BASIC_AUTH_PASSWORD:-}
@@ -394,6 +426,12 @@ services:
             exit 1
             ;;
         esac
+        if [ "$${GF_AUTH_GENERIC_OAUTH_ENABLED}" = "true" ]; then
+          : "$${GF_AUTH_GENERIC_OAUTH_CLIENT_ID:?GRAFANA_OIDC_CLIENT_ID is required when OIDC is enabled}"
+          : "$${GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:?GRAFANA_OIDC_CLIENT_SECRET is required when OIDC is enabled}"
+          : "$${GF_AUTH_GENERIC_OAUTH_AUTH_URL:?GRAFANA_OIDC_AUTH_URL is required when OIDC is enabled}"
+          : "$${GF_AUTH_GENERIC_OAUTH_TOKEN_URL:?GRAFANA_OIDC_TOKEN_URL is required when OIDC is enabled}"
+        fi
         : "$${MONITORING_BASIC_AUTH_USER:?MONITORING_BASIC_AUTH_USER is required for the Prometheus datasource}"
         : "$${MONITORING_BASIC_AUTH_PASSWORD:?MONITORING_BASIC_AUTH_PASSWORD is required for the Prometheus datasource}"
         case "$${MONITORING_BASIC_AUTH_PASSWORD}" in
@@ -409,6 +447,7 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+      - tempo
 
 volumes:
   postgres_data:
@@ -418,3 +457,4 @@ volumes:
   caddy_config:
   prometheus_data:
   grafana_data:
+  tempo_data:

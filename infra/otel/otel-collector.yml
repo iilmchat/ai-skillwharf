@@ -1,6 +1,7 @@
 # OTel Collector для локального/staging-наблюдения.
-# Принимает OTLP по HTTP/gRPC и печатает спаны в stdout (docker compose logs).
-# Внешние SaaS-экспортёры по умолчанию не подключены: данные не покидают хост.
+# Принимает OTLP по HTTP/gRPC, печатает спаны в stdout (debug, для dev) и
+# одновременно отправляет их в Grafana Tempo по OTLP/gRPC (tempo:4317).
+# Внешние SaaS-экспортёры не подключены: данные не покидают хост.
 receivers:
   otlp:
     protocols:
@@ -15,10 +16,17 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+  # Durable-хранилище трейсов: Tempo в профиле monitoring. TLS внутри compose
+  # не нужен (сеть только localhost), поэтому insecure: true.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      # debug оставляем для dev-логов; Tempo — постоянное хранилище (7 дней).
+      exporters: [debug, otlp/tempo]
