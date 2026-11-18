@@ -64,12 +64,28 @@ export const historyMessageSchema = z.object({
   content: z.string(),
 });
 
+/**
+ * Правило условного HITL (KI-079): граф останавливается только при совпадении
+ * значения `arg` вызова с одним из `values`.
+ */
+export const approvalRuleSchema = z
+  .object({
+    tool: z.string().min(1).max(128),
+    arg: z.string().min(1).max(128),
+    values: z.array(z.string().min(1).max(256)).min(1).max(50),
+  })
+  .strict();
+
+export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
+
 /** Контекст запуска графа; повторно передаётся при resume. */
 export const graphContextSchema = z.object({
   conversationId: z.string().min(1),
   userId: z.string().min(1),
   skills: z.array(skillSnapshotSchema),
   approvalRequiredTools: z.array(z.string()),
+  /** Условия HITL по аргументам; инструменты без правила — по имени. */
+  approvalRules: z.array(approvalRuleSchema).optional(),
   outcomePrices: z.record(z.string(), outcomePriceSchema),
   llmRoutes: z.array(llmRouteSelectionSchema),
   memoryContext: z.string(),

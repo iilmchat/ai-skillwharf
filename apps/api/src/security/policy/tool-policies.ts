@@ -46,11 +46,35 @@ export type ShellKind = 'exec' | 'sandbox';
  * HITL-режим инструмента.
  *
  * `final-stage` — подтверждение нужно только для необратимого перехода
- * (сделка Битрикс24 → «Успешно»/`WON`); Runtime решает это по аргументам
- * вызова. Worker пока останавливает граф по имени инструмента из манифеста,
- * поэтому на промежуточных стадиях подтверждение тоже запрашивается (KI-079).
+ * (сделка Битрикс24 → «Успешно»/`WON`); Runtime и worker решают это по
+ * аргументам вызова через `approvalRule` (KI-079).
  */
 export type ToolApprovalMode = 'none' | 'always' | 'final-stage';
+
+/**
+ * Условие HITL по аргументу вызова (KI-079).
+ *
+ * Передаётся worker'у в `GraphContext.approvalRules`: граф останавливается
+ * только если значение `arg` входит в `values` (точное совпадение или
+ * суффикс стадии вида `C1:WON`).
+ */
+export interface ToolApprovalRule {
+  readonly arg: string;
+  readonly values: readonly string[];
+}
+
+/** Правило HITL для конкретного инструмента (контракт GraphContext). */
+export interface ApprovalRule {
+  readonly tool: string;
+  readonly arg: string;
+  readonly values: string[];
+}
+
+/** Аргумент `bitrix24_update_deal`, по которому определяется финал сделки. */
+export const DEAL_STAGE_ARG = 'stageId';
+
+/** Значения аргумента стадии, которые требуют подтверждения. */
+export const FINAL_DEAL_STAGE_VALUES = ['WON'] as const;
 
 /** Политика одного инструмента. */
 export interface ToolPolicy {
@@ -71,6 +95,8 @@ export interface ToolPolicy {
   readonly shell?: ShellKind;
   /** HITL-режим; отсутствует — подтверждение не требуется. */
   readonly approval?: ToolApprovalMode;
+  /** Условие HITL по аргументу (`final-stage`); worker фильтрует вызовы. */
+  readonly approvalRule?: ToolApprovalRule;
 }
 
 const ALL_ROLES = [
@@ -213,6 +239,10 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
     allowedRoles: ALL_ROLES,
     // HITL ядра — смена стадии на «Успешно» (необратимый финал сделки).
     approval: 'final-stage',
+    approvalRule: {
+      arg: DEAL_STAGE_ARG,
+      values: FINAL_DEAL_STAGE_VALUES,
+    },
   },
   moysklad_check_stock: {
     name: 'moysklad_check_stock',
@@ -495,8 +525,40 @@ export function getToolPolicy(toolName: string): ToolPolicy | undefined {
   return TOOL_POLICIES[toolName];
 }
 
-/** Аргумент `bitrix24_update_deal`, по которому определяется финал сделки. */
-export const DEAL_STAGE_ARG = 'stageId';
+/**
+ * Совпадает ли значение аргумента с одним из разрешённых значений правила.
+ *
+ * Для стадий Битрикс24 финальная стадия воронки приходит как `C1:WON`,
+ * поэтому кроме точного совпадения принимается суффикс `:<значение>`.
+ */
+export function approvalRuleMatches(
+  value: unknown,
+  values: readonly string[],
+): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toUpperCase();
+
+  return values.some((expected) => {
+    const target = expected.trim().toUpperCase();
+
+    return normalized === target || normalized.endsWith(`:${target}`);
+  });
+}
+
+/** Декларативное правило HITL инструмента или `null`. */
+export function approvalRuleFor(toolName: string): ApprovalRule | null {
+  const policy = getToolPolicy(toolName);
+  const rule = policy?.approvalRule;
+
+  if (policy === undefined || rule === undefined) {
+    return null;
+  }
+
+  return { tool: toolName, arg: rule.arg, values: [...rule.values] };
+}
 
 /**
  * Нужно ли подтверждение пользователя для конкретного вызова инструмента.
@@ -510,7 +572,8 @@ export function requiresApprovalFor(
   toolName: string,
   args: Readonly<Record<string, unknown>>,
 ): boolean {
-  const approval = getToolPolicy(toolName)?.approval ?? 'none';
+  const policy = getToolPolicy(toolName);
+  const approval = policy?.approval ?? 'none';
 
   if (approval === 'always') {
     return true;
@@ -518,6 +581,12 @@ export function requiresApprovalFor(
 
   if (approval !== 'final-stage') {
     return false;
+  }
+
+  const rule = policy?.approvalRule;
+
+  if (rule !== undefined) {
+    return approvalRuleMatches(args[rule.arg], rule.values);
   }
 
   const stageId = args[DEAL_STAGE_ARG];

@@ -51,6 +51,44 @@ export function policyBlockedError(message: string): ApiException {
   });
 }
 
+/** Регистрация закрыта: `REGISTRATION_MODE=closed` (KI-073). */
+export function registrationClosedError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 403,
+    error: 'Forbidden',
+    code: 'errors.registration_closed',
+    message,
+  });
+}
+
+/** Инвайт-код не передан или не совпал (`REGISTRATION_MODE=invite`, KI-073). */
+export function invalidInviteCodeError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 403,
+    error: 'Forbidden',
+    code: 'errors.invalid_invite_code',
+    message,
+  });
+}
+
+/**
+ * Провайдер отклонил учётные данные при явном подключении интеграции (400).
+ *
+ * Отличается от `providerAuthRequiredError` (502) намеренно: это ответ на
+ * запрос пользователя «подключить ключ», а не сбой уже настроенной
+ * интеграции, поэтому клиент исправляет ввод, а не повторяет позже.
+ */
+export function providerCredentialsRejectedError(
+  message: string,
+): ApiException {
+  return new ApiException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'errors.provider_auth_required',
+    message,
+  });
+}
+
 /**
  * Marketplace-провайдер недоступен (нет ключей, сервер не отвечает).
  *

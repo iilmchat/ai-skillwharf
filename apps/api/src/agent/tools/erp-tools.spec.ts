@@ -315,6 +315,13 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
           href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/product/product-1`,
         },
       });
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/report/stock/all`)
+      .query({ filter: 'article=CH-1', limit: 100 })
+      .reply(200, [
+        { article: 'CH-1', warehouse: { name: 'Основной склад' }, stock: 10 },
+        { article: 'CH-1', warehouse: 'Резервный склад', stock: 2 },
+      ]);
 
     const result = await moyskladCheckStock(
       createService(),
@@ -324,11 +331,69 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
 
     expect(JSON.parse(result)).toMatchObject({
       productId: 'product-1',
+      tracked: true,
       onHand: 12,
       reserve: 5,
       available: 7,
       requested: 8,
       enough: false,
+      warehouses: [
+        { name: 'Основной склад', stock: 10 },
+        { name: 'Резервный склад', stock: 2 },
+      ],
+    });
+  });
+
+  it('moysklad_check_stock: услуга без stock — tracked:false, без ошибки', async () => {
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/product/service-1`)
+      .reply(200, {
+        id: 'service-1',
+        name: 'Доставка',
+      });
+
+    const result = await moyskladCheckStock(
+      createService(),
+      { productId: 'service-1', quantity: 1 },
+      { endpoint: moyskladMcpUrl },
+    );
+
+    expect(JSON.parse(result)).toEqual({
+      productId: 'service-1',
+      tracked: false,
+      available: true,
+      stock: null,
+      reserve: null,
+      reason: 'untracked_item',
+    });
+  });
+
+  it('moysklad_check_stock: недоступный stock_report — fallback на остаток карточки', async () => {
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/product/product-1`)
+      .reply(200, {
+        id: 'product-1',
+        name: 'Кресло офисное',
+        article: 'CH-1',
+        stock: 12,
+        reserve: 5,
+      });
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/report/stock/all`)
+      .query({ filter: 'article=CH-1', limit: 100 })
+      .reply(500, { errors: [{ error: 'report unavailable' }] });
+
+    const result = await moyskladCheckStock(
+      createService(),
+      { productId: 'product-1', quantity: 1 },
+      { endpoint: moyskladMcpUrl },
+    );
+
+    expect(JSON.parse(result)).toMatchObject({
+      onHand: 12,
+      reserve: 5,
+      available: 7,
+      warehouses: [],
     });
   });
 

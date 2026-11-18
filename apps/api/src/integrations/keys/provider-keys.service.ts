@@ -3,6 +3,10 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { TokenCipherService } from '../google/token-cipher.service.js';
 import {
+  verifyBitrix24Webhook,
+  verifyMoyskladToken,
+} from './provider-live-check.js';
+import {
   WB_TOKEN_TTL_DAYS,
   bitrix24KeysSchema,
   bitrix24SecretSchema,
@@ -180,8 +184,10 @@ export class ProviderKeysService {
   /**
    * Сохраняет входящий вебхук Битрикс24 (Треки K/L).
    *
-   * Весь URL — секрет (код вебхука в пути), поэтому в логах и статусе его нет:
-   * наружу отдаётся только `active`. MCP-сервер Битрикс24 продолжает читать
+   * Формат проверяется Zod-схемой, затем вебхук проверяется live-запросом
+   * `profile.json` (KI-075): невалидный код не попадает в БД. Весь URL —
+   * секрет (код вебхука в пути), поэтому в логах и статусе его нет: наружу
+   * отдаётся только `active`. MCP-сервер продолжает читать
    * `BITRIX24_WEBHOOK_URL` из своего окружения (KI-077).
    */
   async connectBitrix24(
@@ -189,6 +195,8 @@ export class ProviderKeysService {
     keys: Bitrix24Keys,
   ): Promise<Bitrix24IntegrationState> {
     const parsed = bitrix24KeysSchema.parse(keys);
+
+    await verifyBitrix24Webhook(parsed.webhookUrl);
 
     await this.save(userId, 'bitrix24', parsed);
     this.logger.log(
@@ -198,12 +206,20 @@ export class ProviderKeysService {
     return { status: 'active', source: 'user' };
   }
 
-  /** Сохраняет токен МойСклада (Треки K/L); в логи попадает только событие. */
+  /**
+   * Сохраняет токен МойСклада (Треки K/L).
+   *
+   * Перед записью токен проверяется запросом
+   * `GET /entity/organization?limit=1` (KI-075); в логи попадает только
+   * событие, значение токена не раскрывается.
+   */
   async connectMoysklad(
     userId: string,
     keys: MoyskladKeys,
   ): Promise<MoyskladIntegrationState> {
     const parsed = moyskladKeysSchema.parse(keys);
+
+    await verifyMoyskladToken(parsed.apiToken);
 
     await this.save(userId, 'moysklad', parsed);
     this.logger.log(

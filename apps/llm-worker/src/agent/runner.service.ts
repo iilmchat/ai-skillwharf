@@ -64,6 +64,7 @@ export class AgentRunnerService {
             messages: toLangChainMessages(request.messages),
             skills: request.skills,
             approvalRequiredTools: request.approvalRequiredTools,
+            approvalRules: request.approvalRules ?? [],
             outcomePrices: request.outcomePrices,
             llmRoutes: request.llmRoutes,
             systemPrompt: request.systemPrompt,

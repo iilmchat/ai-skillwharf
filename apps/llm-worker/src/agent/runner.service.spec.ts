@@ -3,7 +3,7 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentBridgeService } from './bridge.service.js';
 import type { LlmInferenceService } from '../llm/inference.service.js';
-import type { GraphContext, GraphEvent } from '../contracts.js';
+import type { ApprovalRule, GraphContext, GraphEvent } from '../contracts.js';
 import { AgentRunnerService } from './runner.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
@@ -25,6 +25,7 @@ function graphContext(): GraphContext {
     userId: 'user-1',
     skills: [],
     approvalRequiredTools: ['exec'],
+    approvalRules: [],
     outcomePrices: {},
     llmRoutes: [],
     memoryContext: '',
@@ -36,21 +37,29 @@ function graphContext(): GraphContext {
   };
 }
 
-function toolCallMessage(): AIMessage {
+function toolCallMessage(
+  name = 'exec',
+  args: Record<string, unknown> = { command: 'echo hi' },
+): AIMessage {
   return new AIMessage({
     content: '',
-    tool_calls: [{ name: 'exec', args: { command: 'echo hi' }, id: 'call-1' }],
+    tool_calls: [{ name, args, id: 'call-1' }],
   });
 }
 
 function createRunner(options: {
   first: 'tool-call' | 'answer';
   second?: 'answer' | 'tool-call';
+  /** Инструмент, который «вызывает» модель (по умолчанию `exec`). */
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
 }): {
   runner: AgentRunnerService;
   llm: LlmMock;
   bridge: BridgeMock;
 } {
+  const toolName = options.toolName ?? 'exec';
+  const toolArgs = options.toolArgs ?? { command: 'echo hi' };
   let call = 0;
   const llm: LlmMock = {
     stream: vi.fn(async function* stream() {
@@ -58,7 +67,7 @@ function createRunner(options: {
       const kind = call === 1 ? options.first : (options.second ?? 'answer');
 
       if (kind === 'tool-call') {
-        yield { type: 'message', message: toolCallMessage() };
+        yield { type: 'message', message: toolCallMessage(toolName, toolArgs) };
 
         return;
       }
@@ -71,13 +80,13 @@ function createRunner(options: {
     isConfigured: vi.fn(() => false),
     prepareApproval: vi.fn(async () => ({
       reason: 'approval',
-      tools: ['exec'],
+      tools: [toolName],
       holds: {},
     })),
     resolveApproval: vi.fn(async () => true),
     executeTools: vi.fn(async () => ({
       messages: [
-        { toolCallId: 'call-1', name: 'exec', content: 'echo hi' },
+        { toolCallId: 'call-1', name: toolName, content: 'ok' },
       ],
       taintedSecrets: [],
     })),
@@ -195,6 +204,107 @@ describe('AgentRunnerService: HITL interrupt/resume', () => {
     expect(llm.stream).toHaveBeenCalledTimes(2);
     expect(events.at(-1)).toEqual(
       expect.objectContaining({ type: 'done', pendingApproval: false }),
+    );
+  });
+
+  it('условный HITL: промежуточная стадия сделки выполняется без паузы', async () => {
+    const dealRule: ApprovalRule = {
+      tool: 'bitrix24_update_deal',
+      arg: 'stageId',
+      values: ['WON'],
+    };
+    const { runner, bridge } = createRunner({
+      first: 'tool-call',
+      toolName: 'bitrix24_update_deal',
+      toolArgs: { dealId: '42', stageId: 'EXECUTING' },
+    });
+
+    const events = await collect(
+      runner.run({
+        ...graphContext(),
+        approvalRequiredTools: ['bitrix24_update_deal'],
+        approvalRules: [dealRule],
+        messages: [{ role: 'user', content: 'переведи сделку в работу' }],
+      }),
+    );
+
+    expect(bridge.prepareApproval).not.toHaveBeenCalled();
+    expect(bridge.executeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calls: [
+          {
+            id: 'call-1',
+            name: 'bitrix24_update_deal',
+            args: { dealId: '42', stageId: 'EXECUTING' },
+          },
+        ],
+      }),
+    );
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({ type: 'done', pendingApproval: false }),
+    );
+  });
+
+  it('условный HITL: комментарий без stageId выполняется без паузы', async () => {
+    const dealRule: ApprovalRule = {
+      tool: 'bitrix24_update_deal',
+      arg: 'stageId',
+      values: ['WON'],
+    };
+    const { runner, bridge } = createRunner({
+      first: 'tool-call',
+      toolName: 'bitrix24_update_deal',
+      toolArgs: { dealId: '42', comments: 'Клиент ждёт счёт' },
+    });
+
+    await collect(
+      runner.run({
+        ...graphContext(),
+        approvalRequiredTools: ['bitrix24_update_deal'],
+        approvalRules: [dealRule],
+        messages: [{ role: 'user', content: 'добавь комментарий' }],
+      }),
+    );
+
+    expect(bridge.prepareApproval).not.toHaveBeenCalled();
+    expect(bridge.executeTools).toHaveBeenCalledTimes(1);
+  });
+
+  it('условный HITL: финальная стадия WON останавливает граф', async () => {
+    const dealRule: ApprovalRule = {
+      tool: 'bitrix24_update_deal',
+      arg: 'stageId',
+      values: ['WON'],
+    };
+    const { runner, bridge } = createRunner({
+      first: 'tool-call',
+      toolName: 'bitrix24_update_deal',
+      toolArgs: { dealId: '42', stageId: 'C1:WON' },
+    });
+
+    const events = await collect(
+      runner.run({
+        ...graphContext(),
+        approvalRequiredTools: ['bitrix24_update_deal'],
+        approvalRules: [dealRule],
+        messages: [{ role: 'user', content: 'закрой сделку' }],
+      }),
+    );
+
+    expect(bridge.prepareApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calls: [
+          {
+            id: 'call-1',
+            name: 'bitrix24_update_deal',
+            args: { dealId: '42', stageId: 'C1:WON' },
+          },
+        ],
+      }),
+    );
+    expect(bridge.executeTools).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({ type: 'done', pendingApproval: true }),
     );
   });
 

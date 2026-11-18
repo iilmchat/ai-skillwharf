@@ -40,6 +40,10 @@ export const ERROR_KEYS = {
   providerNotConfigured: 'errors.provider_not_configured',
   /** Внешний запрос отклонён egress-политикой API/worker. */
   outboundBlocked: 'errors.outbound_blocked',
+  /** Регистрация закрыта администратором (`REGISTRATION_MODE=closed`). */
+  registrationClosed: 'errors.registration_closed',
+  /** Инвайт-код отсутствует или не совпал (`REGISTRATION_MODE=invite`). */
+  invalidInviteCode: 'errors.invalid_invite_code',
   /** Загруженный документ больше лимита (413). */
   documentTooLarge: 'errors.document_too_large',
   /** MIME-тип документа не поддержан парсером (415). */

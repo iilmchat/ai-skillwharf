@@ -7,7 +7,11 @@ import type {
 } from '../agent/contracts.js';
 import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
-import { ChatService, type ChatReply } from './chat.service.js';
+import {
+  ChatService,
+  resolveApprovalRules,
+  type ChatReply,
+} from './chat.service.js';
 import type {
   PendingApprovalRecord,
 } from './persistence/pending-approval.service.js';
@@ -189,6 +193,29 @@ describe('ChatService (llm-worker client)', () => {
     expect(request.memoryContext).toBe(MEMORY_CONTEXT);
     expect(request.systemPrompt).toContain(MEMORY_CONTEXT);
     expect(request.systemPrompt).toContain('## Долговременная память');
+  });
+
+  it('resolveApprovalRules передаёт условие HITL по stageId (KI-079)', () => {
+    const rules = resolveApprovalRules([
+      {
+        id: 'skill-bitrix',
+        name: 'bitrix24-crm',
+        isEnabled: true,
+        manifest: {
+          name: 'bitrix24-crm',
+          version: '1.0.0',
+          description: 'CRM Битрикс24',
+          author: { name: 'SkillWharf' },
+          permissions: ['network'],
+          dependencies: { tools: ['bitrix24_update_deal'] },
+          requiresApproval: true,
+        },
+      },
+    ]);
+
+    expect(rules).toEqual([
+      { tool: 'bitrix24_update_deal', arg: 'stageId', values: ['WON'] },
+    ]);
   });
 
   it('передаёт worker схемы инструментов, HITL и цены из манифестов', async () => {

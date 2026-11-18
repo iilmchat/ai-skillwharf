@@ -22,6 +22,8 @@ export type ProviderName =
   | 'telegram'
   | 'google'
   | 'midjourney'
+  | 'bitrix24'
+  | 'moysklad'
   | 'ocr'
   | 'tavily';
 
@@ -248,6 +250,10 @@ function providerLabel(provider: ProviderName): string {
       return 'Telegram';
     case 'midjourney':
       return 'Midjourney';
+    case 'bitrix24':
+      return 'Битрикс24';
+    case 'moysklad':
+      return 'МойСклад';
     case 'ocr':
       return 'OCR';
     case 'tavily':

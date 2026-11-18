@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import nock from 'nock';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiException } from '../../common/api-error.js';
 import { ERROR_KEYS } from '../../i18n/error-keys.js';
 import { TokenCipherService } from '../google/token-cipher.service.js';
@@ -101,6 +102,8 @@ describe('ProviderKeysService: хранение и шифрование', () => 
     delete process.env.MIDJOURNEY_API_KEY;
     delete process.env.BITRIX24_WEBHOOK_URL;
     delete process.env.MOYSKLAD_TOKEN;
+    // Live-проверку Битрикс24/МойСклада проверяет отдельный spec с nock.
+    process.env.SKIP_INTEGRATION_LIVE_CHECK = 'true';
   });
 
   it('Ozon: секреты в БД зашифрованы envelope v1 и не содержат открытых значений', async () => {
@@ -426,5 +429,143 @@ describe('ProviderKeysService: ключи для инструментов (БД 
         extra: 'x',
       } as never),
     ).rejects.toThrow();
+  });
+});
+
+describe('ProviderKeysService: live-проверка при подключении (KI-075)', () => {
+  const BITRIX_API = 'https://portal.bitrix24.ru';
+  const BITRIX_WEBHOOK = `${BITRIX_API}/rest/1/token/`;
+  const MOYSKLAD_API = 'https://api.moysklad.ru';
+  const MOYSKLAD_REMAP = '/api/remap/1.2';
+
+  beforeEach(() => {
+    delete process.env.SKIP_INTEGRATION_LIVE_CHECK;
+    delete process.env.API_OUTBOUND_ALLOWLIST;
+    delete process.env.MOYSKLAD_BASE_URL;
+    // Детерминированный egress-allowlist независимо от .env разработчика.
+    process.env.OUTBOUND_ALLOWLIST = '*.bitrix24.ru,*.moysklad.ru';
+    nock.disableNetConnect();
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+    nock.enableNetConnect();
+    delete process.env.OUTBOUND_ALLOWLIST;
+    delete process.env.SKIP_INTEGRATION_LIVE_CHECK;
+  });
+
+  it('Битрикс24: profile.json подтверждает вебхук до сохранения', async () => {
+    const { service, rows } = createHarness();
+    const api = nock(BITRIX_API)
+      .get('/rest/1/token/profile.json')
+      .reply(200, { result: { ID: '1', NAME: 'Иван' } });
+
+    await expect(
+      service.connectBitrix24('user-1', { webhookUrl: BITRIX_WEBHOOK }),
+    ).resolves.toEqual({ status: 'active', source: 'user' });
+    expect(api.isDone()).toBe(true);
+    expect(rows.has('user-1::bitrix24')).toBe(true);
+  });
+
+  it('Битрикс24: 401 даёт 400 provider_auth_required и не пишет в БД', async () => {
+    const { service, rows } = createHarness();
+    nock(BITRIX_API)
+      .get('/rest/1/token/profile.json')
+      .reply(401, { error: 'INVALID_CREDENTIALS' });
+
+    const error: unknown = await service
+      .connectBitrix24('user-1', { webhookUrl: BITRIX_WEBHOOK })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 400,
+      code: ERROR_KEYS.providerAuthRequired,
+    });
+    expect(rows.size).toBe(0);
+  });
+
+  it('МойСклад: organization?limit=1 подтверждает токен до сохранения', async () => {
+    const { service, rows } = createHarness();
+    const api = nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/organization`)
+      .query({ limit: '1' })
+      .matchHeader('authorization', 'Bearer moysklad-api-token-secret')
+      .reply(200, { rows: [{ id: 'organization-1' }] });
+
+    await expect(
+      service.connectMoysklad('user-1', {
+        apiToken: 'moysklad-api-token-secret',
+      }),
+    ).resolves.toEqual({ status: 'active', source: 'user' });
+    expect(api.isDone()).toBe(true);
+    expect(rows.has('user-1::moysklad')).toBe(true);
+  });
+
+  it('МойСклад: 403 даёт 400 provider_auth_required и не пишет в БД', async () => {
+    const { service, rows } = createHarness();
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/organization`)
+      .query({ limit: '1' })
+      .reply(403, { errors: [{ error: 'Access denied' }] });
+
+    const error: unknown = await service
+      .connectMoysklad('user-1', {
+        apiToken: 'moysklad-api-token-secret',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 400,
+      code: ERROR_KEYS.providerAuthRequired,
+    });
+    expect(rows.size).toBe(0);
+  });
+
+  it('SKIP_INTEGRATION_LIVE_CHECK=true пропускает live-проверку', async () => {
+    const { service, rows } = createHarness();
+    process.env.SKIP_INTEGRATION_LIVE_CHECK = 'true';
+
+    await expect(
+      service.connectBitrix24('user-1', { webhookUrl: BITRIX_WEBHOOK }),
+    ).resolves.toEqual({ status: 'active', source: 'user' });
+    expect(rows.has('user-1::bitrix24')).toBe(true);
+  });
+
+  it('таймаут/сеть live-проверки даёт 502 provider_unavailable', async () => {
+    const { service, rows } = createHarness();
+    nock(BITRIX_API)
+      .get('/rest/1/token/profile.json')
+      .replyWithError(new Error('socket hang up'));
+
+    const error: unknown = await service
+      .connectBitrix24('user-1', { webhookUrl: BITRIX_WEBHOOK })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 502,
+      code: ERROR_KEYS.providerUnavailable,
+    });
+    expect(rows.size).toBe(0);
+  });
+
+  it('5xx live-проверки Битрикс24 даёт 502 provider_unavailable', async () => {
+    const { service, rows } = createHarness();
+    nock(BITRIX_API)
+      .get('/rest/1/token/profile.json')
+      .reply(500, { error: 'internal' });
+
+    const error: unknown = await service
+      .connectBitrix24('user-1', { webhookUrl: BITRIX_WEBHOOK })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 502,
+      code: ERROR_KEYS.providerUnavailable,
+    });
+    expect(rows.size).toBe(0);
   });
 });

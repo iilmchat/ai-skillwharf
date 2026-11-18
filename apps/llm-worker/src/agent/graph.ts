@@ -18,6 +18,7 @@ import {
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import { z } from 'zod';
 import type {
+  ApprovalRule,
   OutcomePrice,
   SkillSnapshot,
   ToolSkillContext,
@@ -104,6 +105,10 @@ const ChatStateAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => [],
   }),
+  approvalRules: Annotation<ApprovalRule[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
   llmRoutes: Annotation<
     import('../contracts.js').LlmRouteSelection[]
   >({
@@ -157,6 +162,46 @@ function toolCallsOf(message: BaseMessage | undefined): ToolCall[] {
 
 function toolRounds(messages: BaseMessage[]): number {
   return messages.filter((message) => toolCallsOf(message).length > 0).length;
+}
+
+/**
+ * Требует ли вызов HITL с учётом правил по аргументам (KI-079).
+ *
+ * Инструмент без правила подтверждается по имени (прежнее поведение
+ * `approvalRequiredTools`). Если правила есть, граф останавливается только
+ * при совпадении значения аргумента; стадии воронки вида `C1:WON`
+ * сопоставляются как суффикс.
+ */
+export function callRequiresApproval(
+  call: Pick<ToolCall, 'name' | 'args'>,
+  approvalRequiredTools: ReadonlySet<string>,
+  approvalRules: readonly ApprovalRule[],
+): boolean {
+  if (!approvalRequiredTools.has(call.name)) {
+    return false;
+  }
+
+  const rules = approvalRules.filter((rule) => rule.tool === call.name);
+
+  if (rules.length === 0) {
+    return true;
+  }
+
+  return rules.some((rule) => {
+    const value = call.args?.[rule.arg];
+
+    if (typeof value !== 'string') {
+      return false;
+    }
+
+    const normalized = value.trim().toUpperCase();
+
+    return rule.values.some((expected) => {
+      const target = expected.trim().toUpperCase();
+
+      return normalized === target || normalized.endsWith(`:${target}`);
+    });
+  });
 }
 
 function callKey(call: ToolCall, index: number): string {
@@ -238,7 +283,13 @@ export function buildChatGraph(options: BuildGraphOptions) {
       const callIds = calls.map((call, index) => callKey(call, index));
       const approvalCalls = calls
         .map((call, index) => ({ call, key: callIds[index]! }))
-        .filter(({ call }) => approvalRequired.has(call.name));
+        .filter(({ call }) =>
+          callRequiresApproval(
+            call,
+            approvalRequired,
+            state.approvalRules ?? [],
+          ),
+        );
       let preAuthorizedHolds: Record<string, string> = {};
 
       if (approvalCalls.length > 0) {
@@ -360,6 +411,7 @@ export interface RunGraphInput {
   messages: BaseMessage[];
   skills: SkillSnapshot[];
   approvalRequiredTools: string[];
+  approvalRules?: ApprovalRule[];
   outcomePrices: Record<string, OutcomePrice>;
   llmRoutes: import('../contracts.js').LlmRouteSelection[];
   systemPrompt: string;

@@ -12,7 +12,10 @@ import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { MemoryService } from '../memory/memory.service.js';
 import { PromptsService } from '../prompts/prompts.service.js';
 import type { UserRole } from '../security/policy/policy.types.js';
-import { getToolPolicy } from '../security/policy/tool-policies.js';
+import {
+  approvalRuleFor,
+  getToolPolicy,
+} from '../security/policy/tool-policies.js';
 import { SkillsService } from '../skills/skills.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -31,7 +34,13 @@ import {
   type OfficeEvent,
 } from './office-events.js';
 import { AgentToolsService } from '../agent/agent-tools.service.js';
-import type { GraphEvent, OutcomePrice, ResumeGraphRequest, RunGraphRequest } from '../agent/contracts.js';
+import type {
+  ApprovalRule,
+  GraphEvent,
+  OutcomePrice,
+  ResumeGraphRequest,
+  RunGraphRequest,
+} from '../agent/contracts.js';
 import { LlmWorkerClient } from '../agent/llm-worker.client.js';
 
 /** Сколько последних сообщений уходит в LLM. */
@@ -69,6 +78,7 @@ interface PreparedMessage {
   messages: HistoryMessage[];
   skills: SkillSnapshot[];
   approvalRequiredTools: string[];
+  approvalRules: ApprovalRule[];
   outcomePrices: Record<string, OutcomePrice>;
   memoryContext: string;
   userRole: UserRole;
@@ -117,6 +127,37 @@ export function resolveApprovalTools(skills: readonly SkillSnapshot[]): string[]
   }
 
   return [...tools];
+}
+
+/**
+ * Условия HITL по аргументам для инструментов из манифестов (KI-079).
+ *
+ * Передаются worker'у вместе с `approvalRequiredTools`: инструмент без
+ * правила подтверждается всегда, инструмент с правилом — только при
+ * совпадении значения аргумента (например, `stageId: WON`).
+ */
+export function resolveApprovalRules(
+  skills: readonly SkillSnapshot[],
+): ApprovalRule[] {
+  const rules = new Map<string, ApprovalRule>();
+
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (!parsed.success || parsed.data.requiresApproval !== true) {
+      continue;
+    }
+
+    for (const tool of parsed.data.dependencies?.tools ?? []) {
+      const rule = approvalRuleFor(tool);
+
+      if (rule !== null) {
+        rules.set(tool, rule);
+      }
+    }
+  }
+
+  return [...rules.values()];
 }
 
 /** Цены Pay-per-Outcome по инструментам из манифестов навыков. */
@@ -422,6 +463,7 @@ export class ChatService {
       messages: prepared.messages,
       skills: prepared.skills,
       approvalRequiredTools: prepared.approvalRequiredTools,
+      approvalRules: prepared.approvalRules,
       outcomePrices: prepared.outcomePrices,
       llmRoutes: routes,
       memoryContext: prepared.memoryContext,
@@ -555,6 +597,7 @@ export class ChatService {
       messages,
       skills,
       approvalRequiredTools: resolveApprovalTools(skills),
+      approvalRules: resolveApprovalRules(skills),
       outcomePrices: resolveOutcomePrices(skills),
       memoryContext,
       userRole,

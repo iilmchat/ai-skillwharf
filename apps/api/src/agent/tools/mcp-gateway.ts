@@ -52,6 +52,7 @@ export const BITRIX24_MCP_ACTIONS = {
 /** Действия MCP-сервера МойСклад (реальные имена из `tools/list`). */
 export const MOYSKLAD_MCP_ACTIONS = {
   productGet: 'product_get',
+  stockReport: 'stock_report',
   customerOrderCreate: 'customer_order_create',
 } as const;
 
@@ -391,6 +392,12 @@ const BITRIX24_ACTION_SCHEMAS = {
 const MOYSKLAD_ACTION_SCHEMAS = {
   [MOYSKLAD_MCP_ACTIONS.productGet]: z.strictObject({
     id: moyskladEntityIdSchema,
+  }),
+  [MOYSKLAD_MCP_ACTIONS.stockReport]: z.strictObject({
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+    filter: z.string().min(1).max(512).optional(),
+    search: z.string().min(1).max(256).optional(),
   }),
   [MOYSKLAD_MCP_ACTIONS.customerOrderCreate]: z.strictObject({
     payload: moyskladCustomerOrderPayloadSchema,

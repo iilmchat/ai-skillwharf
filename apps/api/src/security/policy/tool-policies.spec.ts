@@ -1,6 +1,8 @@
 import {
   KNOWN_TOOL_NAMES,
   TOOL_POLICIES,
+  approvalRuleFor,
+  approvalRuleMatches,
   getToolPolicy,
   requiresApprovalFor,
 } from './tool-policies.js';
@@ -170,6 +172,21 @@ describe('tool-policies', () => {
         comments: 'Только комментарий',
       }),
     ).toBe(false);
+  });
+
+  it('отдаёт правило HITL по аргументу для bitrix24_update_deal (KI-079)', () => {
+    expect(approvalRuleFor('bitrix24_update_deal')).toEqual({
+      tool: 'bitrix24_update_deal',
+      arg: 'stageId',
+      values: ['WON'],
+    });
+    expect(approvalRuleFor('moysklad_create_order')).toBeNull();
+    expect(approvalRuleFor('unknown_tool')).toBeNull();
+
+    expect(approvalRuleMatches('WON', ['WON'])).toBe(true);
+    expect(approvalRuleMatches('c1:won', ['WON'])).toBe(true);
+    expect(approvalRuleMatches('EXECUTING', ['WON'])).toBe(false);
+    expect(approvalRuleMatches(undefined, ['WON'])).toBe(false);
   });
 
   it('требует подтверждения для создания заказа и не требует для чтения', () => {

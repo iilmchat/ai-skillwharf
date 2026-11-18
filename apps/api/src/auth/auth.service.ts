@@ -5,10 +5,15 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  invalidInviteCodeError,
+  invalidRequestError,
+  registrationClosedError,
+} from '../common/api-error.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { LoginDto } from './dto/login.dto.js';
-import { RegisterDto } from './dto/register.dto.js';
+import { RegisterDto, registerSchema } from './dto/register.dto.js';
 import type { JwtPayload } from './jwt.strategy.js';
 
 const ACCESS_TOKEN_TTL = '15m';
@@ -34,6 +39,48 @@ export interface UserProfile {
   dailyTokensUsed: number;
 }
 
+/** Режим регистрации (`REGISTRATION_MODE`, KI-073). */
+export type RegistrationMode = 'open' | 'invite' | 'closed';
+
+/** Непустое значение окружения или `null`. */
+function readEnv(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env[name]?.trim() ?? '';
+
+  return value === '' ? null : value;
+}
+
+/**
+ * Режим регистрации из окружения.
+ *
+ * Явный `REGISTRATION_MODE` имеет приоритет. Без него: если задан
+ * `REGISTRATION_INVITE_CODE` — режим `invite` (fail closed), иначе `open`
+ * (dev/тесты). Неизвестное значение трактуется так же, как отсутствие
+ * переменной, а не как «открыто всем».
+ */
+export function resolveRegistrationMode(
+  env: NodeJS.ProcessEnv = process.env,
+): RegistrationMode {
+  const raw = env.REGISTRATION_MODE?.trim().toLowerCase();
+
+  if (raw === 'open' || raw === 'invite' || raw === 'closed') {
+    return raw;
+  }
+
+  return readEnv('REGISTRATION_INVITE_CODE', env) === null ? 'open' : 'invite';
+}
+
+/** Сравнение инвайт-кодов без раннего выхода (constant-time). */
+function inviteCodeMatches(provided: string, expected: string): boolean {
+  const providedBuffer = Buffer.from(provided, 'utf8');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
 /**
  * Начало текущих суток в UTC. Дублирует границу из Budget Guard в LlmService,
  * чтобы auth не зависел от llm-модуля.
@@ -52,8 +99,18 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<RegisteredUser> {
+    const parsed = registerSchema.safeParse(dto);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Некорректные данные регистрации');
+    }
+
+    // Режим проверяем до обращения к БД: закрытая регистрация не должна
+    // раскрывать, занят ли email.
+    this.assertRegistrationAllowed(parsed.data.inviteCode);
+
     const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email: parsed.data.email },
       select: { id: true },
     });
 
@@ -61,12 +118,35 @@ export class AuthService {
       throw new ConflictException('Пользователь с таким email уже существует');
     }
 
-    const passwordHash = await argon2.hash(dto.password);
+    const passwordHash = await argon2.hash(parsed.data.password);
 
     return this.prisma.user.create({
-      data: { email: dto.email, passwordHash },
+      data: { email: parsed.data.email, passwordHash },
       select: { id: true, email: true },
     });
+  }
+
+  /** KI-073: `closed` — всегда 403; `invite` — только с верным кодом. */
+  private assertRegistrationAllowed(inviteCode: string | undefined): void {
+    const mode = resolveRegistrationMode();
+
+    if (mode === 'closed') {
+      throw registrationClosedError('Регистрация новых пользователей закрыта');
+    }
+
+    if (mode !== 'invite') {
+      return;
+    }
+
+    const expected = readEnv('REGISTRATION_INVITE_CODE');
+
+    if (
+      expected === null ||
+      inviteCode === undefined ||
+      !inviteCodeMatches(inviteCode, expected)
+    ) {
+      throw invalidInviteCodeError('Неверный или отсутствующий инвайт-код');
+    }
   }
 
   async login(dto: LoginDto): Promise<AuthTokens> {

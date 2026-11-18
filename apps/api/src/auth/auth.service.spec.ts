@@ -2,8 +2,10 @@ import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as argon2 from 'argon2';
+import { ApiException } from '../common/api-error.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AuthService } from './auth.service.js';
+import { AuthService, resolveRegistrationMode } from './auth.service.js';
 import type { JwtPayload } from './jwt.strategy.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
@@ -49,6 +51,10 @@ describe('AuthService', () => {
   let jwt: JwtMock;
 
   beforeEach(async () => {
+    // KI-073: по умолчанию в тестах режим open.
+    delete process.env.REGISTRATION_MODE;
+    delete process.env.REGISTRATION_INVITE_CODE;
+
     prisma = {
       user: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
       session: {
@@ -101,6 +107,80 @@ describe('AuthService', () => {
         service.register({ email: EMAIL, password: PASSWORD }),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('REGISTRATION_MODE=closed отдаёт 403 errors.registration_closed', async () => {
+      process.env.REGISTRATION_MODE = 'closed';
+
+      const error: unknown = await service
+        .register({ email: EMAIL, password: PASSWORD })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getResponse()).toMatchObject({
+        statusCode: 403,
+        code: ERROR_KEYS.registrationClosed,
+      });
+      // До БД запрос не доходит: email не раскрывается.
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('REGISTRATION_MODE=invite с верным кодом создаёт пользователя', async () => {
+      process.env.REGISTRATION_MODE = 'invite';
+      process.env.REGISTRATION_INVITE_CODE = 'design-partner-2026';
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: USER_ID, email: EMAIL });
+
+      await expect(
+        service.register({
+          email: EMAIL,
+          password: PASSWORD,
+          inviteCode: 'design-partner-2026',
+        }),
+      ).resolves.toEqual({ id: USER_ID, email: EMAIL });
+      expect(prisma.user.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('REGISTRATION_MODE=invite без кода или с неверным кодом — 403', async () => {
+      process.env.REGISTRATION_MODE = 'invite';
+      process.env.REGISTRATION_INVITE_CODE = 'design-partner-2026';
+
+      for (const inviteCode of [undefined, 'wrong-code', 'design-partner-202']) {
+        const error: unknown = await service
+          .register({ email: EMAIL, password: PASSWORD, inviteCode })
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(ApiException);
+        expect((error as ApiException).getResponse()).toMatchObject({
+          statusCode: 403,
+          code: ERROR_KEYS.invalidInviteCode,
+        });
+      }
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('наличие REGISTRATION_INVITE_CODE без режима включает invite', async () => {
+      process.env.REGISTRATION_INVITE_CODE = 'design-partner-2026';
+
+      expect(resolveRegistrationMode()).toBe('invite');
+
+      const error: unknown = await service
+        .register({ email: EMAIL, password: PASSWORD })
+        .catch((caught: unknown) => caught);
+
+      expect((error as ApiException).getResponse()).toMatchObject({
+        statusCode: 403,
+        code: ERROR_KEYS.invalidInviteCode,
+      });
+    });
+
+    it('неизвестный REGISTRATION_MODE не открывает регистрацию при заданном коде', () => {
+      process.env.REGISTRATION_MODE = 'sometimes';
+      process.env.REGISTRATION_INVITE_CODE = 'design-partner-2026';
+
+      expect(resolveRegistrationMode()).toBe('invite');
     });
   });
 

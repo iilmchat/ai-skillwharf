@@ -90,6 +90,35 @@ const moyskladProductSchema = z.object({
   meta: z.object({ href: z.string().min(1) }).optional(),
 });
 
+/** Склад в строке отчёта `stock_report`: строка или объект с `name`. */
+const warehouseRefSchema = z.union([
+  z.string().min(1),
+  z.object({ name: z.string().min(1) }),
+]);
+
+/**
+ * Строка отчёта `stock_report` (`GET /report/stock/all`).
+ *
+ * Отчёт может отдавать остаток по складам (`warehouse`/`store`) либо только
+ * агрегат по товару — поля необязательны, разбор не должен падать на
+ * неполном ответе МойСклада.
+ */
+const moyskladStockReportRowSchema = z.object({
+  article: z.string().optional(),
+  code: z.string().optional(),
+  name: z.string().optional(),
+  stock: numericSchema.optional(),
+  reserve: numericSchema.optional(),
+  warehouse: warehouseRefSchema.optional(),
+  store: warehouseRefSchema.optional(),
+});
+
+/** Ответ `stock_report`: массив строк или конверт `{ rows }`. */
+const moyskladStockReportSchema = z.union([
+  z.array(moyskladStockReportRowSchema),
+  z.object({ rows: z.array(moyskladStockReportRowSchema) }),
+]);
+
 /** Заказ покупателя в ответе `customer_order_create`. */
 const moyskladOrderSchema = z.object({
   id: z.string().min(1),
@@ -227,7 +256,73 @@ export async function bitrix24UpdateDeal(
   });
 }
 
-/** Проверяет доступный остаток товара МойСклад под запрошенное количество. */
+/** Название склада в строке отчёта или `undefined`. */
+function stockReportWarehouseName(
+  row: z.infer<typeof moyskladStockReportRowSchema>,
+): string | undefined {
+  const ref = row.warehouse ?? row.store;
+
+  if (ref === undefined) {
+    return undefined;
+  }
+
+  return typeof ref === 'string' ? ref.trim() : ref.name.trim();
+}
+
+/**
+ * Остатки по складам из `stock_report` (KI-081).
+ *
+ * Отчёт — дополнительная детализация: если он недоступен, ошибка провайдера
+ * не должна ломать проверку остатка, инструмент возвращает общий остаток
+ * карточки с пустым `warehouses`.
+ */
+async function stockReportWarehouses(
+  mcp: MarketplaceMcpService,
+  context: ErpToolContext,
+  article: string,
+): Promise<Array<{ name: string; stock: number }>> {
+  const action = MOYSKLAD_MCP_ACTIONS.stockReport;
+
+  try {
+    const text = await mcp.call(
+      'moysklad',
+      action,
+      { filter: `article=${article}`, limit: 100 },
+      context,
+    );
+    const parsed = parseProviderResult(
+      action,
+      moyskladStockReportSchema,
+      parseMcpJson(action, text),
+    );
+    const rows = Array.isArray(parsed) ? parsed : parsed.rows;
+    const byWarehouse = new Map<string, number>();
+
+    for (const row of rows) {
+      const name = stockReportWarehouseName(row);
+
+      if (name === undefined || name === '' || row.stock === undefined) {
+        continue;
+      }
+
+      byWarehouse.set(name, (byWarehouse.get(name) ?? 0) + row.stock);
+    }
+
+    return [...byWarehouse.entries()].map(([name, stock]) => ({ name, stock }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Проверяет доступный остаток товара МойСклад под запрошенное количество.
+ *
+ * Для услуг, комплектов и других нетарифицируемых позиций в карточке нет
+ * `stock`/`reserve`: это не ошибка провайдера, а `tracked: false` с
+ * `available: true` (KI-081). Для товаров с артикулом дополнительно
+ * запрашивается `stock_report` с разбивкой по складам; при недоступном
+ * отчёте остаётся общий остаток карточки.
+ */
 export async function moyskladCheckStock(
   mcp: MarketplaceMcpService,
   args: MoyskladCheckStockArgs,
@@ -247,13 +342,24 @@ export async function moyskladCheckStock(
   );
 
   if (product.stock === undefined) {
-    throw mcpProviderError(
-      `МойСклад не вернул остаток товара ${args.productId}: позиция не учитывается по складу`,
-    );
+    await context.beforeExecute?.();
+
+    return JSON.stringify({
+      productId: product.id,
+      tracked: false,
+      available: true,
+      stock: null,
+      reserve: null,
+      reason: 'untracked_item',
+    });
   }
 
   const reserve = product.reserve ?? 0;
   const available = Math.max(product.stock - reserve, 0);
+  const warehouses =
+    product.article === undefined
+      ? []
+      : await stockReportWarehouses(mcp, context, product.article);
 
   await context.beforeExecute?.();
 
@@ -261,11 +367,13 @@ export async function moyskladCheckStock(
     productId: product.id,
     name: product.name,
     article: product.article,
+    tracked: true,
     onHand: product.stock,
     reserve,
     available,
     requested: args.quantity,
     enough: available >= args.quantity,
+    warehouses,
   });
 }
 
