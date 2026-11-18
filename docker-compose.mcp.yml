@@ -8,6 +8,9 @@
 #   BITRIX24_WEBHOOK_URL, MOYSKLAD_TOKEN, MOYSKLAD_BASE_URL
 #   MOYSKLAD_DEFAULT_ORGANIZATION_ID, MOYSKLAD_DEFAULT_AGENT_ID
 #   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
+# По умолчанию MCP_ALLOW_MISSING_KEYS=1: креды могут приходить per-request
+# заголовками (MCP-24.1), глобальные env-ключи не обязательны.
+# 0 — healthcheck требует глобальные ключи (старое поведение).
 services:
   api:
     # image нужен, чтобы файл был валидным и при запуске отдельно от базового
@@ -37,8 +40,8 @@ services:
       OZON_API_KEY: ${OZON_API_KEY:-}
       OZON_PERF_CLIENT_ID: ${OZON_PERF_CLIENT_ID:-}
       OZON_PERF_CLIENT_SECRET: ${OZON_PERF_CLIENT_SECRET:-}
-      # 0 — healthcheck падает без ключей; 1 — только для локального UI.
-      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+      # 1 (по умолчанию) — креды приходят per-request; 0 — healthcheck требует ключи.
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-1}
       # 0 отключает фоновые проверки, чтобы не тратить лимиты API.
       HEALTH_CHECK_INTERVAL_MIN: ${OZON_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
@@ -67,7 +70,7 @@ services:
       DATA_DIR: /data
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       WB_API_TOKEN: ${WB_API_TOKEN:-}
-      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-1}
       HEALTH_CHECK_INTERVAL_MIN: ${WB_HEALTH_CHECK_INTERVAL_MIN:-0}
     ports:
       # Только localhost: панель MCP не должна быть доступна из сети.
@@ -93,7 +96,7 @@ services:
       PORT: 5003
       BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL:-}
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
-      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-1}
     ports:
       # Только localhost: MCP-сервер не публикуется во внешнюю сеть.
       - '127.0.0.1:5003:5003'
@@ -117,7 +120,7 @@ services:
       MOYSKLAD_TOKEN: ${MOYSKLAD_TOKEN:-}
       MOYSKLAD_BASE_URL: ${MOYSKLAD_BASE_URL:-https://api.moysklad.ru/api/remap/1.2}
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
-      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-0}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-1}
     ports:
       # Только localhost: MCP-сервер не публикуется во внешнюю сеть.
       - '127.0.0.1:5004:5004'

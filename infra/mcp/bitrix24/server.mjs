@@ -17,6 +17,7 @@ const ALLOW_MISSING_KEYS = process.env.MCP_ALLOW_MISSING_KEYS === '1';
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1_048_576;
 const PROTOCOL_VERSION = '2024-11-05';
+const BITRIX24_WEBHOOK_HEADER = 'x-bitrix24-webhook-url';
 
 const webhookRaw = process.env.BITRIX24_WEBHOOK_URL?.trim() ?? '';
 let webhookUrl = null;
@@ -74,6 +75,36 @@ function normalizeWebhookUrl(raw) {
   url.hash = '';
 
   return url.toString();
+}
+
+function headerValue(headers, name) {
+  const value = headers[name];
+
+  if (Array.isArray(value)) {
+    return value[0] ?? '';
+  }
+
+  return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Креды приходят либо в заголовке MCP-сессии, либо из env контейнера.
+ * Значение заголовка никогда не попадает в логи: ошибки без содержимого URL.
+ */
+export function resolveBitrixWebhookFromHeaders(headers, fallback = webhookUrl) {
+  const raw = headerValue(headers, BITRIX24_WEBHOOK_HEADER).trim();
+
+  if (raw === '') {
+    return fallback ?? null;
+  }
+
+  try {
+    return normalizeWebhookUrl(raw);
+  } catch {
+    throw new Error(
+      'некорректный X-Bitrix24-Webhook-Url: ожидается https://<portal>.bitrix24.ru/rest/<user_id>/<token>/',
+    );
+  }
 }
 
 function safeDetail(value) {
@@ -310,7 +341,7 @@ function sseWrite(response, data) {
   response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function handleRpc(message) {
+async function handleRpc(message, credentials = {}) {
   const method = message.method;
 
   if (method === 'initialize') {
@@ -338,7 +369,9 @@ async function handleRpc(message) {
     }
 
     try {
-      const result = await callBitrixTool(name, params.arguments ?? {});
+      const result = await callBitrixTool(name, params.arguments ?? {}, {
+        webhookUrl: credentials.webhookUrl,
+      });
       return {
         content: [
           {
@@ -395,6 +428,18 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/sse') {
+    let sessionWebhook;
+
+    try {
+      sessionWebhook = resolveBitrixWebhookFromHeaders(request.headers);
+    } catch (error) {
+      sendJson(response, 400, {
+        status: 'error',
+        message: safeDetail(error instanceof Error ? error.message : error),
+      });
+      return;
+    }
+
     const sessionId = randomUUID();
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -411,7 +456,11 @@ const server = createServer(async (request, response) => {
     }, 15_000);
     heartbeat.unref();
 
-    sessions.set(sessionId, { response, heartbeat });
+    sessions.set(sessionId, {
+      response,
+      heartbeat,
+      webhookUrl: sessionWebhook,
+    });
 
     const cleanup = () => {
       clearInterval(heartbeat);
@@ -428,6 +477,21 @@ const server = createServer(async (request, response) => {
 
     if (session === undefined) {
       sendJson(response, 404, { status: 'error', message: 'session not found' });
+      return;
+    }
+
+    let requestWebhook;
+
+    try {
+      requestWebhook = resolveBitrixWebhookFromHeaders(
+        request.headers,
+        session.webhookUrl,
+      );
+    } catch (error) {
+      sendJson(response, 400, {
+        status: 'error',
+        message: safeDetail(error instanceof Error ? error.message : error),
+      });
       return;
     }
 
@@ -448,7 +512,9 @@ const server = createServer(async (request, response) => {
     }
 
     try {
-      const result = await handleRpc(message);
+      const result = await handleRpc(message, {
+        webhookUrl: requestWebhook,
+      });
       sseWrite(session.response, {
         jsonrpc: '2.0',
         id: message.id,

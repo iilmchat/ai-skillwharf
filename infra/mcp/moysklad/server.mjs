@@ -18,6 +18,9 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1_048_576;
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = 'https://api.moysklad.ru/api/remap/1.2';
+const MAX_TOOL_ATTEMPTS = 2;
+const RETRY_BASE_DELAY_MS = 200;
+const MOYSKLAD_TOKEN_HEADER = 'x-moysklad-token';
 
 const token = process.env.MOYSKLAD_TOKEN?.trim() ?? '';
 const baseUrlRaw = process.env.MOYSKLAD_BASE_URL?.trim() || DEFAULT_BASE_URL;
@@ -83,6 +86,55 @@ function asObject(value) {
   }
 
   return value;
+}
+
+function headerValue(headers, name) {
+  const value = headers[name];
+
+  if (Array.isArray(value)) {
+    return value[0] ?? '';
+  }
+
+  return typeof value === 'string' ? value : '';
+}
+
+/** Токен clients приходит в X-Moysklad-Token, иначе используется env. */
+export function resolveMoyskladTokenFromHeaders(headers, fallback = token) {
+  return headerValue(headers, MOYSKLAD_TOKEN_HEADER).trim() || fallback || '';
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/** До двух попыток с экспоненциальной задержкой на 429/5xx и сетевых сбоях. */
+async function fetchWithRetry(url, init, timeoutMs) {
+  for (let attempt = 1; ; attempt += 1) {
+    let response;
+
+    try {
+      response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      if (attempt >= MAX_TOOL_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+      continue;
+    }
+
+    const retryable = response.status === 429 || response.status >= 500;
+
+    if (!retryable || attempt >= MAX_TOOL_ATTEMPTS) {
+      return response;
+    }
+
+    await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+  }
 }
 
 const TOOLS = [
@@ -173,6 +225,54 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'demand_create',
+    description: 'Создать отгрузку покупателю (POST /entity/demand).',
+    inputSchema: {
+      type: 'object',
+      properties: { payload: { type: 'object' } },
+      required: ['payload'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'purchase_order_create',
+    description:
+      'Создать заказ поставщику при дефиците комплектующих (POST /entity/purchaseorder).',
+    inputSchema: {
+      type: 'object',
+      properties: { payload: { type: 'object' } },
+      required: ['payload'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'counterparty_balance',
+    description:
+      'Проверить дебиторскую задолженность контрагента (GET /report/counterparty).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        offset: { type: 'integer', minimum: 0 },
+        filter: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'bundle_get',
+    description:
+      'Прочитать состав комплекта/спецификации по ID или артикулу (GET /entity/bundle).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        article: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 const READ_PATHS = Object.freeze({
@@ -180,11 +280,18 @@ const READ_PATHS = Object.freeze({
   stock_report: '/report/stock/all',
   customer_order_list: '/entity/customerorder',
   counterparty_list: '/entity/counterparty',
+  counterparty_balance: '/report/counterparty',
 });
 
 const GET_PATHS = Object.freeze({
   product_get: '/entity/product',
   customer_order_get: '/entity/customerorder',
+});
+
+const CREATE_PATHS = Object.freeze({
+  customer_order_create: '/entity/customerorder',
+  demand_create: '/entity/demand',
+  purchase_order_create: '/entity/purchaseorder',
 });
 
 function cleanQuery(input) {
@@ -216,6 +323,13 @@ function cleanQuery(input) {
   return result;
 }
 
+function cleanReportQuery(input) {
+  const query = cleanQuery(input);
+  delete query.search;
+  delete query.expand;
+  return query;
+}
+
 function safeEntityId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
     throw new Error('id должен содержать только буквы, цифры, дефис и _');
@@ -244,10 +358,26 @@ export async function callMoySkladTool(name, args, options = {}) {
 
   if (READ_PATHS[name] !== undefined) {
     path = READ_PATHS[name];
-    query = cleanQuery(input);
+    query =
+      name === 'counterparty_balance' ? cleanReportQuery(input) : cleanQuery(input);
   } else if (GET_PATHS[name] !== undefined) {
     path = `${GET_PATHS[name]}/${encodeURIComponent(safeEntityId(input.id))}`;
-  } else if (name === 'customer_order_create') {
+  } else if (name === 'bundle_get') {
+    if (input.id !== undefined) {
+      path = `/entity/bundle/${encodeURIComponent(safeEntityId(input.id))}`;
+    } else if (
+      typeof input.article === 'string' &&
+      input.article.trim() !== ''
+    ) {
+      path = '/entity/bundle';
+      query = {
+        filter: `article=${input.article.trim()}`,
+        limit: '1',
+      };
+    } else {
+      throw new Error('bundle_get: нужен id или article');
+    }
+  } else if (CREATE_PATHS[name] !== undefined) {
     if (
       typeof input.payload !== 'object' ||
       input.payload === null ||
@@ -255,7 +385,7 @@ export async function callMoySkladTool(name, args, options = {}) {
     ) {
       throw new Error('payload должен быть объектом');
     }
-    path = '/entity/customerorder';
+    path = CREATE_PATHS[name];
     method = 'POST';
     body = JSON.stringify(input.payload);
   } else {
@@ -268,18 +398,21 @@ export async function callMoySkladTool(name, args, options = {}) {
     url.searchParams.set(key, value);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${tokenValue}`,
-      Accept: 'application/json;charset=utf-8',
-      'Content-Type': 'application/json',
-      'User-Agent': 'SkillWharf-MCP/0.1.0',
+  const response = await fetchWithRetry(
+    url,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${tokenValue}`,
+        Accept: 'application/json;charset=utf-8',
+        'Content-Type': 'application/json',
+        'User-Agent': 'SkillWharf-MCP/0.1.0',
+      },
+      ...(body === undefined ? {} : { body }),
+      redirect: 'error',
     },
-    ...(body === undefined ? {} : { body }),
-    redirect: 'error',
-    signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
-  });
+    options.timeoutMs ?? REQUEST_TIMEOUT_MS,
+  );
   const text = await response.text();
   let data = null;
 
@@ -359,7 +492,7 @@ function sseWrite(response, data) {
   response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function handleRpc(message) {
+async function handleRpc(message, credentials = {}) {
   const method = message.method;
 
   if (method === 'initialize') {
@@ -387,7 +520,9 @@ async function handleRpc(message) {
     }
 
     try {
-      const result = await callMoySkladTool(name, params.arguments ?? {});
+      const result = await callMoySkladTool(name, params.arguments ?? {}, {
+        token: credentials.token,
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
         isError: false,
@@ -445,6 +580,9 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/sse') {
+    // Токен приходит заголовком на SSE-запрос; он же обслуживает последующие
+    // tools/call в этой сессии (`MCP-24.1`).
+    const sessionToken = resolveMoyskladTokenFromHeaders(request.headers);
     const sessionId = randomUUID();
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -461,7 +599,7 @@ const server = createServer(async (request, response) => {
     }, 15_000);
     heartbeat.unref();
 
-    sessions.set(sessionId, { response, heartbeat });
+    sessions.set(sessionId, { response, heartbeat, token: sessionToken });
 
     const cleanup = () => {
       clearInterval(heartbeat);
@@ -497,8 +635,14 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    // Заголовок на POST переопределяет токен, сохранённый в SSE-сессии.
+    const requestToken = resolveMoyskladTokenFromHeaders(
+      request.headers,
+      session.token,
+    );
+
     try {
-      const result = await handleRpc(message);
+      const result = await handleRpc(message, { token: requestToken });
       sseWrite(session.response, {
         jsonrpc: '2.0',
         id: message.id,
