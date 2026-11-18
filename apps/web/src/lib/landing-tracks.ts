@@ -5,19 +5,29 @@
  * тарифы) читают один и тот же список, поэтому он вынесен из страницы.
  * Тексты живут в локалях: `landing.tracks.items.<id>.*`.
  */
-export type TrackId =
-  | 'pvz'
-  | 'dev'
-  | 'ecommerce'
-  | 'marketing'
-  | 'education'
-  | 'content'
-  | 'hr'
-  | 'documents'
-  | 'ocr'
-  | 'finance'
-  | 'wholesale'
-  | 'production';
+/**
+ * Идентификаторы треков в порядке лендинга (A–L).
+ *
+ * Порядок задаёт переключатель превью-симулятора и совпадает с карточками,
+ * поэтому список вынесен в отдельный кортеж: `z.enum` и тесты проверяют
+ * полноту 12 треков по нему.
+ */
+export const LANDING_TRACK_IDS = [
+  'pvz',
+  'dev',
+  'ecommerce',
+  'marketing',
+  'education',
+  'content',
+  'hr',
+  'documents',
+  'ocr',
+  'finance',
+  'wholesale',
+  'production',
+] as const;
+
+export type TrackId = (typeof LANDING_TRACK_IDS)[number];
 
 export type TrackPricingKey =
   'free' | 'pro' | 'team' | 'enterprise' | 'payPerCall' | 'payPerOutcome';

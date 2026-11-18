@@ -11,6 +11,12 @@ interface ImportMetaEnv {
   /** Адрес для формы «Связаться с нами». По умолчанию `skillwharf@iiruchating.ru`. */
   readonly VITE_CONTACT_EMAIL?: string;
   /**
+   * Вебхук заявок Design Partner с лендинга: `POST` JSON
+   * `{ name, contact, track, comment?, source, language, submittedAt }`.
+   * Пустое значение — форма собирает `mailto:` и текст для Telegram.
+   */
+  readonly VITE_LEAD_WEBHOOK_URL?: string;
+  /**
    * Страница CloudTips для секции «Поддержка». Пустое значение скрывает
    * секцию целиком — так лендинг не показывает нерабочую кнопку.
    */

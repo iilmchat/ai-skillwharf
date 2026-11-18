@@ -7,11 +7,13 @@ import {
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brand } from '../components/Brand';
+import { DesignPartnerSection } from '../components/DesignPartnerSection';
 import {
   IntegrationIcon,
   type IntegrationLogoProvider,
 } from '../components/IntegrationIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { OfficeSimulator } from '../components/OfficeSimulator';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TrackDetailsModal } from '../components/TrackDetailsModal';
 import { LANDING_TRACKS, type TrackId } from '../lib/landing-tracks';
@@ -59,6 +61,12 @@ const USE_CASES_GUIDE_URL = `${DOCS_URL}/ecosystem/USE-CASES-GUIDE.md`;
  */
 const CONTACT_EMAIL =
   import.meta.env.VITE_CONTACT_EMAIL ?? 'skillwharf@iiruchating.ru';
+/**
+ * Вебхук заявок Design Partner. Пустая строка (по умолчанию) — статический
+ * лендинг формирует `mailto:` и текст для Telegram, чтобы форма работала
+ * без бэкенда.
+ */
+const LEAD_WEBHOOK_URL = (import.meta.env.VITE_LEAD_WEBHOOK_URL ?? '').trim();
 const CLOUDTIPS_URL = import.meta.env.VITE_CLOUDTIPS_URL ?? '';
 const CLOUDTIPS_QR = import.meta.env.VITE_CLOUDTIPS_QR ?? '';
 const SITE_URL = 'https://skillwharf.ru';
@@ -296,6 +304,12 @@ export function LandingPage() {
                   {t('landing.nav.tracks')}
                 </a>
                 <a
+                  href="#simulator"
+                  className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {t('landing.nav.demo')}
+                </a>
+                <a
                   href="#ecosystem"
                   className="rounded-md px-1 py-1 transition hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
@@ -402,7 +416,7 @@ export function LandingPage() {
                   className="mt-9 flex flex-col gap-3 sm:flex-row"
                 >
                   <a
-                    href="#contact"
+                    href="#design-partner"
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-on-primary shadow-xl shadow-primary/25 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:brightness-95"
                   >
                     {t('landing.primaryCta')}
@@ -420,7 +434,7 @@ export function LandingPage() {
                     </svg>
                   </a>
                   <a
-                    href={appHref('/app/office')}
+                    href="#simulator"
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline bg-surface-container px-6 py-3.5 text-sm font-semibold text-on-surface transition hover:border-primary/40 hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <span
@@ -757,6 +771,8 @@ export function LandingPage() {
             </div>
           </section>
 
+          <OfficeSimulator officeHref={appHref('/app/office')} />
+
           <section
             id="ecosystem"
             aria-labelledby="landing-ecosystem-title"
@@ -884,6 +900,11 @@ export function LandingPage() {
               </div>
             </div>
           </section>
+
+          <DesignPartnerSection
+            email={CONTACT_EMAIL}
+            webhookUrl={LEAD_WEBHOOK_URL}
+          />
 
           <LandingContact
             email={CONTACT_EMAIL}
