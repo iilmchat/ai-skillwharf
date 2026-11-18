@@ -91,8 +91,9 @@ backup_s3_configure_rclone() {
   fi
 }
 
-# Удаляет только ${POSTGRES_DB}-*.dump старше keep_days. Свежий дамп,
-# загруженный только что, не попадает под условие.
+# Удаляет только ${POSTGRES_DB}-*.dump* старше keep_days: сам дамп, его
+# зашифрованную копию .enc и .sha256-сайдкар. Свежий дамп, загруженный только
+# что, не попадает под условие.
 backup_s3_prune() {
   local keep_days="${1:-${BACKUP_S3_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-14}}}"
   local remote
@@ -110,9 +111,9 @@ backup_s3_prune() {
 
   remote="$(backup_s3_remote)"
 
-  echo "Ротация offsite: удаляю ${POSTGRES_DB}-*.dump старше ${keep_days} дн."
+  echo "Ротация offsite: удаляю ${POSTGRES_DB}-*.dump* старше ${keep_days} дн."
   if ! output="$(rclone delete "$remote" \
-    --include "${POSTGRES_DB}-*.dump" \
+    --include "${POSTGRES_DB}-*.dump*" \
     --min-age "${keep_days}d" \
     --stats-one-line 2>&1)"; then
     echo "ОШИБКА: не удалось применить retention в ${BACKUP_S3_BUCKET}." >&2
