@@ -38,7 +38,7 @@
 * [x] **[MCP-24.1]** Проброс per-user/per-tenant кредов из `ProviderCredential` в заголовки запросов к `ozon-mcp`, `wb-mcp`, `bitrix24-mcp`, `moysklad-mcp` (закрытие **KI-064**, **KI-077**).
 * [x] **[MCP-24.2]** Расширение методов `moysklad-mcp` для треков K/L: создание отгрузки (`demand`), заказа поставщику (`purchaseorder`), проверка долга контрагента (`counterparty` balance) и техкарты/комплекты (`bundle`) (закрытие **KI-078**).
 * [x] **[API-24.3]** Автоматический маппинг компании из сделки Битрикс24 в контрагента МойСклад при создании заказа (развитие **KI-080**).
-* [ ] **[QA-24.4]** Контрактные E2E-тесты с mock/sandbox LLM для полного цикла `tool_calls -> HITL approve -> Ledger capture` (закрытие **KI-049**).
+* [x] **[QA-24.4]** Контрактные E2E-тесты с mock/sandbox LLM для полного цикла `tool_calls -> HITL approve -> Ledger capture` (закрытие **KI-049**).
 * [x] **[BILLING-24.5]** Перевод Pay-per-Call на двухфазную блокировку Hold -> Capture (по спецификации Billing-Flows.md) для защиты от параллельного перерасхода баланса.
 * [x] **[WEB-24.6]** Интерактивный превью-симулятор 12 треков (A–L) без регистрации и форма заявки Design Partner (с уведомлением в Telegram) на лендинге skillwharf.ru.
 
@@ -50,9 +50,9 @@
 
 ### Sprint 25: Hardware Sandbox (Firecracker / gVisor)
 
-* [ ] **[INFRA-25.1]** Драйвер `FirecrackerSandboxProvider` в `apps/sandbox-worker` для bare-metal/KVM-узлов (ADR 0002).
-* [ ] **[INFRA-25.2]** Fallback-профиль `gVisor` (`runsc`) для облачных Kubernetes-кластеров без `/dev/kvm` + Helm/K8s манифесты (включая K8s Job для `db-migrate`, закрытие **KI-037**).
-* [ ] **[SEC-25.3]** TLS egress-прокси с фильтрацией по SNI/Host и защитой от DNS rebinding (закрытие **KI-028**, **KI-042**).
+* [x] **[INFRA-25.1]** Интерфейс `ISandboxRuntimeProvider` и драйвер `FirecrackerSandboxProvider` в `apps/sandbox-worker` для bare-metal/KVM-узлов (ADR 0002); Docker остаётся дефолтом (commit: см. журнал ниже).
+* [x] **[INFRA-25.2]** Fallback-профиль `gVisor` (`runsc`) для облачных Kubernetes-кластеров без `/dev/kvm` + Helm/K8s манифесты (включая K8s Job для `db-migrate`, закрытие **KI-037**).
+* [x] **[SEC-25.3]** SNI/Host egress-прокси с фильтрацией по точному FQDN и защитой от DNS rebinding/SSRF в `sandbox-worker` (закрытие **KI-028**, **KI-042**; commit: см. журнал ниже).
 
 ### Sprint 26: Enterprise Auth, KMS & Observability Hardening
 
@@ -87,4 +87,5 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-18 | Sprint 22 (22.1–22.3) | Infra / OpenCode / UI | Выполнено | Добавлены MCP-серверы Битрикс24/МойСклад, инструменты CRM/ERP и UI карточки | KI-075..KI-081 |
 | 2026-11-18 | Sprint 23 (23.1–23.3) | Infra / OpenCode / UI | В работе | Промпты отправлены: инвайты, live-проверки ERP, KI-076/079/081 | — |
-| 2026-11-18 | Sprint 24 (24.1–24.2) | Infra | Выполнено | Per-request креды в `bitrix24-mcp`/`moysklad-mcp`, новые методы K/L в `moysklad-mcp`, `MCP_ALLOW_MISSING_KEYS=1`; тесты MCP-серверов | KI-084 (Ozon/WB), KI-085 (OAuth/аудит) |
+| 2026-11-18 | Sprint 24 (24.1–24.6) | Infra / OpenCode / UI | Выполнено | MCP per-request креды, новые методы K/L, маппинг контрагента, Pay-per-Call Hold→Capture, лендинг-симулятор и E2E `Chat → tool_calls → HITL → Ledger` (QA-24.4) | KI-049 закрыт; KI-084/KI-085 — остаточные |
+| 2026-11-18 | Sprint 25 (25.1–25.3) | Infra / OpenCode | Выполнено | `ISandboxRuntimeProvider` + `FirecrackerSandboxProvider` (fail closed без KVM), SNI/Host egress-прокси с DNS-rebinding guard, K8s-манифесты `deploy/k8s/` (gVisor RuntimeClass, Job миграций, Deployment, NetworkPolicy) и гайд `KUBERNETES-DEPLOY.md` | KI-028, KI-037, KI-042 закрыты |

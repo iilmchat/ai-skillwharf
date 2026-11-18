@@ -35,6 +35,7 @@
 ## 🚀 Эксплуатация (`operations/`)
 
 - [Runbook развертывания](operations/Deployment-Runbook.md)
+- [Kubernetes: gVisor и Job миграций](operations/KUBERNETES-DEPLOY.md)
 
 ## 💻 Разработка (`development/`)
 

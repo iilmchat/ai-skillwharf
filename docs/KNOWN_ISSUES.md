@@ -31,7 +31,7 @@
 | KI-025 | Frontend/Backend | Низкая | Исправлено | Все коды ошибок API (`invalid_request`, `policy_blocked`, MCP, лимиты) маппятся в UI по `code` с i18n RU/EN; текстовый fallback сохранён |
 | KI-026 | Sandbox | Низкая | Открыто | Seccomp-профиль рассчитан на linux/amd64 и проверяется smoke-тестом вне worker; смена профиля требует перезапуска worker |
 | KI-027 | Security | Средняя | Исправлено | MCP Gateway использует `tools/list` для dynamic discovery и отклоняет неизвестные actions до вызова; при недоступности — structural-only с логом |
-| KI-028 | Sandbox | Средняя | Исправлено | Egress: DNS только для root-entrypoint, strict ip6tables, ExtraHosts для read-only rootfs; остаточные SNI/SSRF — KI-042 |
+| KI-028 | Sandbox | Средняя | Исправлено | Egress: DNS только для root-entrypoint, strict ip6tables, ExtraHosts для read-only rootfs; SNI/Host-фильтрация и защита от DNS rebinding закрыты в Sprint 25 (SEC-25.3) |
 | KI-029 | Security | Средняя | Открыто | Структурный анализатор shell — эвристика, а не полный POSIX-парсер; интерпретаторы (`python3`, `node`) могут строить команды/сеть внутри процесса, allowlist команд — defense-in-depth |
 | KI-030 | Frontend/Build | Низкая | Исправлено | `VITE_RAG_MEMORY_ENABLED` проброшен в build-args `docker-compose.yml` и `docker-compose.staging.yml`; `.env.example` документирует переменную |
 | KI-031 | LLM | Низкая | Открыто | Ранний abort клиентского стрима (или падение native-стрима без usage) оставляет резерв токенов не сверенным: счётчик завышен до суточного сброса, жёсткий лимит не превышается |
@@ -40,19 +40,19 @@
 | KI-034 | Persistence | Низкая | Исправлено | Retention-job удаляет checkpoint'ы завершённых/осиротевших тредов (после `CHECKPOINT_RETENTION_DAYS`), не трогая активные и ожидающие |
 | KI-035 | Инфраструктура | Низкая | Открыто | Offsite-бэкапы зависят от rclone на хосте; нет object-lock/versioning, KMS-шифрования и проверки checksum на уровне скрипта |
 | KI-036 | Инфраструктура | Низкая | Открыто | Restore-drill выполняется на том же PostgreSQL и проверяет только наличие таблиц; алерты ограничены кодом возврата и логами cron |
-| KI-037 | Инфраструктура | Низкая | Открыто | `db-migrate` — Compose one-shot; в Kubernetes нужен Job, а при одновременном запуске нескольких `compose up` защита опирается на advisory locks Prisma |
+| KI-037 | Инфраструктура | Низкая | Исправлено | Для Kubernetes добавлен Job `prisma migrate deploy` (`backoffLimit: 3`, без параллельных реплик); Compose one-shot остаётся для локального пилота |
 | KI-038 | Observability | Низкая | Открыто | OTel Collector хранит трейсы только в stdout (debug), без durable backend, sampling, retention, auth/TLS; спаны usage фиксируют итог вызова, а не полную latency |
 | KI-039 | Observability | Низкая | Открыто | Sentry включён только для backend-ошибок и только при DSN; PII-фильтр — эвристика по regex, frontend Sentry и алертинг не подключены |
 | KI-040 | Observability | Низкая | Открыто | `llm_cost_total` считает стоимость по единому `LLM_COST_PER_1K_TOKENS`, без per-model тарифов/скидок; `tenant_id` — unbounded user id, возможна кардинальность Prometheus |
 | KI-041 | LLM Router | Низкая | Исправлено | Control Plane UI не показывал и не редактировал `taskType`/`dailyCostLimit`; поля добавлены в форму создания и редактирования, лимит выведен в таблице, ответ API валидируется Zod |
-| KI-042 | Sandbox | Средняя | Открыто | Egress: нет SNI/Host-фильтрации (allowlist — IP:port, разрешённый IP можно использовать с любым Host), DNS rebinding/SSRF через разрешённый FQDN, ротация IP/CDN и рассинхрон worker/entrypoint, ExtraHosts только IPv4 |
+| KI-042 | Sandbox | Средняя | Исправлено | Egress: SNI/Host-фильтрация по точному FQDN, DNS-pinning с denylist приватных/metadata IP, forward-прокси в `sandbox-worker`; остаточные ротация CDN и IPv4-only ExtraHosts — ниже |
 | KI-043 | Persistence/MCP | Низкая | Открыто | Resolved-записи `PendingApproval` не чистятся retention-job; MCP `tools/list` кешируется на время SSE-сессии, изменения набора действий подхватываются после переподключения |
 | KI-044 | LLM Router | Низкая | Исправлено | 502 `errors.llm_unavailable` отдаётся и для одиночного маршрута/env-fallback: retriable-ошибка провайдера больше не утекает сырым текстом |
 | KI-045 | Security | Средняя | Открыто | Внутренние эндпоинты API и llm-worker защищены общим `INTERNAL_API_TOKEN`; при пустом значении доступ открыт (dev), нет mTLS/подписей и network policy |
 | KI-046 | LLM Worker | Низкая | Открыто | JSON Schema инструментов конвертируется в Zod подмножеством; незнакомые конструкции (сложные union, `$ref`) становятся `z.unknown()` |
 | KI-047 | Notifications | Низкая | Открыто | BullMQ-уведомление об ожидающем подтверждении только пишется структурным логом: нет email/push/webhook и подтверждения доставки |
 | KI-048 | LLM Worker | Средняя | Открыто | Worker синхронно ходит в API на каждый LLM-вызов (бюджет), tool-call, HITL и checkpoint; нет circuit breaker/retry и деградации при недоступности API |
-| KI-049 | E2E | Низкая | Открыто | E2E проверяет чат в echo-режиме (без LLM и tool-calls); путь worker → API tools/approvals/HITL покрыт только unit-тестами |
+| KI-049 | E2E | Низкая | Исправлено | Сквозной контрактный E2E `apps/api/test/agent-hitl-billing.e2e-spec.ts` покрывает Chat → tool_calls → HITL → approve/reject → Ledger в общем `pnpm test` (in-memory Prisma + mock LLM-worker) |
 | KI-050 | Integrations | Низкая | Исправлено | Контракт UI реализован бэкендом (`GET /integrations`, `POST/DELETE /integrations/telegram`, `authorization-url`, `DELETE /integrations/google`); OAuth-callback умеет redirect (`GOOGLE_OAUTH_SUCCESS_REDIRECT`), иначе JSON; реальные ключи проверяются в staging |
 | KI-051 | Security | Средняя | Открыто | Telegram webhook защищён только секретом и rate limit на IP: нет allowlist сетей Telegram, проверки `update_id` на replay/idempotency и очереди дедупликации |
 | KI-052 | Security | Средняя | Открыто | Egress api/worker — прикладной allowlist (`provider-http`, LLM-маршруты), а не NetworkPolicy/iptables; embeddings, MCP и YooKassa API не все проходят через единый guard |
@@ -729,9 +729,17 @@ MCP-сервера и возвращалась его ошибкой (502), а �
 - Разрешённые домены резолвятся без DNS для кода; неразрешённые не
   резолвятся вовсе.
 
-**Остаточные риски (KI-042):** SNI/Host-фильтрации нет (allowlist — IP:port),
-DNS rebinding/SSRF через разрешённый FQDN, ротация IP/CDN и двойной резолв
-worker/entrypoint, ExtraHosts только IPv4.
+**Исправлено (Sprint 25, SEC-25.3):** добавлен SNI/Host-барьер: `egress-proxy.ts`
+разбирает TLS ClientHello (extension `server_name`) и HTTP `Host`, требует
+точного совпадения с `egressAllowlist`, резолвит FQDN и блокирует
+приватные/loopback/link-local/metadata диапазоны. Проверка выполняется в
+`DockerSandboxProvider` до создания контейнера (fail closed), поэтому
+разрешённый домен, резолвящийся в `169.254.169.254`/`127.0.0.1`, не получит
+egress. Подробности — KI-042.
+
+**Остаточные риски:** ротация IP/CDN и двойной резолв worker/entrypoint,
+ExtraHosts только IPv4 (IPv6-записи пропускаются с логом). Сетевой трафик
+через интерпретаторы по-прежнему описывается KI-029.
 
 ### KI-029 — Структурный анализатор shell не заменяет песочницу
 
@@ -911,6 +919,13 @@ compose-файл этого не создаёт. При одновременно
 **План:** Добавить Kubernetes Job/Helm-хук, распределённую блокировку
 миграций и метрику `db_migrate_duration_seconds`/алерт на неуспешный запуск.
 
+**Исправлено (Sprint 25, INFRA-25.2):** добавлен
+`deploy/k8s/job-db-migrate.yaml` — `batch/v1 Job` с `backoffLimit: 3`,
+`completions: 1`, `parallelism: 1`, `ttlSecondsAfterFinished: 600` и тем же
+образом `ai-skillwharf-db-migrate:latest`, что и в Compose. Job запускается до
+раскатки приложений (`kubectl wait --for=condition=complete`). Compose-сервис
+остался для локального пилота; Helm-хук/метрика duration — отдельный шаг.
+
 ### KI-038 — OTel Collector без durable backend
 
 **Влияние:** Коллектор принимает OTLP и выводит спаны через `debug` exporter
@@ -1002,13 +1017,31 @@ worker и entrypoint резолвят независимо (при ротаци�
 `ExtraHosts` и iptables-ACCEPT), ExtraHosts поддерживает только IPv4
 (AAAA-only домены пропускаются с логом).
 
-**Обход:** Объявлять в `egress_allowlist` только собственные API-домены без
-публичных CDN; держать bridge-сеть без доступа к внутренним сервисам;
-проверять логи worker (`unresolved`/`ipv6Only`) при проблемах с доменом.
+**Исправлено (Sprint 25, SEC-25.3):**
 
-**План:** TLS egress-прокси с allowlist по SNI/Host (и DNS-pinning с
-range-денлистом), единый резолв IP для hosts и iptables, поддержка IPv6 в
-ExtraHosts при появлении в Docker.
+- `apps/sandbox-worker/src/egress-proxy.ts` извлекает SNI из TLS ClientHello
+  (extension `server_name`) и `Host` из HTTP-запроса, нормализует имя и
+  требует **точного** совпадения с `egressAllowlist` (поддомен, суффикс и
+  wildcard не проходят). IP-литерал в SNI/Host тоже не проходит.
+- Перед подключением FQDN резолвится (A/AAAA); адреса из
+  `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `169.254.0.0/16`, loopback/link-local IPv6 и IPv4-mapped-адреса
+  отклоняются. Подключение идёт к проверенному IP (pinning), а не к имени —
+  это закрывает окно DNS rebinding между проверкой и соединением.
+- `EgressForwardProxy` реализует хендлеры CONNECT (TLS) и обычный HTTP;
+  `DockerSandboxProvider` вызывает `validateEgressAllowlist` при наличии
+  `egressAllowlist` **до** `createContainer`. Без allowlist сеть остаётся
+  `none`, конфиг контейнера не меняется. При заданном
+  `SANDBOX_EGRESS_PROXY_URL` в контейнер инжектируются proxy-env.
+- Тесты: парсер ClientHello (включая битые/неполные записи), блокировка
+  чужого SNI/Host, `169.254.169.254`, `127.0.0.1`, `::1`, DNS-rebinding в
+  Docker-провайдере, дефолтный выбор Docker и fail-closed Firecracker без KVM.
+
+**Остатки:** ротация IP/CDN требует повторного резолва (ExtraHosts и
+iptables-ACCEPT строятся на старте контейнера); IPv6 в ExtraHosts не
+поддерживается Docker. Полный transparent-MITM-режим прокси требует
+проброса порта прокси через entrypoint-iptables — включается явно через
+`SANDBOX_EGRESS_PROXY_URL`, по умолчанию не меняет сеть песочницы.
 
 ### KI-043 — Rows PendingApproval и кеш tools/list
 
@@ -1116,18 +1149,46 @@ checkpoint.
 
 ### KI-049 — E2E не покрывает tool-calls и HITL через worker
 
-**Влияние:** Playwright E2E поднимает стек с пустыми `LLM_BASE_URL`/
-`LLM_MODEL`, поэтому worker отвечает эхо-заглушкой и не вызывает инструменты,
-не создаёт HITL-ожидания и не проходит ветку `approvals`. Контракт
-worker → API (`tools/execute`, `approvals/prepare|resolve`, budget,
-checkpoints) проверяется unit-тестами и ручным stub-сервером, но не в CI.
+**Статус:** исправлено (Sprint 24).
 
-**Обход:** При изменении контрактов запускать unit-тесты
+**Влияние (было):** Playwright E2E поднимал стек с пустыми
+`LLM_BASE_URL`/`LLM_MODEL`, поэтому worker отвечал эхо-заглушкой и не вызывал
+инструменты, не создавал HITL-ожидания и не проходил ветку `approvals`.
+Контракт worker → API (`tools/execute`, `approvals/prepare|resolve`, budget,
+checkpoints) проверялся unit-тестами и ручным stub-сервером, но не в CI.
+
+**Обход (был):** при изменении контрактов запускать unit-тесты
 `apps/llm-worker/src/**` и `apps/api/src/agent/**`; ручная проверка —
 `docker compose up` с реальным LLM и навыком, требующим подтверждения.
 
-**План:** Добавить контрактный тест с mock LLM, возвращающим `tool_calls`, и
-E2E-сценарий approve/reject с проверкой Ledger и `PendingApproval`.
+**Решено:** добавлен сквозной контрактный E2E
+`apps/api/test/agent-hitl-billing.e2e-spec.ts`. В нём работают настоящие
+`ChatController`, `ChatService`, `AgentRuntimeService`,
+`PendingApprovalService` и `BillingService`; Prisma заменён in-memory
+double'ом (`apps/api/test/support/fake-agent-prisma.ts`) с escrow-операциями,
+`Decimal` и rollback `$transaction`, а mock LLM-worker повторяет контракт
+`apps/llm-worker/src/agent/graph.ts` (`prepareApproval` → interrupt,
+`resolveApproval` → `executeTools`).
+
+Сценарии:
+
+- **approve:** баланс `500.00 ₽` → `authorizeHold` 100 ₽ (Ledger `PENDING`,
+  `heldBalance=100`), `GET /api/v1/chat/pending` отдаёт ожидание с
+  `expiresAt` (ответ валидируется Zod-схемой), после `approve` Ledger
+  переходит в `debit`, `heldBalance=0`, баланс `400.00 ₽`, финальный ответ
+  агента сохраняется в истории;
+- **reject:** `cancelHold`, Ledger `credit`, баланс снова `500.00 ₽`,
+  `PendingApproval.status='rejected'`;
+- **ошибка инструмента после approve:** hold отменяется, деньги
+  возвращаются (`credit`, `500.00 ₽`), ошибка пробрасывается;
+- **повторный approve** не создаёт второе списание (append-only Ledger).
+
+Тест входит в общий прогон `pnpm test` (явно добавлен в корневой
+`vitest.config.ts`) и не требует внешних LLM/MCP/Sandbox.
+
+**Осталось:** реальный LLM и внешние MCP-серверы по-прежнему проверяются
+только в staging/ручном E2E; in-memory double намеренно не воспроизводит
+SQL-ограничения PostgreSQL и гонки нескольких реплик.
 
 ### KI-050 — Возврат из Google OAuth и реальные проверки интеграций
 

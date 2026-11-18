@@ -4,6 +4,56 @@
 
 ## [Unreleased]
 
+### Sprint 25: Hardware Sandbox, egress proxy, Kubernetes и E2E HITL/Ledger
+
+**INFRA-25.1 / SEC-25.3 (sandbox-worker).**
+
+- `INFRA-25.1`: в `apps/sandbox-worker` выделен интерфейс
+  `ISandboxRuntimeProvider` (`execute`/`healthCheck`). Логика запуска
+  контейнеров перенесена в `DockerSandboxProvider` без изменения поведения:
+  при отсутствии `SANDBOX_RUNTIME` или `SANDBOX_RUNTIME=docker` сеть без
+  allowlist остаётся `none`, UID 65534, те же seccomp/лимиты/таймаут.
+  `FirecrackerSandboxProvider` создаётся только при явном
+  `SANDBOX_RUNTIME=firecracker`: конфигурация (KVM + `FIRECRACKER_BIN`,
+  kernel/rootfs, vCPU/MiB) валидируется Zod, отсутствие `/dev/kvm` или
+  бинарника завершает старт воркера (fail closed, без фолбэка на Docker).
+  MicroVM настраивается через API socket: `boot-source`, read-only `drives`
+  (rootfs + код), `machine-config`, `actions/InstanceStart`, с таймаутом.
+- `SEC-25.3` (KI-028, KI-042): новый модуль `egress-proxy.ts` извлекает SNI из
+  TLS ClientHello и `Host` из HTTP, требует точного совпадения с
+  `egressAllowlist`, резолвит FQDN и блокирует приватные/loopback/link-local/
+  metadata диапазоны (включая `169.254.169.254`, `127.0.0.1`, `::1`), а также
+  IPv4-mapped адреса. `EgressForwardProxy` содержит CONNECT/HTTP-хендлеры с
+  подключением к проверенному IP. `DockerSandboxProvider` вызывает guard при
+  наличии allowlist до создания контейнера (без allowlist сеть по-прежнему
+  `none`); при явно заданном `SANDBOX_EGRESS_PROXY_URL` инжектируются proxy-env.
+  В `.env.example` добавлены закомментированные переменные рантайма и прокси.
+- Тесты: 110 unit-тестов `sandbox-worker` (дефолтный выбор провайдера,
+  активация Firecracker и fail-closed без KVM, парсер ClientHello, чужой
+  SNI/Host в CONNECT и в авторизации, DNS rebinding в провайдере). Полный
+  прогон `pnpm test` — 1366 тестов.
+
+**QA-24.4 (сквозной E2E Chat → HITL → Ledger, KI-049).**
+
+- Добавлен контрактный E2E `apps/api/test/agent-hitl-billing.e2e-spec.ts`:
+  настоящие `ChatController`/`ChatService`, `AgentRuntimeService`,
+  `PendingApprovalService` и `BillingService`, in-memory Prisma
+  (`apps/api/test/support/fake-agent-prisma.ts`) с escrow-операциями,
+  `Decimal` и rollback `$transaction`, а также mock LLM-worker, повторяющий
+  контракт `apps/llm-worker/src/agent/graph.ts` (`prepareApproval` →
+  interrupt, `resolveApproval` → `executeTools`).
+- Покрыты approve (hold `PENDING` 100 ₽ → `debit`, `GET /api/v1/chat/pending`
+  с `expiresAt`, финальный ответ и история), reject (`cancelHold`, `credit`,
+  баланс `500.00 ₽`), ошибка инструмента после approve (возврат средств) и
+  повторный approve без второго списания.
+- Тест включён в общий прогон `pnpm test` (корневой `vitest.config.ts`);
+  внешние LLM/MCP/Sandbox не требуются. KI-049 переведён в «Исправлено».
+
+**INFRA-25.2 (Kubernetes gVisor и Job миграций).**
+
+- `INFRA-25.2`: добавлены базовые production-манифесты в `deploy/k8s/`: `RuntimeClass gvisor` (`handler: runsc`), `Job db-migrate` (`prisma migrate deploy`, `backoffLimit: 3`, без параллельных реплик), `Deployment sandbox-worker` (`runtimeClassName: gvisor`, read-only rootfs, `capabilities.drop: ALL`) и `NetworkPolicy` с запретом прямого egress для `api`, `llm-worker`, `sandbox-worker` (разрешены DNS и `egress-proxy`).
+- Добавлен гайд `docs/operations/KUBERNETES-DEPLOY.md` с порядком применения манифестов, проверкой gVisor и описанием egress-прокси; ссылка добавлена в `docs/README.md`. KI-037 переведён в «Исправлено».
+
 ### Sprint 24: per-user MCP, маппинг контрагента и Pay-per-Call Hold → Capture
 
 - `MCP-24.1`: `MarketplaceMcpService` читает ключи пользователя из
