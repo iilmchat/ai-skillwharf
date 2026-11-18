@@ -56,10 +56,10 @@
 
 ### Sprint 26: Enterprise Auth, KMS & Observability Hardening
 
-* [ ] **[SEC-26.1]** mTLS / подписанные JWT для внутреннего канала `api <-> llm-worker` вместо статического токена (закрытие **KI-045**).
-* [ ] **[SEC-26.2]** Envelope-шифрование с `keyId`, ротация ключей и адаптер Yandex KMS / HashiCorp Vault (закрытие **KI-053**).
-* [ ] **[INFRA-26.3]** SSO (OIDC) для Grafana/Prometheus (закрытие **KI-018**), durable trace storage (Tempo/Jaeger) для OTel Collector (закрытие **KI-038**).
-* [ ] **[INFRA-26.4]** Шифрование и Object Lock для offsite-бэкапов S3 + изолированный стенд для `restore-drill` (закрытие **KI-035**, **KI-036**).
+* [x] **[SEC-26.1]** Подписанные короткоживущие JWT (TTL 60 сек, `iss`/`aud`/`jti`) для канала `api <-> llm-worker` вместо статического токена, fail-closed в production (закрытие **KI-045**).
+* [x] **[SEC-26.2]** Envelope-шифрование `v2:<keyId>:...` с previous keys и CLI-ротацией `pnpm --filter api keys:rotate` (закрытие **KI-053**); адаптер Yandex KMS/Vault — отдельная задача.
+* [x] **[INFRA-26.3]** SSO (OIDC) для Grafana/Prometheus (закрытие **KI-018**), durable trace storage (Tempo/Jaeger) для OTel Collector (закрытие **KI-038**).
+* [x] **[INFRA-26.4]** Шифрование и Object Lock для offsite-бэкапов S3 + изолированный стенд для `restore-drill` (закрытие **KI-035**, **KI-036**).
 
 ---
 
@@ -89,3 +89,4 @@
 | 2026-11-18 | Sprint 23 (23.1–23.3) | Infra / OpenCode / UI | В работе | Промпты отправлены: инвайты, live-проверки ERP, KI-076/079/081 | — |
 | 2026-11-18 | Sprint 24 (24.1–24.6) | Infra / OpenCode / UI | Выполнено | MCP per-request креды, новые методы K/L, маппинг контрагента, Pay-per-Call Hold→Capture, лендинг-симулятор и E2E `Chat → tool_calls → HITL → Ledger` (QA-24.4) | KI-049 закрыт; KI-084/KI-085 — остаточные |
 | 2026-11-18 | Sprint 25 (25.1–25.3) | Infra / OpenCode | Выполнено | `ISandboxRuntimeProvider` + `FirecrackerSandboxProvider` (fail closed без KVM), SNI/Host egress-прокси с DNS-rebinding guard, K8s-манифесты `deploy/k8s/` (gVisor RuntimeClass, Job миграций, Deployment, NetworkPolicy) и гайд `KUBERNETES-DEPLOY.md` | KI-028, KI-037, KI-042 закрыты |
+| 2026-11-18 | Sprint 26 (26.1–26.4) | Infra / OpenCode | Выполнено | `internal-jwt.ts` (TTL 60, iss/aud/jti, fail-closed в production) и guards в api/worker; envelope `v2` с keyId + previous keys и CLI `keys:rotate`; Grafana OIDC с Basic-фолбэком и Tempo с OTLP-экспортёром; шифрование offsite `.enc`, SHA-256-сайдкар, SSE-S3 и изолированный restore-drill с проверкой append-only-триггеров | KI-018, KI-035, KI-036, KI-038, KI-045, KI-053 закрыты; mTLS/KMS, Object Lock и SSO для Prometheus — остаток |

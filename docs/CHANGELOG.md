@@ -4,6 +4,64 @@
 
 ## [Unreleased]
 
+### Sprint 26: Internal JWT, keyId rotation, OIDC, Tempo и защита бэкапов
+
+**SEC-26.1 / SEC-26.2 (internal JWT и ротация ключей).**
+
+- `SEC-26.1` (KI-045): общий модуль `packages/shared/src/internal-jwt.ts`
+  выпускает и проверяет HMAC-SHA256 JWT на 60 секунд с `iss`
+  (`skillwharf-api`/`skillwharf-worker`), `aud` (`internal-worker`/
+  `internal-api`), `jti` (UUID), `iat`/`exp`. `LlmWorkerClient` и
+  `InternalApiClient` передают JWT в `x-internal-token`; `InternalTokenGuard`
+  (API) и `InternalJwtGuard` (llm-worker) проверяют направление, срок жизни и
+  подпись constant-time. Статический `INTERNAL_API_TOKEN` принимается только с
+  `ALLOW_LEGACY_INTERNAL_TOKEN=true` вне production. В `NODE_ENV=production`
+  пустой/короткий (<32) секрет завершает старт api и llm-worker (fail closed).
+- `SEC-26.2` (KI-053): envelope `v2:<keyId>:<iv>:<tag>:<ciphertext>` с
+  `TOKEN_ENCRYPTION_KEY_ID` (default `local-v1`). Чтение старого `v1` и v2 с
+  previous keys из `TOKEN_ENCRYPTION_PREVIOUS_KEYS` (JSON или CSV). Добавлен
+  `CredentialRotationService.rotateAllCredentials()` — атомарная перешифровка
+  `ProviderCredential`, `GoogleCredential`, `TelegramBot` в транзакции Prisma —
+  и CLI `pnpm --filter api keys:rotate`. Облачный KMS не подключён
+  (`KeyManagementService` остаётся точкой расширения).
+- Тесты: 9 тестов внутреннего JWT (аудитория, `exp`, подпись, издатель,
+  fail-closed, legacy), 4 теста guard API, обновлённые тесты cipher и rotation
+  (v1 → v2, previous keys, rollback). Полный прогон `pnpm test` — 1386 тестов.
+
+**INFRA-26.3 (OIDC и трейсы).**
+
+- Опциональный OIDC/OAuth2 для Grafana: `GRAFANA_OIDC_*` маппятся в
+  `GF_AUTH_GENERIC_OAUTH_*` в `docker-compose.yml` и
+  `docker-compose.staging.yml`. Пока `GRAFANA_OIDC_ENABLED` не задан,
+  работает только Basic Auth (fallback); при включённом OIDC Basic
+  остаётся, пока `GRAFANA_BASIC_AUTH_ENABLED` не выставлен в `false`.
+  Entrypoint Grafana проверяет обязательные OIDC-параметры. Prometheus
+  остаётся за Caddy Basic Auth (нативного OIDC нет).
+- Добавлен сервис `tempo` (`grafana/tempo`) в профиль `monitoring` с томом
+  `tempo_data`, retention `168h` (7 дней) и OTLP-приёмниками в
+  `infra/tempo/tempo-config.yaml`. OTel Collector шлёт спаны в `tempo:4317`
+  через новый экспортёр `otlp/tempo` в дополнение к `debug`; в Grafana
+  провижинен datasource `Tempo` (`infra/monitoring/grafana/provisioning/datasources/tempo.yml`).
+
+**INFRA-26.4 (шифрование и изолированный drill).**
+
+- `scripts/upload-backup.sh`: при `BACKUP_ENCRYPTION_KEY` дамп шифруется
+  `openssl enc -aes-256-cbc -pbkdf2 -iter 100000` (ключ через env), в S3
+  уходит `.enc`; для всех объектов включён SSE-S3 `AES256`, пишется
+  `.sha256`-сайдкар и после выгрузки объект скачивается повторно для сверки
+  SHA-256. Ротация в `scripts/lib/backup-s3.sh` покрывает `.dump*`.
+- `scripts/restore-drill.sh`: восстановление перенесено в изолированный
+  контейнер с `--network none` вместо боевого инстанса (по умолчанию
+  `pgvector/pgvector:pg17` — боевые дампы содержат расширение `vector`).
+  Дамп проверяется по SHA-256, расшифровывается, восстанавливается через
+  `pg_restore` и проверяет `User`, `LedgerEntry` и append-only-триггеры
+  `prevent_update_ledger`/`prevent_delete_ledger`; контейнер и temp-файлы
+  удаляются по `trap EXIT`.
+- Стыковка env: `TOKEN_ENCRYPTION_PREVIOUS_KEYS` проброшен в контейнер `api`
+  для CLI `pnpm --filter api keys:rotate`.
+
+Обновлены `.env.example`, Runbook и статусы KI-018/KI-035/KI-036/KI-038/KI-045/KI-053.
+
 ### Sprint 25: Hardware Sandbox, egress proxy, Kubernetes и E2E HITL/Ledger
 
 **INFRA-25.1 / SEC-25.3 (sandbox-worker).**

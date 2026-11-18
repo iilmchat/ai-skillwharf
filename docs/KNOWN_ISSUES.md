@@ -21,7 +21,7 @@
 | KI-015 | Finance | Средняя | Исправлено | Финансовые навыки считают по реальным данным Ozon/WB через MCP (аналитика, начисления, отчёт о реализации, удержания, цены); без данных — `dataAvailable:false` или ошибка провайдера |
 | KI-016 | Инфраструктура | Высокая | Исправлено | В staging Grafana использовала `admin/admin`, а Prometheus был без авторизации |
 | KI-017 | Инфраструктура | Средняя | Исправлено | Бэкапы БД накапливались без retention-политики и проверки свободного места |
-| KI-018 | Инфраструктура | Средняя | Открыто | Мониторинг использует общие статические Basic Auth-креды; нет SSO, per-user аудита и автоматической ротации |
+| KI-018 | Инфраструктура | Средняя | Исправлено | Опциональный OIDC/OAuth2 в Grafana (`GRAFANA_OIDC_*`), Basic Auth остаётся fallback; Prometheus по-прежнему за Caddy Basic Auth (нативного OIDC нет) |
 | KI-019 | Инфраструктура | Средняя | Исправлено | Offsite-копии в S3 через rclone, retention `BACKUP_S3_KEEP_DAYS` и restore-drill во временную БД |
 | KI-020 | Finance | Высокая | Исправлено | Дневной жёсткий лимит токенов можно превысить конкурентными запросами (read-check-write без атомарности) |
 | KI-021 | LLM | Средняя | Исправлено | Дневной лимит токенов резервируется до вызова LLM (reserve-before-call) с reconcile после ответа и откатом при ошибке; лимит не превышается при гонке |
@@ -38,17 +38,17 @@
 | KI-032 | LLM | Низкая | Открыто | Оценка prompt-токенов приблизительная (`cl100k_base`, схемы tools не учитываются); при `actual > reserved` счётчик клампится к лимиту — возможен дрейф учёта |
 | KI-033 | Finance/Chat | Средняя | Исправлено | HITL TTL: `expiresAt`, фоновый job отменяет просроченные ожидания, hold возвращается, checkpoint удаляется, `GET /chat/pending` отдаёт `expiresAt` |
 | KI-034 | Persistence | Низкая | Исправлено | Retention-job удаляет checkpoint'ы завершённых/осиротевших тредов (после `CHECKPOINT_RETENTION_DAYS`), не трогая активные и ожидающие |
-| KI-035 | Инфраструктура | Низкая | Открыто | Offsite-бэкапы зависят от rclone на хосте; нет object-lock/versioning, KMS-шифрования и проверки checksum на уровне скрипта |
-| KI-036 | Инфраструктура | Низкая | Открыто | Restore-drill выполняется на том же PostgreSQL и проверяет только наличие таблиц; алерты ограничены кодом возврата и логами cron |
+| KI-035 | Инфраструктура | Низкая | Исправлено | Offsite: клиентское шифрование `.enc` (AES-256-CBC/PBKDF2), SHA-256-сайдкар с проверкой после загрузки и SSE-S3 AES256; object-lock/versioning/KMS — отдельный шаг |
+| KI-036 | Инфраструктура | Низкая | Исправлено | Restore-drill в ephemeral `postgres:17-alpine` (`--network none`): SHA-256, расшифровка и append-only-триггеры; алертинг — отдельный шаг |
 | KI-037 | Инфраструктура | Низкая | Исправлено | Для Kubernetes добавлен Job `prisma migrate deploy` (`backoffLimit: 3`, без параллельных реплик); Compose one-shot остаётся для локального пилота |
-| KI-038 | Observability | Низкая | Открыто | OTel Collector хранит трейсы только в stdout (debug), без durable backend, sampling, retention, auth/TLS; спаны usage фиксируют итог вызова, а не полную latency |
+| KI-038 | Observability | Низкая | Исправлено | OTel Collector шлёт спаны в Grafana Tempo (`tempo:4317`), блоки в томе `tempo_data`, retention 7 дней; sampling/TLS и latency usage-спанов — остаток |
 | KI-039 | Observability | Низкая | Открыто | Sentry включён только для backend-ошибок и только при DSN; PII-фильтр — эвристика по regex, frontend Sentry и алертинг не подключены |
 | KI-040 | Observability | Низкая | Открыто | `llm_cost_total` считает стоимость по единому `LLM_COST_PER_1K_TOKENS`, без per-model тарифов/скидок; `tenant_id` — unbounded user id, возможна кардинальность Prometheus |
 | KI-041 | LLM Router | Низкая | Исправлено | Control Plane UI не показывал и не редактировал `taskType`/`dailyCostLimit`; поля добавлены в форму создания и редактирования, лимит выведен в таблице, ответ API валидируется Zod |
 | KI-042 | Sandbox | Средняя | Исправлено | Egress: SNI/Host-фильтрация по точному FQDN, DNS-pinning с denylist приватных/metadata IP, forward-прокси в `sandbox-worker`; остаточные ротация CDN и IPv4-only ExtraHosts — ниже |
 | KI-043 | Persistence/MCP | Низкая | Открыто | Resolved-записи `PendingApproval` не чистятся retention-job; MCP `tools/list` кешируется на время SSE-сессии, изменения набора действий подхватываются после переподключения |
 | KI-044 | LLM Router | Низкая | Исправлено | 502 `errors.llm_unavailable` отдаётся и для одиночного маршрута/env-fallback: retriable-ошибка провайдера больше не утекает сырым текстом |
-| KI-045 | Security | Средняя | Открыто | Внутренние эндпоинты API и llm-worker защищены общим `INTERNAL_API_TOKEN`; при пустом значении доступ открыт (dev), нет mTLS/подписей и network policy |
+| KI-045 | Security | Средняя | Исправлено | Внутренний канал `api ↔ llm-worker` защищён подписанными JWT TTL 60 сек с `iss`/`aud`/`jti`/`iat`/`exp`; production fail-closed при коротком секрете, legacy-токен — только по явному флагу. mTLS/K8s NetworkPolicy — отдельная задача |
 | KI-046 | LLM Worker | Низкая | Открыто | JSON Schema инструментов конвертируется в Zod подмножеством; незнакомые конструкции (сложные union, `$ref`) становятся `z.unknown()` |
 | KI-047 | Notifications | Низкая | Открыто | BullMQ-уведомление об ожидающем подтверждении только пишется структурным логом: нет email/push/webhook и подтверждения доставки |
 | KI-048 | LLM Worker | Средняя | Открыто | Worker синхронно ходит в API на каждый LLM-вызов (бюджет), tool-call, HITL и checkpoint; нет circuit breaker/retry и деградации при недоступности API |
@@ -56,7 +56,7 @@
 | KI-050 | Integrations | Низкая | Исправлено | Контракт UI реализован бэкендом (`GET /integrations`, `POST/DELETE /integrations/telegram`, `authorization-url`, `DELETE /integrations/google`); OAuth-callback умеет redirect (`GOOGLE_OAUTH_SUCCESS_REDIRECT`), иначе JSON; реальные ключи проверяются в staging |
 | KI-051 | Security | Средняя | Открыто | Telegram webhook защищён только секретом и rate limit на IP: нет allowlist сетей Telegram, проверки `update_id` на replay/idempotency и очереди дедупликации |
 | KI-052 | Security | Средняя | Открыто | Egress api/worker — прикладной allowlist (`provider-http`, LLM-маршруты), а не NetworkPolicy/iptables; embeddings, MCP и YooKassa API не все проходят через единый guard |
-| KI-053 | Security | Средняя | Открыто | OAuth-токены шифруются локальным AES-256-GCM ключом из env; нет облачного KMS, keyId в envelope/БД и ротации без потери доступа |
+| KI-053 | Security | Средняя | Исправлено | Envelope `v2:<keyId>:<iv>:<tag>:<ciphertext>`, чтение v1 и previous keys, `pnpm --filter api keys:rotate` перешифровывает все три модели в одной транзакции; облачный KMS (Yandex/Vault) не подключён |
 | KI-054 | Security | Низкая | Открыто | `DELETE /integrations/google` удаляет локальные токены, но не вызывает revoke в Google; refresh-token может оставаться действительным |
 | KI-055 | Marketplace | Средняя | Исправлено | `generate_image` реально вызывает Midjourney API (async polling, retry); финансовые данные Ozon/WB идут через MCP — демонстрационных значений в этих инструментах нет |
 | KI-056 | Integrations | Низкая | Открыто | Telegram: webhook обслуживает один системный бот; боты, подключённые пользователями, используются только для исходящих `sendMessage`, входящие для них не принимаются |
@@ -492,6 +492,16 @@ per-user аудита. При утечке пароля нужно вручну�
 пользователя из Caddy и роли только для чтения для Prometheus либо оставить
 единый SSO-провайдер. Добавить аудит входов и процедуру ротации секретов.
 
+**Исправлено (Sprint 26, INFRA-26.3):** в `docker-compose.yml` добавлена
+опциональная маппировка `GRAFANA_OIDC_* → GF_AUTH_GENERIC_OAUTH_*` с
+валидацией обязательных параметров при `GRAFANA_OIDC_ENABLED=true`. Basic
+Auth остаётся включённым по умолчанию (`GF_AUTH_BASIC_ENABLED=true`) и
+служит fallback; при OIDC он отключается только явной настройкой. Caddy
+продолжает требовать Basic Auth на `/grafana/*` и `/prometheus/*` как
+дополнительный слой: Prometheus не поддерживает OIDC нативно, поэтому
+полноценный SSO для него (forward-auth proxy) и per-user аудит остаются
+в работе.
+
 ### KI-019 — Бэкапы БД хранятся только локально
 
 **Влияние:** `scripts/backup-db.sh` и `scripts/rotate-backups.sh` ограничивали
@@ -883,6 +893,14 @@ S3-совместимый bucket. Скрипт не настраивает versi
 шифрование, immutable-политику и keep-min для offsite, проверку checksum
 после загрузки и выгрузку в два независимых bucket'а/региона.
 
+**Исправлено (Sprint 26, INFRA-26.4):** `upload-backup.sh` при заданном
+`BACKUP_ENCRYPTION_KEY` шифрует дамп `openssl enc -aes-256-cbc -pbkdf2
+-iter 100000` (ключ через env, не argv) и выгружает `.enc`. Каждая выгрузка
+получает `.sha256`-сайдкар; объект скачивается обратно и SHA-256 сравнивается
+с локальным. Для всех объектов включён SSE-S3 (`--s3-server-side-encryption
+AES256`), ротация покрывает `.dump*`. Object Lock/versioning, KMS и
+второй регион по-прежнему настраиваются на стороне хранилища — это остаток.
+
 ### KI-036 — Restore-drill на том же PostgreSQL
 
 **Влияние:** `restore-drill.sh` восстанавливает дамп в временную БД на том же
@@ -898,9 +916,18 @@ S3-совместимый bucket. Скрипт не настраивает versi
 восстановление на отдельном стенде. Не считать успешный count-запрос полной
 гарантией целостности Ledger.
 
-**План:** Выполнять drill на отдельном PostgreSQL/эпhemeral-инстансе, добавить
+**План:** Выполнять drill на отдельном PostgreSQL/временном инстансе, добавить
 проверку инвариантов Ledger (суммы, append-only-триггеры), доставку
 результата в мониторинг и отчёт с длительностью/размером восстановления.
+
+**Исправлено (Sprint 26, INFRA-26.4):** `restore-drill.sh` больше не трогает
+боевой PostgreSQL: он поднимает временный `postgres:17-alpine` с
+`--network none`, проверяет SHA-256 по сайдкару, расшифровывает `.enc`,
+выполняет `pg_restore`, проверяет `User`, `LedgerEntry` и наличие триггеров
+`prevent_update_ledger`/`prevent_delete_ledger`, а затем удаляет контейнер
+по `trap EXIT`. Образ по умолчанию — `postgres:17-alpine`; для дампов с
+расширением `vector` предусмотрен `RESTORE_DRILL_IMAGE=pgvector/pgvector:pg17`.
+Доставка результата в мониторинг и свёрка сумм Ledger — остаток.
 
 ### KI-037 — `db-migrate` только для Compose
 
@@ -943,6 +970,14 @@ collector с persistent backend (Tempo/Jaeger/OTLP SaaS) и sampling осозн�
 **План:** Добавить OTLP backend с retention и sampling, TLS/mTLS и
 аутентификацию, корреляцию `trace_id` с JSON-логами, а также измерение
 latency непосредственно вокруг вызова провайдера.
+
+**Исправлено (Sprint 26, INFRA-26.3):** OTel Collector получил второй
+экспортёр `otlp/tempo` (`endpoint: tempo:4317`) и направляет спаны в
+`[debug, otlp/tempo]` — debug остаётся для dev-логов. Сервис `tempo`
+(`grafana/tempo`) добавлен в профиль `monitoring` с томом `tempo_data`,
+retention `168h` (7 дней) в `infra/tempo/tempo-config.yaml` и
+провижиненным datasource в Grafana. sampling, TLS/mTLS и измерение latency
+usage-спанов остаются в работе.
 
 ### KI-039 — Sentry только для backend и с эвристическим PII-фильтром
 
@@ -1086,19 +1121,32 @@ env-fallback, 400, цепочка из двух маршрутов).
 
 ### KI-045 — Внутренний токен API ↔ llm-worker
 
-**Влияние:** Внутренние эндпоинты `/api/v1/internal/agent/*` и
-`/v1/graphs/*` защищены общим `INTERNAL_API_TOKEN`. Если переменная пуста
-(локальная разработка), проверка отключена и запросы принимаются от любого
-источника, доступного по сети. mTLS, подписи запросов и Kubernetes
-NetworkPolicy не используются; компрометация одного контейнера даёт доступ к
-внутреннему API другого.
+**Влияние (было):** Внутренние эндпоинты `/api/v1/internal/agent/*` и
+`/v1/graphs/*` защищались общим `INTERNAL_API_TOKEN`. Если переменная пуста
+(локальная разработка), проверка отключалась и запросы принимались от любого
+источника, доступного по сети. Компрометированный контейнер получал доступ к
+внутреннему API другого сервиса.
 
-**Обход:** В production обязательно задавать случайный
-`INTERNAL_API_TOKEN`, не публиковать порт `llm-worker` наружу и держать
-сервисы в отдельной bridge-сети без доступа к PostgreSQL/Redis извне.
+**Исправлено (Sprint 26, SEC-26.1):**
 
-**План:** mTLS или SPIFFE-идентичность для внутреннего трафика, отдельные
-токены на направление, NetworkPolicy/Compose-сеть только для api ↔ worker.
+- Общий код в `packages/shared/src/internal-jwt.ts`: HMAC-SHA256 JWT на 60
+  секунд с `iss` (`skillwharf-api`/`skillwharf-worker`), `aud`
+  (`internal-worker`/`internal-api`), уникальным `jti`, `iat` и `exp`.
+  Направление жёстко проверяется парой `iss`/`aud`; подпись сравнивается
+  constant-time; все claims и env-флаги валидируются Zod.
+- `LlmWorkerClient` и `InternalApiClient` передают JWT в заголовке
+  `x-internal-token`; `InternalTokenGuard` (API) и `InternalJwtGuard`
+  (llm-worker) проверяют их. Статический токен принимается только при явном
+  `ALLOW_LEGACY_INTERNAL_TOKEN=true` и только вне production.
+- В `NODE_ENV=production` пустой или короче 32 символов `INTERNAL_API_TOKEN`
+  приводит к ошибке старта обоих сервисов (fail closed), даже с legacy-флагом.
+- Unit-тесты: неверная аудитория, истёкший `exp`, неверная подпись, чужой
+  издатель, невалидные claims, fail-closed в production, legacy-режим и
+  интеграция guards с единым JSON `ApiException`.
+
+**Остатки:** общий симметричный ключ по-прежнему известен обоим сервисам;
+mTLS/SPIFFE и сетевые политики (NetworkPolicy) не входили в задачу. Для K8s
+есть `deploy/k8s/networkpolicy-deny-egress.yaml` (INFRA-25.2).
 
 ### KI-046 — JSON Schema ↔ Zod подмножество
 
@@ -1246,17 +1294,33 @@ HTTP-клиенты API на общий guard, добавить deny-all Network
 
 ### KI-053 — Ротация ключа шифрования OAuth-токенов
 
-**Влияние:** Токены шифруются AES-256-GCM ключом `TOKEN_ENCRYPTION_KEY` из
-env/Docker secret. Envelope не содержит `keyId`, поэтому после смены ключа
-старые refresh-токены станут нечитаемыми. Облачный KMS и автоматическая
-ротация не подключены.
+**Влияние (было):** Токены шифровались AES-256-GCM ключом
+`TOKEN_ENCRYPTION_KEY` из env/Docker secret. Envelope не содержал `keyId`,
+поэтому после смены ключа старые refresh-токены становились нечитаемыми.
+Облачный KMS и автоматическая ротация не были подключены.
 
-**Обход:** Хранить ключ в менеджере секретов, делать бэкап ключа вместе с
-БД; при ротации сначала расшифровать и перешифровать все `GoogleCredential`.
+**Исправлено (Sprint 26, SEC-26.2):**
 
-**План:** Добавить `keyId` в envelope и колонку `keyId`, поддержку
-previous-key при чтении, миграционный re-encrypt и провайдер Yandex
-KMS/Vault.
+- Новый формат `v2:<keyId>:<iv>:<tag>:<ciphertext>`; `keyId` берётся из
+  `TOKEN_ENCRYPTION_KEY_ID` (по умолчанию `local-v1`) и валидируется Zod.
+- `TokenCipherService.decrypt` понимает старый `v1:<iv>:<tag>:<ciphertext>`
+  и v2 с любым известным keyId. Предыдущие ключи задаются через
+  `TOKEN_ENCRYPTION_PREVIOUS_KEYS` в формате JSON (объект или массив) или CSV
+  `keyId:base64Key,...`; невалидный формат — ошибка старта (fail closed).
+- `CredentialRotationService.rotateAllCredentials()` перешифровывает
+  `ProviderCredential`, `GoogleCredential` и `TelegramBot` в одной
+  транзакции Prisma; ошибка расшифровки любой записи откатывает всю ротацию.
+  CLI: `pnpm --filter api keys:rotate` (сначала собирает `dist`, затем
+  запускает `scripts/rotate-keys.mjs`).
+- Тесты: v1 → v2 с новым keyId, чтение через previous keys из env (CSV/JSON),
+  отвержение неизвестного keyId и невалидных previous keys, счётчики ротации
+  по трём моделям и atomic-rollback.
+
+**Остатки:** облачный KMS (Yandex KMS / HashiCorp Vault) не подключён:
+`KeyManagementService` — абстракция для него, пока используется локальный
+AES-256-GCM. Отдельной колонки `keyId` в БД нет — он хранится внутри
+envelope; ротация всех записей выполняется явно CLI, а не фоновым job'ом.
+Обновление утерянных/отозванных Google-токенов — KI-054.
 
 ### KI-054 — Отзыв Google-токенов при disconnect
 

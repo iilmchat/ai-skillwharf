@@ -290,6 +290,20 @@ S3-совместимое хранилище (MinIO, AWS S3 и т. п.). Есл�
 <https://rclone.org/install/>. Секреты передаются rclone через переменные
 окружения и не попадают в аргументы командной строки.
 
+Все объекты загружаются с server-side encryption (`--s3-server-side-encryption
+AES256`). Рядом с дампом сохраняется `.sha256`-сайдкар, а сразу после выгрузки
+объект скачивается обратно и его SHA-256 сравнивается с локальным — тихое
+искажение или повреждение при передаче прерывает задание с кодом `1`.
+
+Если задан `BACKUP_ENCRYPTION_KEY`, дамп дополнительно шифруется на клиенте
+через `openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt` и в S3 уходит файл
+с расширением `.enc` (например, `skillwharf_db-20261113-020000.dump.enc`).
+Ключ передаётся в openssl через окружение (`-pass env:`), а не в argv, и не
+должен попадать в git. Тот же ключ нужен `restore-drill.sh` для расшифровки.
+Шифрование опционально: без ключа legacy-бэкапы и локальные копии работают
+как раньше. Ротация offsite (`backup_s3_prune`) удаляет `.dump`, `.dump.enc`
+и `.sha256` по возрасту.
+
 | Переменная | Обязательна | Назначение |
 | --- | --- | --- |
 | `BACKUP_S3_BUCKET` | да, для offsite | Bucket; пусто — offsite выключен |
@@ -299,6 +313,7 @@ S3-совместимое хранилище (MinIO, AWS S3 и т. п.). Есл�
 | `BACKUP_S3_SECRET_KEY` | нет | Secret key |
 | `BACKUP_S3_PREFIX` | нет | Префикс ключей, например `skillwharf/db/` |
 | `BACKUP_S3_KEEP_DAYS` | нет | Retention offsite, по умолчанию `BACKUP_KEEP_DAYS` |
+| `BACKUP_ENCRYPTION_KEY` | нет | Клиентское шифрование `.enc`; пусто — без него |
 
 Пример `.env` (значения — заглушки, реальные секреты не коммитьте):
 
@@ -310,6 +325,7 @@ BACKUP_S3_ACCESS_KEY=<access-key>
 BACKUP_S3_SECRET_KEY=<secret-key>
 BACKUP_S3_PREFIX=skillwharf/db/
 BACKUP_S3_KEEP_DAYS=30
+BACKUP_ENCRYPTION_KEY=<длинная случайная passphrase>
 ```
 
 Проверка после запуска:
@@ -337,31 +353,45 @@ bash scripts/upload-backup.sh --file backups/skillwharf_db-20261113-020000.dump
 ### Restore-drill
 
 `scripts/restore-drill.sh` проверяет не только наличие файла, но и
-восстановимость: скачивает последний offsite-дамп `${POSTGRES_DB}-*.dump`,
-создаёт временную БД `drill_*`, выполняет `pg_restore`, проверяет таблицы
-`User` и `LedgerEntry` и удаляет временную БД (в том числе при ошибке).
+восстановимость, и делает это **полностью изолированно от боевого PostgreSQL**:
+
+1. находит последний offsite-дамп `${POSTGRES_DB}-*.dump` или `.dump.enc`;
+2. скачивает его и сверяет SHA-256 с `.sha256`-сайдкаром (для старых бэкапов
+   без сайдкара — предупреждение);
+3. если дамп зашифрован, расшифровывает его тем же `BACKUP_ENCRYPTION_KEY`;
+4. поднимает временный контейнер `pgvector/pgvector:pg17` (значение
+   `RESTORE_DRILL_IMAGE` по умолчанию) с `--network none` и собственными
+   кредами `drill`, выполняет `pg_restore`, проверяет таблицы `User` и
+   `LedgerEntry` и наличие append-only-триггеров `prevent_update_ledger` /
+   `prevent_delete_ledger`. Боевые дампы содержат расширение `vector`,
+   которого нет в базовом `postgres:17-alpine`, поэтому образ по умолчанию —
+   pgvector; для дампов без vector можно указать `postgres:17-alpine`;
+5. удаляет контейнер и временные файлы по `trap EXIT` — даже при ошибке.
 
 ```bash
 bash scripts/restore-drill.sh
+# с зашифрованным дампом:
+BACKUP_ENCRYPTION_KEY=<ваш ключ> bash scripts/restore-drill.sh
+# дамп без расширения vector (образ по умолчанию — pgvector/pgvector:pg17):
+RESTORE_DRILL_IMAGE=postgres:17-alpine bash scripts/restore-drill.sh
 ```
 
-Ожидаемый результат: `OK: User=<n>, LedgerEntry=<n>` и
-`Restore-drill успешно завершён`. Скрипт возвращает `0` только при успехе;
-при недоступном S3, ошибке `pg_restore` или отсутствии таблиц — `1`.
-Локальные дампы не используются: проверяется именно offsite-копия.
+Ожидаемый результат: `OK: User=<n>, LedgerEntry=<n>, append-only triggers=2`
+и `Restore-drill успешно завершён`. Скрипт возвращает `0` только при успехе;
+при недоступном S3, несовпадении SHA-256, неверном ключе, ошибке
+`pg_restore`, отсутствии таблиц/триггеров — `1`. Локальные дампы не
+используются: проверяется именно offsite-копия.
 
-Проверить, что временные БД не остались:
+Проверить, что временные контейнеры не остались:
 
 ```bash
-docker compose exec -T postgres psql --username "$POSTGRES_USER" \
-  --dbname postgres -At \
-  -c "SELECT datname FROM pg_database WHERE datname LIKE 'drill_%';"
+docker ps -a --filter 'name=skillwharf-restore-drill' --format '{{.Names}}'
 ```
 
-Если drill падает, смотрите `docker compose logs postgres`, права
-`POSTGRES_USER` (нужны `CREATEDB` и чтение схемы), свободное место и
-доступность bucket. Drill не изменяет рабочую БД: восстановление идёт в
-отдельную временную базу, а при сбое она удаляется.
+Если drill падает, смотрите логи скрипта, доступность bucket, корректность
+`BACKUP_ENCRYPTION_KEY` и наличие Docker. Drill не изменяет рабочую БД и не
+создаёт временные базы на боевом инстансе: восстановление идёт в отдельном
+контейнере без сети.
 
 ### Включение по расписанию
 
@@ -380,9 +410,10 @@ docker compose exec -T postgres psql --username "$POSTGRES_USER" \
   bash scripts/restore-drill.sh >> /var/log/skillwharf-restore-drill.log 2>&1
 ```
 
-`PATH` в cron должен содержать `docker` и `rclone`: cron не наследует PATH
-интерактивной оболочки. Если offsite не настроен, `restore-drill.sh` вернёт
-`1` с понятной ошибкой — это ожидаемо только до включения S3.
+`PATH` в cron должен содержать `docker`, `rclone` и `openssl` (последний —
+при включённом `BACKUP_ENCRYPTION_KEY`): cron не наследует PATH интерактивной
+оболочки. Если offsite не настроен, `restore-drill.sh` вернёт `1` с понятной
+ошибкой — это ожидаемо только до включения S3.
 
 Если ротация должна выполняться отдельным заданием, добавьте
 `--skip-prune` к бэкапу и второй cron-вызов:
@@ -1229,6 +1260,24 @@ API отдаёт метрики на `GET /metrics` (вне префикса `ap
 Caddy, а Prometheus дополнительно проверяет креды нативно через
 `web.config.file` с `basic_auth_users`.
 
+**OIDC/SSO для Grafana опционален** (`INFRA-26.3`). Пока `GRAFANA_OIDC_ENABLED`
+не задан или равен `false`, работает только Basic Auth — 기존 установки не
+меняются. Чтобы включить SSO, задайте в `.env` `GRAFANA_OIDC_ENABLED=true`,
+`GRAFANA_OIDC_CLIENT_ID`, `GRAFANA_OIDC_CLIENT_SECRET`, `GRAFANA_OIDC_AUTH_URL`
+и `GRAFANA_OIDC_TOKEN_URL` (по PROXY-значениям `GF_AUTH_GENERIC_OAUTH_*`).
+При включённом OIDC Basic Auth остаётся доступным как fallback; чтобы
+запретить его, выставьте `GRAFANA_BASIC_AUTH_ENABLED=false`. Callback URL
+провайдера: `https://$DOMAIN/grafana/login/generic_oauth`. Caddy по-прежнему
+проверяет Basic Auth на `/grafana/*` и `/prometheus/*` как дополнительный
+слой: у Prometheus нет нативной OIDC-поддержки, поэтому SSO для него требует
+отдельного forward-auth прокси (остаётся в KI-018 как остаток).
+
+**Tempo хранит трейсы.** OTel Collector шлёт спаны в `tempo:4317` по OTLP/gRPC
+в дополнение к debug-логу; Tempo пишет блоки в том `tempo_data` и держит
+retention 7 дней (`168h` в `infra/tempo/tempo-config.yaml`). В Grafana
+провижинен datasource `Tempo` (`http://tempo:3200`); Trace-панели открываются
+из дашборда. Дополнительных переменных в `.env` для Tempo не нужно.
+
 ```bash
 # 1. Сгенерируйте bcrypt-хэш пароля (значение содержит `$`).
 read -rs -p 'Monitoring password: ' P; echo
@@ -1266,8 +1315,9 @@ curl -kfsS https://$DOMAIN/api/v1/health
 ```
 
 * Grafana: <https://$DOMAIN/grafana/> — Caddy Basic Auth, затем вход в
-  Grafana с `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`. Дефолтный
-  `admin/admin` не используется.
+  Grafana с `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` либо через OIDC
+  (если включён `GRAFANA_OIDC_ENABLED`). Дефолтный `admin/admin` не
+  используется.
 * Prometheus: <https://$DOMAIN/prometheus/> — Caddy Basic Auth и нативная
   проверка `basic_auth_users`. Прямой `http://127.0.0.1:9090` тоже требует
   креды.
