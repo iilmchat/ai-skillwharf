@@ -94,7 +94,7 @@ docker compose up -d --build
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
 | `LLM_WORKER_URL` | `http://llm-worker:4100` | Адрес LLM-Worker во внутренней сети compose. |
-| `INTERNAL_API_TOKEN` | `change_me_internal_token` | Общий секрет API ↔ LLM-Worker; задайте случайное значение. |
+| `INTERNAL_API_TOKEN` | `change_me_internal_token_min_32_chars` | Общий секрет API ↔ LLM-Worker; не короче 32 символов в production, задайте случайное значение. |
 | `REDIS_URL` | `redis://redis:6379` | Redis для BullMQ: HITL TTL, retention checkpoint'ов, уведомления. Пусто — API использует `setInterval`. |
 | `FINANCE_SNAPSHOT_TTL_SECONDS` | `604800` | TTL снапшотов финансового дашборда (7 суток). Без Redis они живут в памяти процесса API. |
 
