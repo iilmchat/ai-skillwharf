@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-direct-egress
+  namespace: skillwharf
+  labels:
+    app.kubernetes.io/part-of: skillwharf
+spec:
+  # API, LLM worker и sandbox-worker не должны выходить в интернет напрямую:
+  # только DNS + egress-прокси. Остальные исходящие соединения запрещены.
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - api
+          - llm-worker
+          - sandbox-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: skillwharf
+          podSelector:
+            matchLabels:
+              app: egress-proxy

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-worker
+  namespace: skillwharf
+  labels:
+    app: sandbox-worker
+    app.kubernetes.io/part-of: skillwharf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sandbox-worker
+  template:
+    metadata:
+      labels:
+        app: sandbox-worker
+    spec:
+      # gVisor вместо host kernel: кластер работает без /dev/kvm.
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: false
+        fsGroup: 65534
+      containers:
+        - name: sandbox-worker
+          image: ai-skillwharf-sandbox-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "4000"
+            - name: SANDBOX_IMAGE
+              value: skillwharf-sandbox:latest
+            - name: NODE_ENV
+              value: production
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+# ВАЖНО: в Compose worker монтирует /var/run/docker.sock. В K8s hostPath с
+# Docker-сокетом намеренно не используется: это root-доступ к узлу. Перед
+# продакшеном нужен sandbox-provider (удалённый раннер или DinD в отдельном
+# контейнере с собственной RuntimeClass), который worker будет вызывать по API.

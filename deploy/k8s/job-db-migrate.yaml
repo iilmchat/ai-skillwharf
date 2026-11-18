@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: skillwharf
+  labels:
+    app: db-migrate
+    app.kubernetes.io/part-of: skillwharf
+spec:
+  # Один контроллер миграций на релиз: параллельные реплики Prisma и так
+  # сериализуются advisory locks, но нам важен предсказуемый старт.
+  backoffLimit: 3
+  completions: 1
+  parallelism: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: db-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: prisma-migrate
+          # Образ из apps/api/Dockerfile.migrate: только Prisma CLI и migrations.
+          image: ai-skillwharf-db-migrate:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: skillwharf-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
