@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InternalTokenAuth } from '@skillwharf/shared';
 import type { GraphEvent } from './contracts.js';
 import {
   errorEventSchema,
@@ -24,16 +25,13 @@ export class LlmWorkerUnavailableError extends ApiException {
 
 interface WorkerConfig {
   baseUrl: string;
-  token: string | null;
 }
 
 function readConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const rawUrl = env.LLM_WORKER_URL?.trim() ?? '';
-  const token = env.INTERNAL_API_TOKEN?.trim() ?? '';
 
   return {
     baseUrl: rawUrl === '' ? 'http://llm-worker:4100' : rawUrl,
-    token: token === '' ? null : token,
   };
 }
 
@@ -47,6 +45,7 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
 export class LlmWorkerClient {
   private readonly logger = new Logger(LlmWorkerClient.name);
   private readonly config = readConfig();
+  private readonly auth = new InternalTokenAuth();
 
   async *run(request: RunGraphRequest): AsyncGenerator<GraphEvent> {
     const body = runGraphRequestSchema.parse(request);
@@ -69,8 +68,10 @@ export class LlmWorkerClient {
       accept: 'application/x-ndjson',
     };
 
-    if (this.config.token !== null) {
-      headers['x-internal-token'] = this.config.token;
+    const internalToken = this.auth.issue('api-to-worker');
+
+    if (internalToken !== null) {
+      headers['x-internal-token'] = internalToken;
     }
 
     let response: Response;

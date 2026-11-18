@@ -3,12 +3,11 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   Logger,
   Post,
   Res,
-  UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import {
@@ -17,25 +16,14 @@ import {
   type GraphEvent,
 } from './contracts.js';
 import { AgentRunnerService } from './agent/runner.service.js';
-
-/** Общий внутренний токен API ↔ worker. Пустой — только для локальной разработки. */
-function assertInternalToken(token: string | undefined): void {
-  const expected = process.env.INTERNAL_API_TOKEN?.trim() ?? '';
-
-  if (expected === '') {
-    return;
-  }
-
-  if (token !== expected) {
-    throw new UnauthorizedException('Invalid internal token');
-  }
-}
+import { InternalJwtGuard } from './internal-jwt.guard.js';
 
 function writeEvent(response: Response, event: GraphEvent): void {
   response.write(`${JSON.stringify(event)}\n`);
 }
 
 @Controller('v1/graphs')
+@UseGuards(InternalJwtGuard)
 export class GraphsController {
   private readonly logger = new Logger(GraphsController.name);
 
@@ -45,11 +33,8 @@ export class GraphsController {
   @HttpCode(200)
   async run(
     @Body() body: unknown,
-    @Headers('x-internal-token') token: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
-    assertInternalToken(token);
-
     const parsed = runGraphRequestSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -63,11 +48,8 @@ export class GraphsController {
   @HttpCode(200)
   async resume(
     @Body() body: unknown,
-    @Headers('x-internal-token') token: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
-    assertInternalToken(token);
-
     const parsed = resumeGraphRequestSchema.safeParse(body);
 
     if (!parsed.success) {

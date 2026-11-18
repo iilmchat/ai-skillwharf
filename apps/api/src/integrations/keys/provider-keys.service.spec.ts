@@ -106,7 +106,7 @@ describe('ProviderKeysService: хранение и шифрование', () => 
     process.env.SKIP_INTEGRATION_LIVE_CHECK = 'true';
   });
 
-  it('Ozon: секреты в БД зашифрованы envelope v1 и не содержат открытых значений', async () => {
+  it('Ozon: секреты в БД зашифрованы envelope v2 и не содержат открытых значений', async () => {
     const { service, rows } = createHarness();
 
     const state = await service.connectOzon('user-1', OZON_KEYS);
@@ -119,11 +119,11 @@ describe('ProviderKeysService: хранение и шифрование', () => 
 
     const stored = [...rows.values()][0];
 
-    expect(stored?.secret.startsWith('v1:')).toBe(true);
+    expect(stored?.secret.startsWith('v2:')).toBe(true);
     expect(stored?.secret).not.toContain('ozon-client-123');
     expect(stored?.secret).not.toContain('ozon-api-key-secret');
-    // Формат envelope: v1:<iv>:<tag>:<ciphertext>.
-    expect(stored?.secret.split(':')).toHaveLength(4);
+    // Формат envelope: v2:<keyId>:<iv>:<tag>:<ciphertext>.
+    expect(stored?.secret.split(':')).toHaveLength(5);
   });
 
   it('GET-состояние расшифровывает Client ID и показывает active', async () => {
@@ -194,7 +194,7 @@ describe('ProviderKeysService: хранение и шифрование', () => 
 
     const stored = rows.get('user-1::bitrix24');
 
-    expect(stored?.secret.startsWith('v1:')).toBe(true);
+    expect(stored?.secret.startsWith('v2:')).toBe(true);
     expect(stored?.secret).not.toContain('secret-webhook-code');
     // Сам вебхук — секрет: наружу отдаётся только статус.
     await expect(service.describe('user-1')).resolves.toEqual({
@@ -215,7 +215,7 @@ describe('ProviderKeysService: хранение и шифрование', () => 
 
     const stored = rows.get('user-1::moysklad');
 
-    expect(stored?.secret.startsWith('v1:')).toBe(true);
+    expect(stored?.secret.startsWith('v2:')).toBe(true);
     expect(stored?.secret).not.toContain('moysklad-api-token-secret');
     await expect(service.describe('user-1')).resolves.toMatchObject({
       moysklad: { status: 'active', source: 'user' },

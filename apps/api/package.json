@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm --filter @skillwharf/shared build && prisma generate && nest build",
     "db:migrate": "prisma migrate deploy",
+    "keys:rotate": "pnpm build && node --env-file-if-exists=../../.env scripts/rotate-keys.mjs",
     "db:seed:demo": "prisma generate && pnpm --filter @skillwharf/shared build && node --env-file-if-exists=../../.env --experimental-transform-types prisma/seed-demo.ts",
     "openapi:export": "pnpm build && node dist/openapi/export.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

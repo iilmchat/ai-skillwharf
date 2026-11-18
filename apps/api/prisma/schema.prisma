@@ -248,7 +248,7 @@ model PendingApproval {
 }
 
 /// Зашифрованные OAuth-токены Google Workspace.
-/// `accessToken`/`refreshToken` — envelope `v1:<iv>:<tag>:<ciphertext>`;
+/// `accessToken`/`refreshToken` — envelope `v2:<keyId>:<iv>:<tag>:<ciphertext>`;
 /// открытые значения в БД не попадают. Ключ — TOKEN_ENCRYPTION_KEY или KMS.
 model GoogleCredential {
   userId       String   @id
@@ -292,7 +292,7 @@ model TelegramChatLink {
 
 /// Ключи Ozon/Wildberries/Midjourney, подключённые пользователем.
 ///
-/// `secret` — envelope `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM,
+/// `secret` — envelope `v2:<keyId>:<iv>:<tag>:<ciphertext>` (AES-256-GCM,
 /// `TOKEN_ENCRYPTION_KEY`) с JSON полезной нагрузки:
 /// Ozon — `{clientId, apiKey}`, WB — `{apiToken}`, Midjourney — `{apiKey}`.
 /// Открытых секретов в БД нет. `metadata` — только неконфиденциальные поля

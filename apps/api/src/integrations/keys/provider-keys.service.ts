@@ -111,7 +111,8 @@ const CIPHER_ERROR =
  *
  * Секреты шифруются `TokenCipherService` (AES-256-GCM) и попадают в
  * `ProviderCredential.secret` только в виде envelope
- * `v1:<iv>:<tag>:<ciphertext>`. Инструменты (`MarketplaceMcpService`,
+ * `v2:<keyId>:<iv>:<tag>:<ciphertext>` (старые v1 читаются). Инструменты
+ * (`MarketplaceMcpService`,
  * `MidjourneyService`) читают ключи Ozon/WB/Midjourney по `userId` и падают
  * обратно на env (системные ключи для ботов/локальной разработки).
  *

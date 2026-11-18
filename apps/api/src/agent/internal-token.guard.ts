@@ -1,42 +1,46 @@
 import {
   Injectable,
   Logger,
+  Optional,
   type CanActivate,
   type ExecutionContext,
-  UnauthorizedException,
 } from '@nestjs/common';
+import { InternalTokenAuth } from '@skillwharf/shared';
 import type { Request } from 'express';
+import { ApiException } from '../common/api-error.js';
 
 /**
- * Проверка общего внутреннего токена. Если `INTERNAL_API_TOKEN` не задан,
- * запросы разрешены только для локальной разработки (в compose токен задан).
+ * Защита внутренних эндпоинтов API (worker → API).
+ *
+ * Принимает короткоживущий JWT с `aud=internal-api` и `iss=skillwharf-worker`
+ * (вызовы worker → API).
+ * Статический `INTERNAL_API_TOKEN` — только при явном
+ * `ALLOW_LEGACY_INTERNAL_TOKEN=true` вне production (dev/тесты).
  */
 @Injectable()
 export class InternalTokenGuard implements CanActivate {
   private readonly logger = new Logger(InternalTokenGuard.name);
-  private warned = false;
+
+  constructor(@Optional() private readonly auth?: InternalTokenAuth) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const expected = process.env.INTERNAL_API_TOKEN?.trim() ?? '';
-
-    if (expected === '') {
-      if (!this.warned) {
-        this.logger.warn(
-          'INTERNAL_API_TOKEN не задан: внутренние эндпоинты открыты (только для dev)',
-        );
-        this.warned = true;
-      }
-
-      return true;
-    }
-
     const request = context.switchToHttp().getRequest<Request>();
-    const token = request.header('x-internal-token');
+    const auth = this.auth ?? new InternalTokenAuth();
 
-    if (token !== expected) {
-      throw new UnauthorizedException('Invalid internal token');
+    try {
+      auth.verify(request.header('x-internal-token'), 'internal-api');
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `внутренний токен отклонён: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      throw new ApiException({
+        statusCode: 401,
+        error: 'Unauthorized',
+        code: 'errors.internal_unauthorized',
+        message: 'Invalid internal token',
+      });
     }
-
-    return true;
   }
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { verifyInternalJwt } from '@skillwharf/shared';
 import { ApiException } from '../common/api-error.js';
 import { LlmWorkerClient } from './llm-worker.client.js';
 
@@ -40,18 +41,19 @@ describe('LlmWorkerClient', () => {
   });
 
   it('читает NDJSON-события и отдаёт done с reply', async () => {
-    const fetchMock = vi.fn(async () => {
-      return ndjson(
-        { type: 'delta', text: 'Здрав' },
-        { type: 'delta', text: 'ствуйте' },
-        {
-          type: 'done',
-          conversationId: 'c1',
-          reply: 'Здравствуйте',
-          pendingApproval: false,
-        },
-      );
-    });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: { headers?: Record<string, string> }) =>
+        ndjson(
+          { type: 'delta', text: 'Здрав' },
+          { type: 'delta', text: 'ствуйте' },
+          {
+            type: 'done',
+            conversationId: 'c1',
+            reply: 'Здравствуйте',
+            pendingApproval: false,
+          },
+        ),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const client = new LlmWorkerClient();
@@ -71,15 +73,20 @@ describe('LlmWorkerClient', () => {
         pendingApproval: false,
       },
     ]);
+    const captured = fetchMock.mock.calls[0]?.[1] as
+      | { headers?: Record<string, string> }
+      | undefined;
+    const token = captured?.headers?.['x-internal-token'] ?? '';
+
     expect(fetchMock).toHaveBeenCalledWith(
       'http://llm-worker:4100/v1/graphs/run',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'x-internal-token': 'test-token',
-        }),
-      }),
+      expect.objectContaining({ method: 'POST' }),
     );
+    // По проводу идёт подписанный JWT, а не статический секрет.
+    expect(token).not.toBe('test-token');
+    expect(() =>
+      verifyInternalJwt(token, 'test-token', 'internal-worker'),
+    ).not.toThrow();
   });
 
   it('превращает error-событие worker\'а в ApiException', async () => {

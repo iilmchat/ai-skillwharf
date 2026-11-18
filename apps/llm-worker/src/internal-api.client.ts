@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { InternalTokenAuth } from '@skillwharf/shared';
 import type { z } from 'zod';
 import { readWorkerConfig } from './config.js';
 
@@ -21,14 +22,13 @@ export class InternalApiError extends Error {
 export class InternalApiClient {
   private readonly logger = new Logger(InternalApiClient.name);
   private readonly baseUrl: string | null;
-  private readonly token: string | null;
+  private readonly auth = new InternalTokenAuth();
   private readonly timeoutMs: number;
 
   constructor() {
     const config = readWorkerConfig();
 
     this.baseUrl = config.internalApiUrl;
-    this.token = config.internalToken;
     this.timeoutMs = config.requestTimeoutMs;
 
     if (this.baseUrl === null) {
@@ -59,8 +59,10 @@ export class InternalApiClient {
       'content-type': 'application/json',
     };
 
-    if (this.token !== null) {
-      headers['x-internal-token'] = this.token;
+    const internalToken = this.auth.issue('worker-to-api');
+
+    if (internalToken !== null) {
+      headers['x-internal-token'] = internalToken;
     }
 
     let response: Response;

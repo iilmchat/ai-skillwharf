@@ -2,6 +2,7 @@ import './observability/instrument.js';
 
 import { ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
+import { assertInternalAuthConfig } from '@skillwharf/shared';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SentryGlobalFilter } from '@sentry/nestjs/setup';
 import type { NextFunction, Request, Response } from 'express';
@@ -13,6 +14,9 @@ import { setupOpenApi } from './openapi/openapi.js';
 import { shutdownTracing } from './observability/tracing.js';
 
 async function bootstrap() {
+  // SEC-26.1: в production пустой/короткий Internal secret — ошибка старта.
+  assertInternalAuthConfig();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Sentry перехватывает необработанные исключения, сохраняя JSON-формат

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { GoogleApiService } from './google/google-api.service.js';
 import { GoogleOAuthService } from './google/google-oauth.service.js';
 import { TokenCipherService } from './google/token-cipher.service.js';
+import { CredentialRotationService } from './keys/credential-rotation.service.js';
 import { ProviderKeysService } from './keys/provider-keys.service.js';
 import { TelegramBotService } from './telegram/telegram-bot.service.js';
 import { TelegramService } from './telegram/telegram.service.js';
@@ -20,6 +21,7 @@ import { TelegramService } from './telegram/telegram.service.js';
     GoogleOAuthService,
     GoogleApiService,
     ProviderKeysService,
+    CredentialRotationService,
   ],
   exports: [
     TokenCipherService,
@@ -28,6 +30,7 @@ import { TelegramService } from './telegram/telegram.service.js';
     GoogleOAuthService,
     GoogleApiService,
     ProviderKeysService,
+    CredentialRotationService,
   ],
 })
 export class ProvidersModule {}
