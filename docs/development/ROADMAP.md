@@ -26,21 +26,21 @@
 
 ### Sprint 23: Access Control, Live ERP Verification & UX Polish (В РАБОТЕ)
 
-* [ ] **[INFRA-23.1]** Live smoke-тесты `--bitrix24` и `--moysklad` в `scripts/test-integrations.sh` + env `REGISTRATION_MODE` / `REGISTRATION_INVITE_CODE` + актуализация доки под 12 треков.
-* [ ] **[API-23.2]** Invite-only регистрация (`REGISTRATION_MODE=invite|closed`, `timingSafeEqual`), закрытие **KI-073**.
-* [ ] **[API-23.3]** Live-проверка вебхука Битрикс24 (`profile.json`) и токена МойСклад (`/entity/organization`) при сохранении (завершение **KI-075**).
-* [ ] **[API-23.4]** Поддержка нетарифицируемых позиций (`tracked: false`) и разбивки по складам (`stock_report`) в `moysklad_check_stock`, закрытие **KI-081**.
-* [ ] **[WORKER-23.5]** Условный HITL в `llm-worker` по значению аргумента (`stageId === 'WON'` для `bitrix24_update_deal`), закрытие **KI-079**.
-* [ ] **[UI-23.6]** Маскировка `Webhook URL` (`type="password"` + toggle) в настройках Битрикс24 (**KI-076**), поле `inviteCode` на форме регистрации и i18n ошибок.
+* [x] **[INFRA-23.1]** Live smoke-тесты `--bitrix24` и `--moysklad` в `scripts/test-integrations.sh` + env `REGISTRATION_MODE` / `REGISTRATION_INVITE_CODE` + актуализация доки под 12 треков.
+* [x] **[API-23.2]** Invite-only регистрация (`REGISTRATION_MODE=invite|closed`, `timingSafeEqual`), закрытие **KI-073**.
+* [x] **[API-23.3]** Live-проверка вебхука Битрикс24 (`profile.json`) и токена МойСклад (`/entity/organization`) при сохранении (завершение **KI-075**).
+* [x] **[API-23.4]** Поддержка нетарифицируемых позиций (`tracked: false`) и разбивки по складам (`stock_report`) в `moysklad_check_stock`, закрытие **KI-081**.
+* [x] **[WORKER-23.5]** Условный HITL в `llm-worker` по значению аргумента (`stageId === 'WON'` для `bitrix24_update_deal`), закрытие **KI-079**.
+* [x] **[UI-23.6]** Маскировка `Webhook URL` (`type="password"` + toggle) в настройках Битрикс24 (**KI-076**), поле `inviteCode` на форме регистрации и i18n ошибок.
 
 ### Sprint 24: Multi-Tenant MCP & Full K/L Track Capabilities
 
-* [ ] **[MCP-24.1]** Проброс per-user/per-tenant кредов из `ProviderCredential` в заголовки запросов к `ozon-mcp`, `wb-mcp`, `bitrix24-mcp`, `moysklad-mcp` (закрытие **KI-064**, **KI-077**).
-* [ ] **[MCP-24.2]** Расширение методов `moysklad-mcp` для треков K/L: создание отгрузки (`demand`), заказа поставщику (`purchaseorder`), проверка долга контрагента (`counterparty` balance) и техкарты/комплекты (`bundle`) (закрытие **KI-078**).
-* [ ] **[API-24.3]** Автоматический маппинг компании из сделки Битрикс24 в контрагента МойСклад при создании заказа (развитие **KI-080**).
+* [x] **[MCP-24.1]** Проброс per-user/per-tenant кредов из `ProviderCredential` в заголовки запросов к `ozon-mcp`, `wb-mcp`, `bitrix24-mcp`, `moysklad-mcp` (закрытие **KI-064**, **KI-077**).
+* [x] **[MCP-24.2]** Расширение методов `moysklad-mcp` для треков K/L: создание отгрузки (`demand`), заказа поставщику (`purchaseorder`), проверка долга контрагента (`counterparty` balance) и техкарты/комплекты (`bundle`) (закрытие **KI-078**).
+* [x] **[API-24.3]** Автоматический маппинг компании из сделки Битрикс24 в контрагента МойСклад при создании заказа (развитие **KI-080**).
 * [ ] **[QA-24.4]** Контрактные E2E-тесты с mock/sandbox LLM для полного цикла `tool_calls -> HITL approve -> Ledger capture` (закрытие **KI-049**).
-* [ ] **[BILLING-24.5]** Перевод Pay-per-Call на двухфазную блокировку Hold -> Capture (по спецификации Billing-Flows.md) для защиты от параллельного перерасхода баланса.
-* [ ] **[WEB-24.6]** Интерактивный превью-симулятор 12 треков (A–L) без регистрации и форма заявки Design Partner (с уведомлением в Telegram) на лендинге skillwharf.ru.
+* [x] **[BILLING-24.5]** Перевод Pay-per-Call на двухфазную блокировку Hold -> Capture (по спецификации Billing-Flows.md) для защиты от параллельного перерасхода баланса.
+* [x] **[WEB-24.6]** Интерактивный превью-симулятор 12 треков (A–L) без регистрации и форма заявки Design Partner (с уведомлением в Telegram) на лендинге skillwharf.ru.
 
 ---
 
@@ -87,3 +87,4 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-18 | Sprint 22 (22.1–22.3) | Infra / OpenCode / UI | Выполнено | Добавлены MCP-серверы Битрикс24/МойСклад, инструменты CRM/ERP и UI карточки | KI-075..KI-081 |
 | 2026-11-18 | Sprint 23 (23.1–23.3) | Infra / OpenCode / UI | В работе | Промпты отправлены: инвайты, live-проверки ERP, KI-076/079/081 | — |
+| 2026-11-18 | Sprint 24 (24.1–24.2) | Infra | Выполнено | Per-request креды в `bitrix24-mcp`/`moysklad-mcp`, новые методы K/L в `moysklad-mcp`, `MCP_ALLOW_MISSING_KEYS=1`; тесты MCP-серверов | KI-084 (Ozon/WB), KI-085 (OAuth/аудит) |

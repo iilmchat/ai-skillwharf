@@ -67,7 +67,7 @@
 | KI-063 | Integrations | Средняя | Исправлено | Ключи Ozon/WB/Midjourney сохраняются per-user в `ProviderCredential` (AES-256-GCM), маршруты `POST/DELETE /integrations/{ozon,wildberries,midjourney}` и статусы в `GET /integrations` реализованы; инструменты берут ключи из БД с fallback на env |
 | KI-061 | Finance | Низкая | Открыто | Ozon не привязывает комиссию/логистику к SKU в начислениях: `unit-economics` распределяет расходы по доле выручки SKU и не заменяет детализацию отчёта Ozon |
 | KI-062 | Finance | Средняя | Открыто | MCP-серверы Ozon/WB не отдают ERID/UTM отдельными полями: `fraud-shield-audit` проверяет их наличие в сырых данных кампании и сообщает об отсутствии, но не заменяет юридическую проверку маркировки |
-| KI-064 | Integrations | Средняя | Открыто | Личные ключи Ozon/WB сохраняются и видны в UI, но MCP-контейнеры аутентифицируются своими env-ключами (один набор на сервер), поэтому мульти-тенантные запросы идут под ключами контейнера |
+| KI-064 | Integrations | Средняя | Исправлено | Per-request креды передаются MCP-серверам заголовками; `bitrix24-mcp`/`moysklad-mcp` читают их вместо env. Сторонние `ozon-mcp-server`/`wb-mcp-server` остаются на env — остаточный KI-084 |
 | KI-065 | Frontend/Backend | Средняя | Исправлено | `POST /api/v1/documents` реализован: multipart-поле `file`, лимит 15 МБ, PDF/PNG/JPEG/WebP, ответ `{id, filename, mimeType, size, kind, text, tables, warnings, createdAt}`, ошибки 413/415 в едином JSON |
 | KI-066 | Frontend/Backend | Низкая | Открыто | Разметка результата агента (pipe-таблицы, ```` ```json ```` с резюме) — договорённость UI: если агент вернёт другую структуру, чат покажет её текстом/кодом; E2E на реальные tool-calls (KI-049) это не покрывает |
 | KI-067 | HITL | Низкая | Открыто | В `office_event` нет списка инструментов ожидания: карточка HITL узнаёт, что подтверждается публикация `dzen-article`, только из `GET /chat/pending`; при недоступном REST кнопка подписана нейтрально |
@@ -80,13 +80,15 @@
 | KI-074 | API | Низкая | Открыто | Нет REST-эндпоинта для отправки сообщений в чат (только Socket.IO). Swagger/Postman не могут протестировать чат напрямую. |
 | KI-075 | Integrations | Средняя | Исправлено | `POST /integrations/{bitrix24,moysklad}` сохраняют ключи в `ProviderCredential` (AES-256-GCM) только после live-проверки `profile.json` / `GET /entity/organization`; 401/403 — 400 `provider_auth_required`, сбой — 502 `provider_unavailable` |
 | KI-076 | Integrations | Низкая | Исправлено | Вебхук Битрикс24 маскируется по умолчанию (`type="password"`), переключатель «Показать»/«Скрыть» с `aria-label`/`aria-pressed` и предупреждение о секретном токене |
-| KI-077 | Integrations | Средняя | Открыто | MCP-серверы Битрикс24/МойСклад используют общий env-секрет на все диалоги; нет per-user credentials, OAuth и ротации токенов |
-| KI-078 | Integrations | Низкая | Открыто | MCP-обёртки Битрикс24/МойСклад покрывают ограниченный набор методов; нет webhook-событий, полноценной пагинации, retry/rate-limit и live-теста в CI |
+| KI-077 | Integrations | Средняя | Исправлено | Per-request креды Битрикс24/МойСклад через `X-Bitrix24-Webhook-Url`/`X-Moysklad-Token` с fallback на env; OAuth и ротация — KI-085 |
+| KI-078 | Integrations | Низкая | Исправлено | `moysklad-mcp` расширен методами K/L (demand/purchaseorder/counterparty report/bundle), пагинацией `limit`/`offset` и retry на 429/5xx |
 | KI-079 | Agent/HITL | Средняя | Исправлено | `GraphContext.approvalRules` фильтрует HITL по аргументам: `bitrix24_update_deal` останавливает граф только на `stageId = WON`/`*:WON`, промежуточные стадии и комментарии выполняются без паузы |
 | KI-080 | Agent/ERP | Высокая | Исправлено | `moysklad_create_order` передаёт `organization` и `agent` из `MOYSKLAD_DEFAULT_ORGANIZATION_ID`/`MOYSKLAD_DEFAULT_AGENT_ID`; без них — 503 `errors.provider_not_configured` до вызова MCP |
 | KI-081 | Agent/ERP | Средняя | Исправлено | `moysklad_check_stock` возвращает `tracked:false` для услуг/комплектов без `stock` и дополняет остаток `warehouses` из `stock_report` по артикулу; при недоступном отчёте — fallback на карточку |
 | KI-082 | Security | Средняя | Исправлено | `REGISTRATION_MODE`/`REGISTRATION_INVITE_CODE` читаются в `AuthService.register`; invite-only и закрытая регистрация реализованы вместе с KI-073 |
 | KI-083 | Integrations | Низкая | Открыто | Live-проверки Битрикс24/МойСклада есть в `test-integrations.sh`, но не запускаются в CI без секретов и проверяют только read-only profile/organization |
+| KI-084 | Integrations | Средняя | Открыто | `ozon-mcp-server`/`wb-mcp-server` — сторонние пакеты без исходников в `infra/mcp/`; Gateway шлёт per-request заголовки, но серверы по-прежнему читают env контейнера |
+| KI-085 | Security | Средняя | Открыто | Per-request заголовки доверяются внутренней compose-сети; нет OAuth, ротации/отзыва токенов и аудита источника кредов |
 
 ## Детали
 
@@ -1440,6 +1442,12 @@ env MCP-контейнера (для фактических запросов); �
 `McpClient` пробросит ключи из `ProviderCredential`. Требует изменений вне
 этого репозитория (PyPI-пакеты MCP-серверов).
 
+**Исправлено (Sprint 24, частично):** Gateway передаёт ключи пользователя
+заголовками `X-Bitrix24-Webhook-Url`, `X-Moysklad-Token`, `X-Ozon-Client-Id`,
+`X-Ozon-Api-Key`, `X-Wb-Api-Token`; `bitrix24-mcp` и `moysklad-mcp` принимают
+заголовки на `/sse` и `/messages` с fallback на env. Compliance по Ozon/WB
+ограничен сторонними пакетами — см. KI-084.
+
 ### KI-065 — UI загрузки документов без маршрута `POST /documents`
 
 **Влияние:** В чате есть полноценная загрузка PDF и сканов: drag-and-drop,
@@ -1743,6 +1751,12 @@ CI без реальных ключей live-проверки не выполн�
 `ProviderCredential`), передачу tenant-контекста в MCP-запросы, OAuth/токены
 с ограниченным сроком и аудит вызовов; после этого закрыть KI-075 и KI-077.
 
+**Исправлено (Sprint 24):** `bitrix24-mcp` валидирует и принимает
+`X-Bitrix24-Webhook-Url`, `moysklad-mcp` принимает `X-Moysklad-Token` и
+подставляет его в `Authorization: Bearer`. Fallback на env сохранён; значения
+заголовков не логируются, а невалидный webhook Битрикс24 отклоняется с HTTP
+400. Остатки — OAuth/ротация и доверие к внутренней сети (KI-085).
+
 ### KI-078 — Ограниченный набор методов MCP-обёрток
 
 **Влияние:** `bitrix24-mcp` поддерживает только CRM-сделки/контакты/компании
@@ -1761,6 +1775,13 @@ MCP подтверждением валидности токена.
 отгрузки, счета, производства), добавить пагинацию/retry/rate-limit,
 интеграционный тест с mock-сервером в CI и проверку credentials при
 подключении.
+
+**Исправлено (Sprint 24):** в `tools/list` `moysklad-mcp` добавлены
+`demand_create`, `purchase_order_create`, `counterparty_balance` и `bundle_get`;
+списочные методы принимают `limit`/`offset`, а вызовы JSON API повторяются до
+двух попыток с экспоненциальной задержкой на 429/5xx и сетевые ошибки. Покрыто
+юнит-тестами MCP-сервера. Webhook-события и live-тест в CI остаются вне этой
+задачи (KI-083).
 
 ### KI-079 — HITL для сделок подтверждает каждое изменение
 
@@ -1868,3 +1889,37 @@ reason: 'untracked_item' }` без ошибки. Для товаров с арт
 Actions (или staging-раннер), отдельные read-only тестовые аккаунты и
 контрактные тесты MCP-инструментов; при смене API обновлять mock-тесты и
 алертить по неуспешной live-проверке.
+
+### KI-084 — Сторонние Ozon/WB MCP не принимают per-request креды
+
+**Влияние:** `infra/mcp/ozon.Dockerfile` и `wb.Dockerfile` устанавливают
+готовые PyPI-пакеты `ozon-mcp-server==2.5.2` и `wb-mcp-server==2.6.1`; исходного
+кода этих серверов в репозитории нет. Gateway отправляет заголовки
+`X-Ozon-Client-Id`/`X-Ozon-Api-Key`/`X-Wb-Api-Token`, но серверы читают только
+env контейнера. В мульти-тенантном сценарии запросы Ozon/WB всё ещё идут под
+общими ключами, пока не будет отдельный инстанс на арендатора или форк пакета.
+
+**Обход:** Для пилота запускать отдельные MCP-контейнеры Ozon/WB с разными
+env-наборами (один арендатор — один контейнер) либо использовать API-ключи с
+минимальными правами. Не считать UI-статус подключения подтверждением, что
+фактический запрос ушёл под пользовательскими ключами.
+
+**План:** Форкнуть/запатчить `ozon-mcp-server` и `wb-mcp-server` с поддержкой
+per-request заголовков или перейти на собственные MCP-серверы в `infra/mcp/`;
+после этого закрыть KI-084.
+
+### KI-085 — Per-request креды без OAuth и аудита источника
+
+**Влияние:** `bitrix24-mcp` и `moysklad-mcp` принимают креды в заголовках
+внутренних MCP-запросов. Заголовки не логируются, но сама схема доверяет
+вызывающему в compose-сети: при компрометации сервиса с доступом к MCP можно
+подставить чужой вебхук/токен. Нет OAuth, короткоживущих токенов, ротации,
+отзыва и аудита того, кто именно передал креды.
+
+**Обход:** Держать MCP-порты (`5001`–`5004`) вне публичного доступа, требовать
+`MCP_AUTH_TOKEN`, передавать креды только Gateway из `ProviderCredential`.
+Не логировать тела MCP-запросов и заголовки.
+
+**План:** Подписать/привязать креды к tenant-контексту, добавить
+короткоживущие токены с ротацией, аудит `credential.source`/`userId` в
+append-only логе и проверку прав на вызов конкретного MCP-инструмента.

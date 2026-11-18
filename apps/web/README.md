@@ -21,6 +21,9 @@ path `/socket.io`). В production этот же путь проксирует re
 - `VITE_RAG_MEMORY_ENABLED` — включает раздел «Память» на странице
   настроек (по умолчанию выключен: read-API памяти ещё не реализован,
   см. `docs/KNOWN_ISSUES.md`, KI-023).
+- `VITE_LEAD_WEBHOOK_URL` — URL вебхука заявок Design Partner с лендинга.
+  Если не задан, форма собирает `mailto:` на `VITE_CONTACT_EMAIL` и текст
+  для копирования в Telegram (см. раздел «Лендинг»).
 
 ## Проверки
 
@@ -28,6 +31,53 @@ path `/socket.io`). В production этот же путь проксирует re
 pnpm --filter web lint
 pnpm --filter web build
 ```
+
+## Лендинг: превью AI-Офиса и заявка Design Partner
+
+Статический лендинг собирается отдельной командой:
+
+```bash
+VITE_APP_URL=https://app.skillwharf.ru \
+VITE_CONTACT_EMAIL=pilot@skillwharf.ru \
+pnpm --filter web build:landing
+```
+
+Готовый каталог `dist-landing` (вход — `index.html`) можно выложить в корень
+`skillwharf.ru`: приложение на лендинг не влияет. Интерактивные блоки:
+
+- **Превью AI-Офиса для 12 треков A–L** (`src/components/OfficeSimulator.tsx`,
+  данные — `src/lib/office-simulator.ts`). Клиентская state machine без
+  запросов к API: при выборе трека показываются 3–5 агентов и шаги сценария,
+  кнопка «Запустить демо-сценарий» переводит агентов в статус «Работает»,
+  сценарий останавливается на шаге HITL и продолжается после «Одобрить»;
+  в конце показывается итоговый результат. Таймеры очищаются при смене трека
+  и размонтировании, поэтому блок безопасен на статическом хостинге.
+- **Форма «Запросить инвайт на пилот»**
+  (`src/components/DesignPartnerSection.tsx`, схема —
+  `src/lib/design-partner.ts`). Поля: «Имя / Компания», контакт
+  (Telegram `@username`, телефон или email), отрасль (12 треков) и
+  необязательный комментарий. Валидация — Zod.
+
+`VITE_LEAD_WEBHOOK_URL` задаёт вебхук заявок: форма делает `POST` с JSON
+
+```json
+{
+  "name": "Иван, ООО «Пример»",
+  "contact": "@ivan_partner",
+  "track": "wholesale",
+  "comment": "Нужен пилот",
+  "source": "landing",
+  "language": "ru",
+  "submittedAt": "2026-11-18T10:00:00.000Z"
+}
+```
+
+Вебхук должен принимать POST, отвечать 2xx и разрешать CORS с домена
+лендинга для `Content-Type: application/json`. Если переменная не задана
+(или вебхук вернул ошибку), заявка не теряется: форма формирует `mailto:`
+на `VITE_CONTACT_EMAIL` и кнопку «Скопировать заявку для Telegram»; при
+недоступном Clipboard API текст показывается в поле для ручного
+копирования. На лендинге персональные данные не сохраняются.
 
 ## Брендбук и темы
 

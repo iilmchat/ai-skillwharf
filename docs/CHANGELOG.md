@@ -4,6 +4,69 @@
 
 ## [Unreleased]
 
+### Sprint 24: per-user MCP, маппинг контрагента и Pay-per-Call Hold → Capture
+
+- `MCP-24.1`: `MarketplaceMcpService` читает ключи пользователя из
+  `ProviderKeysService` (`bitrix24`, `moysklad`, `ozon`, `wb`) с fallback на
+  env и передаёт их в `McpClient` заголовками `X-Bitrix24-Webhook-Url`,
+  `X-Moysklad-Token`, `X-Ozon-Client-Id`, `X-Ozon-Api-Key`,
+  `X-Wb-Api-Token`. Клиент кешируется по endpoint + отпечатку кредов, поэтому
+  разные пользователи не делят SSE-сессию; значения заголовков не логируются.
+  Проверка «нужны env-ключи контейнера» снята: при наличии per-user ключей
+  вызов идёт без env API. MCP-серверы Битрикс24/МойСклад читают заголовки из
+  SSE-сессии и используют их вместо env.
+- `MCP-24.1` (infra): `bitrix24-mcp` валидирует `X-Bitrix24-Webhook-Url`
+  (`https://*.bitrix24.ru/rest/...` или локальные тесты) и возвращает 400 на
+  некорректное значение; `moysklad-mcp` читает `X-Moysklad-Token` и подставляет
+  его в `Authorization: Bearer`. Оба сервера поддерживают заголовок и на
+  `POST /messages`, не логируют значения кредов и сохраняют fallback на env.
+  `docker-compose.mcp.yml` по умолчанию ставит `MCP_ALLOW_MISSING_KEYS=1`.
+- `MCP-24.2`: `moysklad-mcp` добавил `demand_create`, `purchase_order_create`,
+  `counterparty_balance`, `bundle_get` в `tools/list`; списочные methods
+  поддерживают `limit`/`offset`, запросы к JSON API 1.2 повторяются до двух
+  попыток с экспоненциальным backoff на 429/5xx и сетевых сбоях. Добавлены
+  юнит-тесты MCP-серверов (`node --test`) на заголовки и новые методы.
+- `API-24.3`: `moysklad_create_order` запрашивает сделку через `crm_deal_get`,
+  получает название компании (`COMPANY_ID` → `crm_company_list`) или
+  `TITLE`, ищет точное совпадение в `counterparty_list` МойСклада и
+  подставляет найденный `id` в `agent`. Если контрагент не найден — fallback
+  на `MOYSKLAD_DEFAULT_AGENT_ID`; если нет ни того, ни другого — 503
+  `errors.provider_not_configured`. В ответ добавлен `counterpartySource`.
+- `BILLING-24.5`: Pay-per-Call переведён на двухфазную схему. До вызова
+  инструмента `authorizeHold` резервирует сумму (`heldBalance`, PENDING,
+  детерминированный ключ `paypercall:<conversationId>:<callId>`), при нехватке
+  средств — 402 `errors.insufficient_funds` до внешнего API/MCP/Sandbox. После
+  успеха — `captureHold` (PENDING → debit), при ошибке — `cancelHold`.
+  Freemium-вызовы остаются с постоплатой после успеха.
+- `REGISTRATION_MODE` валидируется Zod-`enum` при старте `AuthService`:
+  опечатка роняет запуск; значение, изменённое после старта, трактуется как
+  `closed`.
+- Тесты: заголовки per-user кредов в `McpClient` (SSE и POST), приоритет
+  кредов БД над env, маппинг контрагента и fallback в `moysklad_create_order`,
+  откат hold при ошибке и 402 до вызова, Zod-валидация режима регистрации.
+
+### Web: превью AI-Офиса для 12 треков и заявка Design Partner (WEB-24.6)
+
+- На лендинге (`apps/web/src/pages/LandingPage.tsx`) появился интерактивный
+  блок «Попробуйте AI-Офис в действии (12 отраслей)»
+  (`src/components/OfficeSimulator.tsx`): переключатель 12 треков A–L,
+  3–5 агентов трека, шаги сценария, статусы «Работает» / «Ждёт одобрения
+  (HITL)» и кнопка «Одобрить» с итоговым результатом. Симуляция — клиентская
+  state machine (`src/lib/office-simulator.ts`) без запросов к API, поэтому
+  блок работает на статическом `skillwharf.ru`.
+- Форма «Запросить инвайт на пилот» (`src/components/DesignPartnerSection.tsx`,
+  Zod-схема `src/lib/design-partner.ts`): имя/компания, контакт
+  (Telegram/телефон/email), отрасль A–L, комментарий. При заданном
+  `VITE_LEAD_WEBHOOK_URL` заявка уходит `POST` JSON; без вебхука или при его
+  ошибке формируются `mailto:` на `VITE_CONTACT_EMAIL` и текст для
+  копирования в Telegram, поэтому заявка не теряется.
+- Hero-CTA «Запросить пилот» ведёт на форму, «Смотреть демо» — на симулятор;
+  в навигации добавлен пункт «Демо». `VITE_LEAD_WEBHOOK_URL` описан в
+  `apps/web/README.md` и `src/vite-env.d.ts`.
+- Тесты: полнота 12 треков A–L и сценариев симулятора
+  (`office-simulator.test.ts`), Zod-схема и fallback-логика заявки
+  (`design-partner.test.ts`).
+
 ### Docs: синхронизация 12 треков, ROADMAP и staging-вебхуков
 
 - `SPRINTS-14-PLUS.md` помечен как архив со ссылкой на актуальный `ROADMAP.md`; исправлено правило markdownlint MD041.

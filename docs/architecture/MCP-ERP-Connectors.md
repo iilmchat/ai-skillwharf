@@ -10,9 +10,15 @@
 - MCP HTTP/SSE: `GET /sse` отдаёт `event: endpoint`, дальше JSON-RPC идёт
   POST-запросами на этот endpoint. Клиент — `apps/api/src/agent/tools/mcp-client.ts`.
 - Общая авторизация контейнеров — `MCP_AUTH_TOKEN` (Bearer на `/sse`).
-- Ключи провайдеров живут в окружении MCP-контейнеров, а не в API:
-  `BITRIX24_WEBHOOK_URL` (Битрикс24), `MOYSKLAD_TOKEN` и `MOYSKLAD_BASE_URL`
-  (МойСклад).
+- **Per-request креды (MCP-24.1):** Gateway передаёт их заголовками
+  `X-Bitrix24-Webhook-Url`, `X-Moysklad-Token`, `X-Ozon-Client-Id`,
+  `X-Ozon-Api-Key`, `X-Wb-Api-Token`. `bitrix24-mcp` и `moysklad-mcp` читают
+  заголовок на `GET /sse` и могут принять его повторно на `POST /messages`;
+  значения не логируются и не попадают в ошибки. Если заголовка нет —
+  используется env контейнера (fallback). Некорректный webhook Битрикс24
+  отклоняется с HTTP `400`.
+- `MCP_ALLOW_MISSING_KEYS=1` по умолчанию в `docker-compose.mcp.yml`: контейнер
+  стартует без глобальных секретов, когда креды приходят per-request.
 - Адрес сервера берётся из `mcp_endpoint` манифеста навыка; fallback —
   `BITRIX24_MCP_URL`/`MOYSKLAD_MCP_URL` (см. ADR 0004).
 
@@ -25,9 +31,27 @@
 | `moysklad_check_stock` | `product_get` | `{ id }` | карточка товара (`stock`, `reserve`) |
 | `moysklad_get_cost` | `product_get` | `{ id }` | карточка товара (`buyPrice.value`, копейки) |
 | `moysklad_create_order` | `customer_order_create` | `{ payload: { description, organization, agent, positions[] } }` | созданный заказ (`id`, `name`, `sum`) |
+| `demand_create` | `demand_create` | `{ payload: { name, agent, positions[] } }` | созданная отгрузка (`id`, `name`) |
+| `purchase_order_create` | `purchase_order_create` | `{ payload: { name, agent, positions[] } }` | созданный заказ поставщику (`id`, `name`) |
+| `counterparty_balance` | `counterparty_balance` | `{ filter?, limit?, offset? }` | отчёт `/report/counterparty` со строками и пагинацией |
+| `bundle_get` | `bundle_get` | `{ id }` или `{ article }` | карточка комплекта/состав изделия |
+
+Новые действия `moysklad-mcp` сейчас доступны в `tools/list`, но не все ещё
+имеют отдельные инструменты агента в `tool-schemas.ts`: Gateway продолжает
+проверять действие по discovery.
 
 Имена действий должны совпадать с `tools/list` MCP-сервера: Gateway
 отклоняет вызов действия, которого нет в discovery (KI-027).
+
+### Поведение `moysklad-mcp` при запросах к JSON API 1.2
+
+- Списочные методы принимают `limit` (1–100) и `offset` (≥0), дополнительно
+  `filter`/`search`/`expand` где применимо; `counterparty_balance` — только
+  `filter`, `limit`, `offset`.
+- `bundle_get` ищет по `id` через `/entity/bundle/{id}` или по артикулу через
+  `/entity/bundle?filter=article=...&limit=1`.
+- Повтор: не более двух попыток с экспоненциальной задержкой (200 мс, затем
+  400 мс) на HTTP 429/5xx и сетевые ошибки. 4xx (кроме 429) не повторяются.
 
 ## Схемы и ошибки
 
@@ -64,4 +88,10 @@
   инструмент отвечает 503 `errors.provider_not_configured` (автоматический
   маппинг контрагента из сделки — следующий шаг).
 - Остаток берётся из карточки товара, без разбивки по складам (KI-081).
-- Credentials общие на контейнер, без per-user подключения (KI-077).
+- Per-request креды реализованы для `bitrix24-mcp` и `moysklad-mcp` (KI-077
+  закрыт). Заголовки доверяются только внутренней compose-сети: обязательна
+  авторизация `MCP_AUTH_TOKEN` и передача кредов Gateway, а не клиентом (KI-085).
+- Ozon/WB — сторонние пакеты `ozon-mcp-server`/`wb-mcp-server`, в `infra/mcp/`
+  нет их исходников; заголовки отправляются Gateway, но серверы всё ещё читают
+  env контейнера (остаточный KI-084).
+- OAuth, ротация и отзыв токенов на уровне платформы пока не реализованы.
