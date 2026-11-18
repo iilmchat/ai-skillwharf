@@ -117,6 +117,9 @@ jobs:
           # эхо-заглушкой, и тест проверяет доставку ответа в UI.
           sed -i 's|^LLM_BASE_URL=.*|LLM_BASE_URL=|' .env
           sed -i 's|^LLM_MODEL=.*|LLM_MODEL=|' .env
+          # E2E создаёт тестового пользователя через /auth/register.
+          # В .env.example по умолчанию invite — в CI нужна открытая регистрация.
+          sed -i 's|^REGISTRATION_MODE=.*|REGISTRATION_MODE=open|' .env
           # E2E делает больше 5 логинов за минуту с одного IP.
           echo 'AUTH_LOGIN_LIMIT=100' >> .env
 
