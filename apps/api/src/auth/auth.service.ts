@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
 import {
   invalidInviteCodeError,
   invalidRequestError,
@@ -40,7 +41,9 @@ export interface UserProfile {
 }
 
 /** Режим регистрации (`REGISTRATION_MODE`, KI-073). */
-export type RegistrationMode = 'open' | 'invite' | 'closed';
+export const registrationModeSchema = z.enum(['open', 'invite', 'closed']);
+
+export type RegistrationMode = z.infer<typeof registrationModeSchema>;
 
 /** Непустое значение окружения или `null`. */
 function readEnv(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
@@ -50,20 +53,41 @@ function readEnv(name: string, env: NodeJS.ProcessEnv = process.env): string | n
 }
 
 /**
+ * Строгая проверка `REGISTRATION_MODE` при старте.
+ *
+ * `null` — переменная не задана (режим вычисляется по invite-коду). Если
+ * значение задано и не входит в enum, Zod бросает ошибку: приложение должно
+ * упасть на старте, а не открыть регистрацию из-за опечатки в `.env`.
+ */
+export function parseRegistrationModeEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): RegistrationMode | null {
+  const raw = env.REGISTRATION_MODE?.trim();
+
+  if (raw === undefined || raw === '') {
+    return null;
+  }
+
+  return registrationModeSchema.parse(raw.toLowerCase());
+}
+
+/**
  * Режим регистрации из окружения.
  *
  * Явный `REGISTRATION_MODE` имеет приоритет. Без него: если задан
- * `REGISTRATION_INVITE_CODE` — режим `invite` (fail closed), иначе `open`
- * (dev/тесты). Неизвестное значение трактуется так же, как отсутствие
- * переменной, а не как «открыто всем».
+ * `REGISTRATION_INVITE_CODE` — режим `invite`, иначе `open` (dev/тесты).
+ * Некорректное значение, попавшее в процесс уже после старта, трактуется
+ * как `closed` (fail closed).
  */
 export function resolveRegistrationMode(
   env: NodeJS.ProcessEnv = process.env,
 ): RegistrationMode {
-  const raw = env.REGISTRATION_MODE?.trim().toLowerCase();
+  const raw = env.REGISTRATION_MODE?.trim();
 
-  if (raw === 'open' || raw === 'invite' || raw === 'closed') {
-    return raw;
+  if (raw !== undefined && raw !== '') {
+    const parsed = registrationModeSchema.safeParse(raw.toLowerCase());
+
+    return parsed.success ? parsed.data : 'closed';
   }
 
   return readEnv('REGISTRATION_INVITE_CODE', env) === null ? 'open' : 'invite';
@@ -96,7 +120,10 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-  ) {}
+  ) {
+    // Fail fast: опечатка в REGISTRATION_MODE не должна открыть регистрацию.
+    parseRegistrationModeEnv();
+  }
 
   async register(dto: RegisterDto): Promise<RegisteredUser> {
     const parsed = registerSchema.safeParse(dto);

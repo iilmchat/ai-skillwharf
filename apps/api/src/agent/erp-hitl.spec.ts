@@ -284,7 +284,7 @@ describe('ERP-навыки: HITL-гейт Runtime', () => {
     expect(tools.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('чтение сделки не требует одобрения и списывает Pay-per-Call', async () => {
+  it('чтение сделки не требует одобрения и делает Hold → Capture', async () => {
     const { runtime, tools, billing, pending } = createRuntime(false);
 
     await runtime.executeTools(
@@ -293,12 +293,13 @@ describe('ERP-навыки: HITL-гейт Runtime', () => {
 
     expect(pending.hasApprovedGrant).not.toHaveBeenCalled();
     expect(tools.execute).toHaveBeenCalledTimes(1);
-    expect(billing.checkAndChargeSkill).toHaveBeenCalledWith(
+    expect(billing.authorizeHold).toHaveBeenCalledWith(
       'user-1',
-      'bitrix24-crm',
       15,
-      0,
+      'paypercall:c1:call-1',
     );
+    expect(billing.captureHold).toHaveBeenCalledWith('hold-1');
+    expect(billing.checkAndChargeSkill).not.toHaveBeenCalled();
   });
 
   it('ошибка проверки одобрения трактуется как «нет одобрения»', async () => {

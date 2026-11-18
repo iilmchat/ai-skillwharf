@@ -73,9 +73,33 @@ const bitrixDealSchema = z.object({
 
 const bitrixDealResponseSchema = z.object({ result: bitrixDealSchema });
 
+/** Компания в ответе `crm.company.list` (нужна для имени контрагента). */
+const bitrixCompanyListResponseSchema = z.object({
+  result: z.array(
+    z.object({
+      ID: bitrixIdSchema,
+      TITLE: z.string().optional(),
+    }),
+  ),
+});
+
 const bitrixUpdateResponseSchema = z.object({
   result: z.union([z.boolean(), z.record(z.string(), z.unknown())]),
 });
+
+/** Контрагент МойСклада в ответе `counterparty_list`. */
+const moyskladCounterpartySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  inn: z.string().optional(),
+  meta: z.object({ href: z.string().min(1) }).optional(),
+});
+
+/** Ответ `counterparty_list`: массив строк или конверт `{ rows }`. */
+const moyskladCounterpartyListResponseSchema = z.union([
+  z.array(moyskladCounterpartySchema),
+  z.object({ rows: z.array(moyskladCounterpartySchema) }),
+]);
 
 /** Товар МойСклад: остаток, резерв и закупочная цена. */
 const moyskladProductSchema = z.object({
@@ -439,17 +463,174 @@ function readOptionalEnv(name: string): string | null {
 }
 
 /**
+ * Значение для `filter` МойСклада: убираем разделители условий и ограничиваем
+ * длину, чтобы название сделки не могло добавить своё условие фильтра.
+ */
+function sanitizeMoyskladFilterValue(value: string): string {
+  return value
+    .replace(/[;\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 255);
+}
+
+/**
+ * Контекст вызова Битрикс24 из ERP-инструмента МойСклада.
+ *
+ * `context.endpoint` относится к MCP МойСклада, поэтому для Битрикс24 адрес
+ * берётся отдельно: `mcp_endpoint` навыка или `BITRIX24_MCP_URL`.
+ */
+function bitrixToolContext(
+  mcp: MarketplaceMcpService,
+  context: ErpToolContext,
+): ErpToolContext {
+  const endpoint = mcp.endpointFor('bitrix24', {
+    skills: context.skills,
+  });
+
+  return {
+    ...(endpoint === null ? {} : { endpoint }),
+    ...(context.authToken === undefined
+      ? {}
+      : { authToken: context.authToken }),
+    ...(context.skills === undefined ? {} : { skills: context.skills }),
+    ...(context.userId === undefined ? {} : { userId: context.userId }),
+  };
+}
+
+/** Ищет контрагента по точному названию (регистр не важен). */
+async function findMoyskladCounterpartyByName(
+  mcp: MarketplaceMcpService,
+  name: string,
+  context: ErpToolContext,
+): Promise<string | null> {
+  const searchName = sanitizeMoyskladFilterValue(name);
+
+  if (searchName === '') {
+    return null;
+  }
+
+  const action = MOYSKLAD_MCP_ACTIONS.counterpartyList;
+  const text = await mcp.call(
+    'moysklad',
+    action,
+    { filter: `name=${searchName}`, limit: 10 },
+    context,
+  );
+  const parsed = parseProviderResult(
+    action,
+    moyskladCounterpartyListResponseSchema,
+    parseMcpJson(action, text),
+  );
+  const rows = Array.isArray(parsed) ? parsed : parsed.rows;
+  const normalized = searchName.toLowerCase();
+  const exact = rows.find(
+    (row) => row.name?.trim().toLowerCase() === normalized,
+  );
+
+  return exact?.id ?? null;
+}
+
+/** Название компании Битрикс24 по ID (для поиска контрагента). */
+async function findBitrixCompanyTitle(
+  mcp: MarketplaceMcpService,
+  companyId: string,
+  context: ErpToolContext,
+): Promise<string | null> {
+  const action = BITRIX24_MCP_ACTIONS.companyList;
+  const text = await mcp.call(
+    'bitrix24',
+    action,
+    { filter: { ID: companyId }, select: ['ID', 'TITLE'] },
+    bitrixToolContext(mcp, context),
+  );
+  const parsed = parseProviderResult(
+    action,
+    bitrixCompanyListResponseSchema,
+    parseMcpJson(action, text),
+  );
+  const title = parsed.result[0]?.TITLE?.trim() ?? '';
+
+  return title === '' ? null : title;
+}
+
+/**
+ * Ищет контрагента МойСклада по сделке Битрикс24 (API-24.3).
+ *
+ * Сначала берётся название компании (`COMPANY_ID` → `crm_company_list`),
+ * затем заголовок сделки (`TITLE`). Совпадение — только точное название,
+ * чтобы не подставить случайного контрагента. Любая ошибка провайдера
+ * означает «не найден»: заказ продолжит работу с дефолтным агентом.
+ */
+async function findMoyskladCounterpartyForDeal(
+  mcp: MarketplaceMcpService,
+  dealId: string,
+  context: ErpToolContext,
+): Promise<string | null> {
+  try {
+    const dealAction = BITRIX24_MCP_ACTIONS.dealGet;
+    const dealText = await mcp.call(
+      'bitrix24',
+      dealAction,
+      { id: dealId },
+      bitrixToolContext(mcp, context),
+    );
+    const deal = parseProviderResult(
+      dealAction,
+      bitrixDealResponseSchema,
+      parseMcpJson(dealAction, dealText),
+    ).result;
+    const candidates: string[] = [];
+
+    if (deal.COMPANY_ID !== undefined) {
+      // Ошибка чтения компании не должна отменять поиск по TITLE сделки.
+      const companyTitle = await findBitrixCompanyTitle(
+        mcp,
+        deal.COMPANY_ID,
+        context,
+      ).catch(() => null);
+
+      if (companyTitle !== null) {
+        candidates.push(companyTitle);
+      }
+    }
+
+    if (deal.TITLE !== undefined && deal.TITLE.trim() !== '') {
+      candidates.push(deal.TITLE.trim());
+    }
+
+    for (const name of new Set(candidates)) {
+      const counterpartyId = await findMoyskladCounterpartyByName(
+        mcp,
+        name,
+        context,
+      ).catch(() => null);
+
+      if (counterpartyId !== null) {
+        return counterpartyId;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Организация и контрагент по умолчанию для заказа покупателя.
  *
- * JSON API 1.2 требует оба поля, а в сделке Битрикс24 лежат только ID
- * компании/контакта CRM, которые не являются сущностями МойСклада. Для
- * пилота берём дефолтные ID из окружения API (KI-080); если их нет или
- * формат неверный — понятная 503 `errors.provider_not_configured`, а не 412
- * от МойСклада после успешного сбора позиций.
+ * JSON API 1.2 требует оба поля. Контрагент сначала ищется по сделке
+ * (`mappedAgentId`); если не найден — берётся `MOYSKLAD_DEFAULT_AGENT_ID`
+ * (KI-080). Организация всегда из env. Если нет ни того, ни другого —
+ * понятная 503 `errors.provider_not_configured` до вызова MCP.
  */
-function resolveMoyskladOrderDefaults(): MoyskladOrderDefaults {
+function resolveMoyskladOrderDefaults(
+  mappedAgentId?: string,
+): MoyskladOrderDefaults {
   const organizationId = readOptionalEnv('MOYSKLAD_DEFAULT_ORGANIZATION_ID');
-  const agentId = readOptionalEnv('MOYSKLAD_DEFAULT_AGENT_ID');
+  const agentId =
+    mappedAgentId?.trim() ?? readOptionalEnv('MOYSKLAD_DEFAULT_AGENT_ID');
   const missing: string[] = [];
 
   if (organizationId === null) {
@@ -502,17 +683,23 @@ function resolveMoyskladOrderDefaults(): MoyskladOrderDefaults {
  *
  * Позиции собираются по ID товаров: `product_get` даёт `meta.href` (без него
  * JSON API 1.2 не принимает позицию) и цену продажи, если её не передали.
- * Организация и контрагент — обязательные поля заказа: для пилота они берутся
- * из `MOYSKLAD_DEFAULT_ORGANIZATION_ID`/`MOYSKLAD_DEFAULT_AGENT_ID`, иначе
- * вызов падает с 503 `errors.provider_not_configured` (KI-080).
+ * Контрагент ищется по сделке Битрикс24 (`COMPANY_ID`/`TITLE`), иначе берётся
+ * `MOYSKLAD_DEFAULT_AGENT_ID`; организация — всегда
+ * `MOYSKLAD_DEFAULT_ORGANIZATION_ID`. Если контрагента нет ни там, ни там —
+ * 503 `errors.provider_not_configured` (KI-080, API-24.3).
  */
 export async function moyskladCreateOrder(
   mcp: MarketplaceMcpService,
   args: MoyskladCreateOrderArgs,
   context: ErpToolContext = {},
 ): Promise<string> {
-  // Проверяем конфигурацию до вызовов MCP: не собираем позиции впустую.
-  const defaults = resolveMoyskladOrderDefaults();
+  const mappedAgentId = await findMoyskladCounterpartyForDeal(
+    mcp,
+    args.dealId,
+    context,
+  );
+  // Проверяем конфигурацию до сбора позиций: не ходим в MCP впустую.
+  const defaults = resolveMoyskladOrderDefaults(mappedAgentId ?? undefined);
   const positions: Array<{
     quantity: number;
     price: number;
@@ -586,6 +773,7 @@ export async function moyskladCreateOrder(
     orderId: order.id,
     orderName: order.name,
     dealId: args.dealId,
+    counterpartySource: mappedAgentId === null ? 'default' : 'deal',
     positions: positions.length,
     sum:
       order.sum === undefined

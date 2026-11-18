@@ -47,12 +47,14 @@ export type McpProvider = 'ozon' | 'wb' | 'bitrix24' | 'moysklad';
 export const BITRIX24_MCP_ACTIONS = {
   dealGet: 'crm_deal_get',
   dealUpdate: 'crm_deal_update',
+  companyList: 'crm_company_list',
 } as const;
 
 /** Действия MCP-сервера МойСклад (реальные имена из `tools/list`). */
 export const MOYSKLAD_MCP_ACTIONS = {
   productGet: 'product_get',
   stockReport: 'stock_report',
+  counterpartyList: 'counterparty_list',
   customerOrderCreate: 'customer_order_create',
 } as const;
 
@@ -386,6 +388,16 @@ const BITRIX24_ACTION_SCHEMAS = {
       COMMENTS: z.string().max(4_000).optional(),
     }),
   }),
+  [BITRIX24_MCP_ACTIONS.companyList]: z.strictObject({
+    filter: z
+      .record(
+        z.string().min(1).max(64),
+        z.union([z.string().max(256), z.number()]),
+      )
+      .optional(),
+    select: z.array(z.string().min(1).max(64)).max(50).optional(),
+    start: z.number().int().min(0).optional(),
+  }),
 };
 
 /** Строгие схемы действий МойСклад. */
@@ -394,6 +406,12 @@ const MOYSKLAD_ACTION_SCHEMAS = {
     id: moyskladEntityIdSchema,
   }),
   [MOYSKLAD_MCP_ACTIONS.stockReport]: z.strictObject({
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+    filter: z.string().min(1).max(512).optional(),
+    search: z.string().min(1).max(256).optional(),
+  }),
+  [MOYSKLAD_MCP_ACTIONS.counterpartyList]: z.strictObject({
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
     filter: z.string().min(1).max(512).optional(),

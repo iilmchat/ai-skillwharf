@@ -1,7 +1,14 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
+import { insufficientFundsError } from '../common/api-error.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { EgressPolicy } from '../sandbox/egress.js';
 import { AgentGatewayService } from '../security/agent-gateway.service.js';
 import { extractSecretCandidates } from '../security/policy/secret-taint.js';
@@ -50,6 +57,22 @@ interface ToolPrice {
   price: number;
   skillName: string;
   freeCallsLimit: number;
+  model: 'Pay-per-Call' | 'Freemium';
+}
+
+/**
+ * Превращает «недостаточно средств» из BAL в 402 до вызова провайдера.
+ * `authorizeHold` исторически бросает 400 — контракт Gateway требует 402.
+ */
+function rethrowPaymentRequired(error: unknown): never {
+  if (
+    error instanceof BadRequestException &&
+    error.message === ERROR_KEYS.insufficientFunds
+  ) {
+    throw insufficientFundsError(ERROR_KEYS.insufficientFunds);
+  }
+
+  throw error;
 }
 
 /** Цена Pay-per-Call/Freemium инструмента из манифеста навыка. */
@@ -85,6 +108,7 @@ function resolveToolPrice(
       price: pricing.price,
       skillName: manifest.name,
       freeCallsLimit: pricing.freeCallsLimit ?? 0,
+      model: pricing.model,
     };
   }
 
@@ -202,27 +226,51 @@ export class AgentRuntimeService {
         let holdEntryId = request.preAuthorizedHolds[call.id];
 
         if (holdEntryId === undefined && outcome !== undefined) {
-          const authorized = await this.billingService.authorizeHold(
-            request.userId,
-            outcome.price,
-            randomUUID(),
-          );
+          try {
+            const authorized = await this.billingService.authorizeHold(
+              request.userId,
+              outcome.price,
+              randomUUID(),
+            );
 
-          holdEntryId = authorized.entryId;
+            holdEntryId = authorized.entryId;
+          } catch (error) {
+            rethrowPaymentRequired(error);
+          }
         }
 
         const pricing = resolveToolPrice(request.skills, call.name);
+        // Pay-per-Call: hold строго до вызова провайдера, capture — после
+        // успеха, cancel — при любой ошибке (BILLING-24.5).
+        let payPerCallHoldId: string | undefined;
+
+        if (pricing?.model === 'Pay-per-Call') {
+          try {
+            const authorized = await this.billingService.authorizeHold(
+              request.userId,
+              pricing.price,
+              `paypercall:${request.conversationId}:${call.id}`,
+            );
+
+            payPerCallHoldId = authorized.entryId;
+          } catch (error) {
+            rethrowPaymentRequired(error);
+          }
+        }
+
+        // Freemium остаётся постоплатным: бесплатные вызовы и остаток лимита
+        // учитываются после успешного выполнения.
         const beforeExecute =
-          pricing === null
-            ? undefined
-            : async (): Promise<void> => {
+          pricing?.model === 'Freemium'
+            ? async (): Promise<void> => {
                 await this.billingService.checkAndChargeSkill(
                   request.userId,
                   pricing.skillName,
                   pricing.price,
                   pricing.freeCallsLimit,
                 );
-              };
+              }
+            : undefined;
         const egress = resolveToolEgress(request.skills, call.name);
         const endpoint = resolveToolMcpEndpoint(request.skills, call.name);
 
@@ -237,11 +285,19 @@ export class AgentRuntimeService {
             ...(endpoint === undefined ? {} : { endpoint }),
           });
         } catch (error) {
+          if (payPerCallHoldId !== undefined) {
+            await this.billingService.cancelHold(payPerCallHoldId);
+          }
+
           if (holdEntryId !== undefined) {
             await this.billingService.cancelHold(holdEntryId);
           }
 
           throw error;
+        }
+
+        if (payPerCallHoldId !== undefined) {
+          await this.billingService.captureHold(payPerCallHoldId);
         }
 
         if (holdEntryId !== undefined) {
@@ -281,11 +337,13 @@ export class AgentRuntimeService {
           continue;
         }
 
-        const authorized = await this.billingService.authorizeHold(
-          request.userId,
-          outcome.price,
-          `approval:${request.conversationId}:${call.id}`,
-        );
+        const authorized = await this.billingService
+          .authorizeHold(
+            request.userId,
+            outcome.price,
+            `approval:${request.conversationId}:${call.id}`,
+          )
+          .catch(rethrowPaymentRequired);
 
         holds.push({
           callId: call.id,

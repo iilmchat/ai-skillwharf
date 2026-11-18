@@ -506,6 +506,144 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
     expect(order.isDone()).toBe(true);
   });
 
+  it('moysklad_create_order находит контрагента по компании сделки (API-24.3)', async () => {
+    delete process.env.MOYSKLAD_DEFAULT_AGENT_ID;
+    process.env.BITRIX24_MCP_URL = bitrixMcpUrl;
+
+    const deal = nock(BITRIX_API)
+      .post('/rest/1/token/crm.deal.get.json', { id: '42' })
+      .reply(200, {
+        result: {
+          ID: '42',
+          TITLE: 'Поставка стульев',
+          COMPANY_ID: '7',
+        },
+        time: {},
+      });
+    const company = nock(BITRIX_API)
+      .post('/rest/1/token/crm.company.list.json', {
+        filter: { ID: '7' },
+        select: ['ID', 'TITLE'],
+      })
+      .reply(200, {
+        result: [{ ID: '7', TITLE: 'ООО "Стулья"' }],
+        time: {},
+      });
+    const counterparty = nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/counterparty`)
+      .query({ filter: 'name=ООО "Стулья"', limit: 10 })
+      .reply(200, {
+        rows: [
+          {
+            id: 'counterparty-77',
+            name: 'ООО "Стулья"',
+            meta: {
+              href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/counterparty/counterparty-77`,
+            },
+          },
+        ],
+      });
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/product/product-1`)
+      .reply(200, {
+        id: 'product-1',
+        meta: {
+          href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/product/product-1`,
+        },
+        salePrices: [{ value: 120000 }],
+      });
+
+    const order = nock(MOYSKLAD_API)
+      .post(`${MOYSKLAD_REMAP}/entity/customerorder`, {
+        description: 'Заказ по сделке Битрикс24 #42',
+        organization: {
+          meta: {
+            href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/organization/${MOYSKLAD_ORGANIZATION_ID}`,
+            type: 'organization',
+            mediaType: 'application/json',
+          },
+        },
+        agent: {
+          meta: {
+            href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/counterparty/counterparty-77`,
+            type: 'counterparty',
+            mediaType: 'application/json',
+          },
+        },
+        positions: [
+          {
+            quantity: 2,
+            price: 120000,
+            assortment: {
+              meta: {
+                href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/product/product-1`,
+                type: 'product',
+                mediaType: 'application/json',
+              },
+            },
+          },
+        ],
+      })
+      .reply(200, {
+        id: 'order-1',
+        name: 'Заказ покупателя №1',
+        sum: 240000,
+      });
+
+    const result = await moyskladCreateOrder(
+      createService(),
+      { dealId: '42', items: [{ productId: 'product-1', quantity: 2 }] },
+      { endpoint: moyskladMcpUrl },
+    );
+
+    expect(JSON.parse(result)).toMatchObject({
+      orderId: 'order-1',
+      counterpartySource: 'deal',
+    });
+    expect(deal.isDone()).toBe(true);
+    expect(company.isDone()).toBe(true);
+    expect(counterparty.isDone()).toBe(true);
+    expect(order.isDone()).toBe(true);
+  });
+
+  it('moysklad_create_order: контрагент не найден — fallback на env-агента', async () => {
+    process.env.BITRIX24_MCP_URL = bitrixMcpUrl;
+
+    nock(BITRIX_API)
+      .post('/rest/1/token/crm.deal.get.json', { id: '42' })
+      .reply(200, {
+        result: { ID: '42', TITLE: 'Разовая продажа' },
+      });
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/counterparty`)
+      .query({ filter: 'name=Разовая продажа', limit: 10 })
+      .reply(200, { rows: [] });
+    nock(MOYSKLAD_API)
+      .get(`${MOYSKLAD_REMAP}/entity/product/product-1`)
+      .reply(200, {
+        id: 'product-1',
+        meta: {
+          href: `${MOYSKLAD_API}${MOYSKLAD_REMAP}/entity/product/product-1`,
+        },
+        salePrices: [{ value: 100000 }],
+      });
+    const order = nock(MOYSKLAD_API)
+      .post(`${MOYSKLAD_REMAP}/entity/customerorder`)
+      .reply(200, { id: 'order-2', sum: 100000 });
+
+    const result = await moyskladCreateOrder(
+      createService(),
+      { dealId: '42', items: [{ productId: 'product-1', quantity: 1 }] },
+      { endpoint: moyskladMcpUrl },
+    );
+
+    expect(JSON.parse(result)).toMatchObject({
+      orderId: 'order-2',
+      counterpartySource: 'default',
+    });
+    expect(order.isDone()).toBe(true);
+  });
+
   it('429 МойСклада на создание заказа — 502 с HTTP-статусом', async () => {
     nock(MOYSKLAD_API)
       .get(`${MOYSKLAD_REMAP}/entity/product/product-1`)
@@ -518,6 +656,7 @@ describe('moysklad-warehouse: реальные MCP-серверы + nock на JS
       });
     nock(MOYSKLAD_API)
       .post(`${MOYSKLAD_REMAP}/entity/customerorder`)
+      .twice()
       .reply(429, { errors: [{ error: 'Слишком много запросов' }] });
 
     const error = await captureApiError(

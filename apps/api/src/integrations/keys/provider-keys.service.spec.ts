@@ -398,6 +398,47 @@ describe('ProviderKeysService: ключи для инструментов (БД 
     });
   });
 
+  it('bitrix24Webhook и moyskladToken: БД приоритетнее env (MCP-24.1)', async () => {
+    const { service } = createHarness();
+
+    process.env.SKIP_INTEGRATION_LIVE_CHECK = 'true';
+    process.env.BITRIX24_WEBHOOK_URL =
+      'https://env.bitrix24.ru/rest/1/env-token/';
+    process.env.MOYSKLAD_TOKEN = 'env-moysklad-token';
+
+    await service.connectBitrix24('user-1', {
+      webhookUrl: 'https://user.bitrix24.ru/rest/1/user-token/',
+    });
+    await service.connectMoysklad('user-1', {
+      apiToken: 'user-moysklad-token',
+    });
+
+    await expect(service.bitrix24Webhook('user-1')).resolves.toEqual({
+      webhookUrl: 'https://user.bitrix24.ru/rest/1/user-token/',
+      source: 'user',
+    });
+    await expect(service.moyskladToken('user-1')).resolves.toEqual({
+      token: 'user-moysklad-token',
+      source: 'user',
+    });
+    await expect(service.bitrix24Webhook('user-2')).resolves.toEqual({
+      webhookUrl: 'https://env.bitrix24.ru/rest/1/env-token/',
+      source: 'env',
+    });
+    await expect(service.moyskladToken('user-2')).resolves.toEqual({
+      token: 'env-moysklad-token',
+      source: 'env',
+    });
+    await expect(service.bitrix24Webhook()).resolves.toEqual({
+      webhookUrl: 'https://env.bitrix24.ru/rest/1/env-token/',
+      source: 'env',
+    });
+
+    delete process.env.SKIP_INTEGRATION_LIVE_CHECK;
+    delete process.env.BITRIX24_WEBHOOK_URL;
+    delete process.env.MOYSKLAD_TOKEN;
+  });
+
   it('битые ключи в БД не блокируют fallback на env', async () => {
     const { service, rows } = createHarness();
 

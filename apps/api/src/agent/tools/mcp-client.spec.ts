@@ -138,6 +138,58 @@ describe('McpClient', () => {
     );
   });
 
+  it('передаёт per-user креды заголовками в SSE и POST (MCP-24.1)', async () => {
+    const fetchMock = vi.fn<FetchMock>(
+      createMcpFetchMock((request) => {
+        if (request.method === 'initialize') {
+          return rpcResult(request.id, {});
+        }
+
+        if (request.method === 'tools/call') {
+          return rpcResult(request.id, {
+            content: [{ type: 'text', text: 'ok' }],
+          });
+        }
+
+        return undefined;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const credentials = {
+      'X-Moysklad-Token': 'moysklad-user-token',
+      'X-Bitrix24-Webhook-Url':
+        'https://portal.bitrix24.ru/rest/1/secret/',
+    };
+    const client = new McpClient({
+      baseUrl: 'http://mcp.local',
+      headers: credentials,
+      timeoutMs: 1_000,
+    });
+
+    try {
+      await expect(client.callTool('product_get', {})).resolves.toBe('ok');
+
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(init?.headers).toMatchObject(credentials);
+      }
+    } finally {
+      client.close();
+    }
+  });
+
+  it('отклоняет CR/LF в per-user заголовке (header injection)', () => {
+    expect(
+      () =>
+        new McpClient({
+          baseUrl: 'http://mcp.local',
+          headers: { 'X-Moysklad-Token': 'token\r\nX-Evil: 1' },
+        }),
+    ).toThrow();
+  });
+
   it('оборачивает сетевой сбой в McpTransportError (transient)', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('network down'));
     vi.stubGlobal('fetch', fetchMock);

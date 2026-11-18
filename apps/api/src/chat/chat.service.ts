@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -22,7 +21,10 @@ import {
   LlmRouterService,
   type LlmRouteSelection,
 } from '../llm-router/llm-router.service.js';
-import { ApiException } from '../common/api-error.js';
+import {
+  ApiException,
+  insufficientFundsError,
+} from '../common/api-error.js';
 import { CheckpointStoreService } from '../agent/checkpoint-store.service.js';
 import {
   PendingApprovalService,
@@ -699,7 +701,7 @@ export class ChatService {
     const { balance } = await this.billingService.getBalance(userId);
 
     if (Number.parseFloat(balance) < MIN_AGENT_BALANCE) {
-      throw new BadRequestException(ERROR_KEYS.insufficientFunds);
+      throw insufficientFundsError(ERROR_KEYS.insufficientFunds);
     }
   }
 

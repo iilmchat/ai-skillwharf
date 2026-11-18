@@ -91,6 +91,18 @@ export interface ResolvedMidjourneyKey {
   readonly source: 'user' | 'env';
 }
 
+/** Входящий вебхук Битрикс24 и источник ключа. */
+export interface ResolvedBitrix24Webhook {
+  readonly webhookUrl: string;
+  readonly source: 'user' | 'env';
+}
+
+/** Токен МойСклада и источник ключа. */
+export interface ResolvedMoyskladToken {
+  readonly token: string;
+  readonly source: 'user' | 'env';
+}
+
 const CIPHER_ERROR =
   'Ключи сохранены, но не расшифровываются: проверьте TOKEN_ENCRYPTION_KEY или подключите интеграцию заново';
 
@@ -103,9 +115,9 @@ const CIPHER_ERROR =
  * `MidjourneyService`) читают ключи Ozon/WB/Midjourney по `userId` и падают
  * обратно на env (системные ключи для ботов/локальной разработки).
  *
- * Ключи Битрикс24/МойСклада (Треки K/L) сохраняются тем же способом, но
- * MCP-серверы пока читают общий env-секрет контейнера — per-user вызовы это
- * отдельный шаг (KI-077).
+ * Ключи Битрикс24/МойСклада (Треки K/L) сохраняются тем же способом и
+ * отдаются `MarketplaceMcpService` для per-user заголовков MCP
+ * (`X-Bitrix24-Webhook-Url`, `X-Moysklad-Token`, `MCP-24.1`).
  */
 @Injectable()
 export class ProviderKeysService {
@@ -304,6 +316,56 @@ export class ProviderKeysService {
     }
 
     const envToken = readEnv('WB_API_TOKEN');
+
+    return envToken === null ? null : { token: envToken, source: 'env' };
+  }
+
+  /**
+   * Входящий вебхук Битрикс24: подключение пользователя → env.
+   *
+   * Используется per-user MCP-вызовами (`MCP-24.1`): значение уходит только
+   * в заголовок `X-Bitrix24-Webhook-Url`, в логи не попадает.
+   */
+  async bitrix24Webhook(
+    userId?: string,
+  ): Promise<ResolvedBitrix24Webhook | null> {
+    const row = await this.find(userId, 'bitrix24');
+
+    if (row !== null) {
+      const secret = this.decrypt(row.secret, 'bitrix24');
+      const parsed =
+        secret === null ? null : bitrix24SecretSchema.safeParse(secret);
+
+      if (parsed !== null && parsed.success) {
+        return {
+          webhookUrl: parsed.data.webhookUrl,
+          source: 'user',
+        };
+      }
+    }
+
+    const envWebhook = readEnv('BITRIX24_WEBHOOK_URL');
+
+    return envWebhook === null
+      ? null
+      : { webhookUrl: envWebhook, source: 'env' };
+  }
+
+  /** Токен МойСклада: подключение пользователя → env (`MCP-24.1`). */
+  async moyskladToken(userId?: string): Promise<ResolvedMoyskladToken | null> {
+    const row = await this.find(userId, 'moysklad');
+
+    if (row !== null) {
+      const secret = this.decrypt(row.secret, 'moysklad');
+      const parsed =
+        secret === null ? null : moyskladSecretSchema.safeParse(secret);
+
+      if (parsed !== null && parsed.success) {
+        return { token: parsed.data.apiToken, source: 'user' };
+      }
+    }
+
+    const envToken = readEnv('MOYSKLAD_TOKEN');
 
     return envToken === null ? null : { token: envToken, source: 'env' };
   }

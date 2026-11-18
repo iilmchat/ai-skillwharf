@@ -5,7 +5,11 @@ import * as argon2 from 'argon2';
 import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AuthService, resolveRegistrationMode } from './auth.service.js';
+import {
+  AuthService,
+  parseRegistrationModeEnv,
+  resolveRegistrationMode,
+} from './auth.service.js';
 import type { JwtPayload } from './jwt.strategy.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
@@ -176,11 +180,24 @@ describe('AuthService', () => {
       });
     });
 
-    it('неизвестный REGISTRATION_MODE не открывает регистрацию при заданном коде', () => {
-      process.env.REGISTRATION_MODE = 'sometimes';
-      process.env.REGISTRATION_INVITE_CODE = 'design-partner-2026';
+    it('некорректный REGISTRATION_MODE падает при старте (Zod enum)', () => {
+      expect(() =>
+        parseRegistrationModeEnv({
+          REGISTRATION_MODE: 'opne',
+        } as NodeJS.ProcessEnv),
+      ).toThrow();
+      expect(
+        parseRegistrationModeEnv({
+          REGISTRATION_MODE: 'invite',
+        } as NodeJS.ProcessEnv),
+      ).toBe('invite');
+      expect(parseRegistrationModeEnv({} as NodeJS.ProcessEnv)).toBeNull();
+    });
 
-      expect(resolveRegistrationMode()).toBe('invite');
+    it('неизвестный REGISTRATION_MODE после старта трактуется как closed', () => {
+      process.env.REGISTRATION_MODE = 'sometimes';
+
+      expect(resolveRegistrationMode()).toBe('closed');
     });
   });
 

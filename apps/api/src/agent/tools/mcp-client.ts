@@ -8,10 +8,34 @@ import { z } from 'zod';
 export interface McpClientOptions {
   baseUrl: string;
   authToken?: string;
+  /**
+   * Дополнительные заголовки MCP-запроса (per-user креды провайдера).
+   * Значения — секреты: клиент не логирует их и не кладёт в ошибки.
+   */
+  headers?: Readonly<Record<string, string>>;
   timeoutMs?: number;
   clientName?: string;
   clientVersion?: string;
 }
+
+/** Имя заголовка: только ASCII-безопасный набор. */
+const mcpHeaderNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9-]+$/);
+
+/** Значение заголовка без CR/LF (защита от header injection). */
+const mcpHeaderValueSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^[^\r\n]+$/);
+
+const mcpExtraHeadersSchema = z.record(
+  mcpHeaderNameSchema,
+  mcpHeaderValueSchema,
+);
 
 const mcpToolDescriptorSchema = z.object({
   name: z.string().min(1).max(128),
@@ -150,6 +174,7 @@ const JSON_RPC_INTERNAL_ERROR = -32_603;
 export class McpClient {
   private readonly baseUrl: string;
   private readonly authToken?: string;
+  private readonly extraHeaders: Record<string, string>;
   private readonly timeoutMs: number;
   private readonly clientName: string;
   private readonly clientVersion: string;
@@ -160,6 +185,10 @@ export class McpClient {
   constructor(options: McpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.authToken = options.authToken;
+    this.extraHeaders =
+      options.headers === undefined
+        ? {}
+        : mcpExtraHeadersSchema.parse(options.headers);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.clientName = options.clientName ?? 'skillwharf-gateway';
     this.clientVersion = options.clientVersion ?? '0.1.0';
@@ -481,12 +510,13 @@ export class McpClient {
   }
 
   private headers(): Record<string, string> {
-    return this.authToken === undefined
-      ? { Accept: 'text/event-stream' }
-      : {
-          Accept: 'text/event-stream',
-          Authorization: `Bearer ${this.authToken}`,
-        };
+    return {
+      ...this.extraHeaders,
+      Accept: 'text/event-stream',
+      ...(this.authToken === undefined
+        ? {}
+        : { Authorization: `Bearer ${this.authToken}` }),
+    };
   }
 }
 

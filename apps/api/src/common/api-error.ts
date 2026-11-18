@@ -41,6 +41,16 @@ export function invalidRequestError(message: string): ApiException {
   });
 }
 
+/** Недостаточно средств на BAL: 402 `errors.insufficient_funds`. */
+export function insufficientFundsError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 402,
+    error: 'Payment Required',
+    code: 'errors.insufficient_funds',
+    message,
+  });
+}
+
 /** Действие заблокировано runtime-политикой Agent Gateway. */
 export function policyBlockedError(message: string): ApiException {
   return new ApiException({

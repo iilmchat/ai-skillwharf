@@ -1,5 +1,8 @@
+import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { BillingService } from '../billing/billing.service.js';
+import { ApiException } from '../common/api-error.js';
+import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { PendingApprovalService } from '../chat/persistence/pending-approval.service.js';
 import type { AgentGatewayService } from '../security/agent-gateway.service.js';
 import type { ToolExecutionRequest } from './contracts.js';
@@ -160,8 +163,25 @@ describe('AgentRuntimeService: списания за реальные вызов
     expect(harness.billing.captureHold).not.toHaveBeenCalled();
   });
 
-  it('Pay-per-Call: списание BAL происходит в инструменте (beforeExecute)', async () => {
+  it('Pay-per-Call: hold до вызова, capture после успеха (BILLING-24.5)', async () => {
     const harness = createHarness();
+    const order: string[] = [];
+
+    harness.billing.authorizeHold.mockImplementationOnce(async () => {
+      order.push('hold');
+
+      return { entryId: 'ppc-hold-1' };
+    });
+    harness.tools.execute.mockImplementationOnce(async () => {
+      order.push('tool');
+
+      return '{"ok":true}';
+    });
+    harness.billing.captureHold.mockImplementationOnce(async () => {
+      order.push('capture');
+
+      return {};
+    });
 
     await harness.runtime.executeTools(
       request({
@@ -172,14 +192,71 @@ describe('AgentRuntimeService: списания за реальные вызов
       }),
     );
 
-    expect(harness.billing.checkAndChargeSkill).toHaveBeenCalledWith(
+    expect(order).toEqual(['hold', 'tool', 'capture']);
+    expect(harness.billing.authorizeHold).toHaveBeenCalledWith(
       'user-1',
-      'profit-leak-detector',
       300,
-      0,
+      'paypercall:c1:call-1',
     );
-    // PPC не создаёт escrow-hold.
-    expect(harness.billing.authorizeHold).not.toHaveBeenCalled();
+    expect(harness.billing.captureHold).toHaveBeenCalledWith('ppc-hold-1');
+    expect(harness.billing.checkAndChargeSkill).not.toHaveBeenCalled();
+  });
+
+  it('Pay-per-Call: ошибка инструмента отменяет hold', async () => {
+    const harness = createHarness();
+
+    harness.billing.authorizeHold.mockResolvedValueOnce({
+      entryId: 'ppc-hold-1',
+    });
+    harness.tools.execute.mockRejectedValueOnce(new Error('MCP down'));
+
+    await expect(
+      harness.runtime.executeTools(
+        request({
+          skills: [skill(PROFIT_MANIFEST)],
+          calls: [
+            {
+              id: 'call-1',
+              name: 'detect_profit_leaks',
+              args: { sellerId: 's1' },
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow('MCP down');
+
+    expect(harness.billing.cancelHold).toHaveBeenCalledWith('ppc-hold-1');
+    expect(harness.billing.captureHold).not.toHaveBeenCalled();
+  });
+
+  it('Pay-per-Call: недостаток средств — 402 до вызова инструмента', async () => {
+    const harness = createHarness();
+
+    harness.billing.authorizeHold.mockRejectedValueOnce(
+      new BadRequestException(ERROR_KEYS.insufficientFunds),
+    );
+
+    const error: unknown = await harness.runtime
+      .executeTools(
+        request({
+          skills: [skill(PROFIT_MANIFEST)],
+          calls: [
+            {
+              id: 'call-1',
+              name: 'detect_profit_leaks',
+              args: { sellerId: 's1' },
+            },
+          ],
+        }),
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).getResponse()).toMatchObject({
+      statusCode: 402,
+      code: ERROR_KEYS.insufficientFunds,
+    });
+    expect(harness.tools.execute).not.toHaveBeenCalled();
   });
 
   it('prepareApproval создаёт hold и PendingApproval до interrupt', async () => {

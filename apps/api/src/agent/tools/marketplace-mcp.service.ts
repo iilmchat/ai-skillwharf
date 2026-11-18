@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { SkillManifestSchema } from '@skillwharf/shared';
+import { createHash } from 'node:crypto';
 import { marketplaceUnavailableError } from '../../common/api-error.js';
 import { ProviderKeysService } from '../../integrations/keys/provider-keys.service.js';
 import { McpClient } from './mcp-client.js';
@@ -38,6 +39,49 @@ export interface MarketplaceCredentials {
   readonly clientId?: string;
   readonly apiKey?: string;
   readonly token?: string;
+  /** Входящий вебхук Битрикс24 (секрет, только для заголовка). */
+  readonly webhookUrl?: string;
+}
+
+/** Заголовки MCP-запроса с per-user кредами (`MCP-24.1`). */
+export function providerCredentialHeaders(
+  platform: McpProvider,
+  credentials: MarketplaceCredentials,
+): Record<string, string> {
+  switch (platform) {
+    case 'ozon':
+      return credentials.clientId !== undefined &&
+        credentials.apiKey !== undefined
+        ? {
+            'X-Ozon-Client-Id': credentials.clientId,
+            'X-Ozon-Api-Key': credentials.apiKey,
+          }
+        : {};
+    case 'wb':
+      return credentials.token === undefined
+        ? {}
+        : { 'X-Wb-Api-Token': credentials.token };
+    case 'bitrix24':
+      return credentials.webhookUrl === undefined
+        ? {}
+        : { 'X-Bitrix24-Webhook-Url': credentials.webhookUrl };
+    case 'moysklad':
+      return credentials.token === undefined
+        ? {}
+        : { 'X-Moysklad-Token': credentials.token };
+  }
+}
+
+/** Ключ кеша клиента: endpoint + отпечаток кредов (без самих секретов). */
+function clientCacheKey(
+  endpoint: string,
+  headers: Readonly<Record<string, string>>,
+): string {
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify(headers))
+    .digest('hex');
+
+  return `${endpoint}\u0000${fingerprint}`;
 }
 
 /** MCP-инструмент, которым пользуется навык провайдера. */
@@ -81,14 +125,13 @@ const PROVIDER_KEY_HINT: Readonly<Record<McpProvider, string>> = {
 };
 
 /**
- * Провайдеры, чьи секреты живут только в окружении MCP-контейнера.
+ * Провайдеры с историческим fallback на env внутри MCP-контейнера.
  *
- * Для Битрикс24 и МойСклада (Треки K/L) API не хранит ключи: вебхук и токен
- * читает MCP-сервер (KI-077), поэтому гейт проверяет наличие endpoint'а, а не
- * секретов в процессе API. Для Ozon/WB ключи приходят из `ProviderKeysService`
- * (подключение пользователя) либо из env — их гейт остаётся прежним (KI-064).
+ * После `MCP-24.1` ключи пользователя передаются в заголовках, а env API —
+ * запасной источник. Если в API ключей нет вовсе, для этих провайдеров
+ * сохраняется совместимость: MCP-сервер может быть настроен своим env.
  */
-const CONTAINER_ONLY_CREDENTIALS: ReadonlySet<McpProvider> = new Set([
+const CONTAINER_ENV_FALLBACK: ReadonlySet<McpProvider> = new Set([
   'bitrix24',
   'moysklad',
 ]);
@@ -149,13 +192,47 @@ export function resolveProviderEndpointFromSkills(
   return undefined;
 }
 
+/** Непустое значение окружения или `null`. */
+function readEnv(name: string): string | null {
+  const value = process.env[name]?.trim() ?? '';
+
+  return value === '' ? null : value;
+}
+
 /** Есть ли в окружении ключи провайдера (без них MCP вернёт ошибку). */
 function hasProviderKeys(platform: McpProvider): boolean {
-  return PROVIDER_KEY_ENV[platform].every((name) => {
-    const value = process.env[name];
+  return PROVIDER_KEY_ENV[platform].every((name) => readEnv(name) !== null);
+}
 
-    return value !== undefined && value !== '';
-  });
+/** Ключи из env API (fallback, когда `ProviderKeysService` не подключён). */
+function envCredentials(
+  platform: McpProvider,
+): MarketplaceCredentials | null {
+  switch (platform) {
+    case 'ozon': {
+      const clientId = readEnv('OZON_CLIENT_ID');
+      const apiKey = readEnv('OZON_API_KEY');
+
+      return clientId === null || apiKey === null
+        ? null
+        : { source: 'env', clientId, apiKey };
+    }
+    case 'wb': {
+      const token = readEnv('WB_API_TOKEN');
+
+      return token === null ? null : { source: 'env', token };
+    }
+    case 'bitrix24': {
+      const webhookUrl = readEnv('BITRIX24_WEBHOOK_URL');
+
+      return webhookUrl === null ? null : { source: 'env', webhookUrl };
+    }
+    case 'moysklad': {
+      const token = readEnv('MOYSKLAD_TOKEN');
+
+      return token === null ? null : { source: 'env', token };
+    }
+  }
 }
 
 /**
@@ -178,7 +255,7 @@ export class MarketplaceMcpService {
 
   /** Доступен ли провайдер: ключи в env (Ozon/WB) или endpoint MCP-сервера. */
   isConfigured(platform: McpProvider): boolean {
-    return CONTAINER_ONLY_CREDENTIALS.has(platform)
+    return CONTAINER_ENV_FALLBACK.has(platform)
       ? resolveMcpEndpoint(platform) !== null
       : hasProviderKeys(platform);
   }
@@ -186,37 +263,59 @@ export class MarketplaceMcpService {
   /**
    * Ключи провайдера: сначала подключение пользователя, затем env.
    *
-   * MCP-серверы Ozon/WB аутентифицируются своими env-ключами (один набор на
-   * контейнер), поэтому пользовательские ключи здесь — источник истины для
-   * гейта и аудита, а не заголовок запроса (см. KI-064).
+   * Возвращаются сами значения (не только источник): `MCP-24.1` передаёт их
+   * в заголовках MCP-запроса, поэтому MCP-контейнеру больше не нужен общий
+   * env-ключ при наличии per-user подключения.
    */
   async credentialsFor(
     platform: McpProvider,
     userId?: string,
   ): Promise<MarketplaceCredentials | null> {
     if (this.providerKeys !== undefined) {
-      if (platform === 'ozon') {
-        const resolved = await this.providerKeys.ozonKeys(userId);
+      switch (platform) {
+        case 'ozon': {
+          const resolved = await this.providerKeys.ozonKeys(userId);
 
-        if (resolved !== null) {
-          return {
-            source: resolved.source,
-            clientId: resolved.clientId,
-            apiKey: resolved.apiKey,
-          };
+          if (resolved !== null) {
+            return {
+              source: resolved.source,
+              clientId: resolved.clientId,
+              apiKey: resolved.apiKey,
+            };
+          }
+          break;
         }
-      } else if (platform === 'wb') {
-        const resolved = await this.providerKeys.wildberriesToken(userId);
+        case 'wb': {
+          const resolved = await this.providerKeys.wildberriesToken(userId);
 
-        if (resolved !== null) {
-          return { source: resolved.source, token: resolved.token };
+          if (resolved !== null) {
+            return { source: resolved.source, token: resolved.token };
+          }
+          break;
+        }
+        case 'bitrix24': {
+          const resolved = await this.providerKeys.bitrix24Webhook(userId);
+
+          if (resolved !== null) {
+            return {
+              source: resolved.source,
+              webhookUrl: resolved.webhookUrl,
+            };
+          }
+          break;
+        }
+        case 'moysklad': {
+          const resolved = await this.providerKeys.moyskladToken(userId);
+
+          if (resolved !== null) {
+            return { source: resolved.source, token: resolved.token };
+          }
+          break;
         }
       }
     }
 
-    return hasProviderKeys(platform)
-      ? { source: 'env' }
-      : null;
+    return envCredentials(platform);
   }
 
   /** Адрес MCP-сервера провайдера (null — не сконфигурирован). */
@@ -241,31 +340,32 @@ export class MarketplaceMcpService {
     params: Record<string, unknown>,
     options: MarketplaceCallOptions = {},
   ): Promise<string> {
-    if (CONTAINER_ONLY_CREDENTIALS.has(platform)) {
-      // Секреты Битрикс24/МойСклада живут в MCP-контейнере (KI-077): без
-      // endpoint'а вызывать нечего, а ключи API знать не обязан.
-      if (this.endpointFor(platform, options) === null) {
-        throw marketplaceUnavailableError(
-          `${PROVIDER_LABEL[platform]} не подключён: задайте ${PROVIDER_MCP_URL_ENV[platform]} или mcp_endpoint навыка`,
-        );
-      }
-    } else {
-      const credentials = await this.credentialsFor(platform, options.userId);
+    // Битрикс24/МойСклад вызываются только через MCP-сервер: без endpoint
+    // ключи пользователя бесполезны.
+    if (
+      CONTAINER_ENV_FALLBACK.has(platform) &&
+      this.endpointFor(platform, options) === null
+    ) {
+      throw marketplaceUnavailableError(
+        `${PROVIDER_LABEL[platform]} не подключён: задайте ${PROVIDER_MCP_URL_ENV[platform]} или mcp_endpoint навыка`,
+      );
+    }
 
-      if (credentials === null) {
+    const credentials = await this.credentialsFor(platform, options.userId);
+    const headers =
+      credentials === null ? {} : providerCredentialHeaders(platform, credentials);
+
+    if (credentials === null) {
+      const canUseContainerEnv =
+        CONTAINER_ENV_FALLBACK.has(platform) &&
+        this.endpointFor(platform, options) !== null;
+
+      if (!canUseContainerEnv) {
         throw marketplaceUnavailableError(
           `${PROVIDER_LABEL[platform]} не подключён: добавьте ${PROVIDER_KEY_HINT[platform]} в разделе «Интеграции» или задайте ${PROVIDER_KEY_ENV[platform].join('/')}`,
         );
       }
-
-      if (!hasProviderKeys(platform)) {
-        // Ключи пользователя не могут аутентифицировать MCP-контейнер: он
-        // читает ключи провайдера из своего окружения (один набор на сервер).
-        throw marketplaceUnavailableError(
-          `Ключи ${PROVIDER_LABEL[platform]} сохранены, но MCP-сервер не сконфигурирован: задайте ${PROVIDER_KEY_ENV[platform].join('/')} в окружении MCP-контейнера (KI-064)`,
-        );
-      }
-
+    } else {
       this.logger.debug(
         JSON.stringify({
           event: 'mcp.credentials',
@@ -275,7 +375,7 @@ export class MarketplaceMcpService {
       );
     }
 
-    const gateway = this.gateway(platform, options);
+    const gateway = this.gateway(platform, options, headers);
 
     if (gateway === null) {
       throw mcpUnavailableError();
@@ -287,9 +387,10 @@ export class MarketplaceMcpService {
   private gateway(
     platform: McpProvider,
     options: MarketplaceCallOptions,
+    headers: Readonly<Record<string, string>>,
   ): McpGateway | null {
     const endpoint = this.endpointFor(platform, options);
-    const client = this.client(platform, endpoint, options.authToken);
+    const client = this.client(platform, endpoint, options.authToken, headers);
 
     if (client === null) {
       return null;
@@ -315,13 +416,15 @@ export class MarketplaceMcpService {
   private client(
     platform: McpProvider,
     endpoint: string | null,
-    authToken?: string,
+    authToken: string | undefined,
+    headers: Readonly<Record<string, string>>,
   ): McpClient | null {
     if (endpoint === null) {
       return null;
     }
 
-    const cached = this.clients.get(endpoint);
+    const cacheKey = clientCacheKey(endpoint, headers);
+    const cached = this.clients.get(cacheKey);
 
     if (cached !== undefined) {
       return cached;
@@ -331,9 +434,10 @@ export class MarketplaceMcpService {
     const client = new McpClient({
       baseUrl: endpoint,
       ...(token === undefined || token === '' ? {} : { authToken: token }),
+      ...(Object.keys(headers).length === 0 ? {} : { headers }),
     });
 
-    this.clients.set(endpoint, client);
+    this.clients.set(cacheKey, client);
     this.logger.log(
       JSON.stringify({
         event: 'mcp.client_created',

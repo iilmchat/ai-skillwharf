@@ -9,12 +9,16 @@ type MockFn = ReturnType<typeof vi.fn>;
 interface KeysMock {
   ozonKeys: MockFn;
   wildberriesToken: MockFn;
+  bitrix24Webhook: MockFn;
+  moyskladToken: MockFn;
 }
 
 function createKeysMock(): KeysMock {
   return {
     ozonKeys: vi.fn(async () => null),
     wildberriesToken: vi.fn(async () => null),
+    bitrix24Webhook: vi.fn(async () => null),
+    moyskladToken: vi.fn(async () => null),
   };
 }
 
@@ -25,10 +29,13 @@ describe('MarketplaceMcpService: ключи из БД → env', () => {
     delete process.env.WB_API_TOKEN;
     delete process.env.OZON_MCP_URL;
     delete process.env.WB_MCP_URL;
+    delete process.env.BITRIX24_WEBHOOK_URL;
+    delete process.env.MOYSKLAD_TOKEN;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('берёт ключи Ozon подключения пользователя', async () => {
@@ -62,6 +69,34 @@ describe('MarketplaceMcpService: ключи из БД → env', () => {
 
     await expect(service.credentialsFor('ozon', 'user-1')).resolves.toEqual({
       source: 'env',
+      clientId: 'env-client',
+      apiKey: 'env-secret',
+    });
+  });
+
+  it('Битрикс24/МойСклад: per-user креды из ProviderKeysService', async () => {
+    const keys = createKeysMock();
+
+    keys.bitrix24Webhook.mockResolvedValueOnce({
+      webhookUrl: 'https://portal.bitrix24.ru/rest/1/token/',
+      source: 'user',
+    });
+    keys.moyskladToken.mockResolvedValueOnce({
+      token: 'moysklad-user-token',
+      source: 'user',
+    });
+
+    const service = new MarketplaceMcpService(
+      keys as unknown as ProviderKeysService,
+    );
+
+    await expect(service.credentialsFor('bitrix24', 'user-1')).resolves.toEqual({
+      source: 'user',
+      webhookUrl: 'https://portal.bitrix24.ru/rest/1/token/',
+    });
+    await expect(service.credentialsFor('moysklad', 'user-1')).resolves.toEqual({
+      source: 'user',
+      token: 'moysklad-user-token',
     });
   });
 
@@ -102,8 +137,12 @@ describe('MarketplaceMcpService: ключи из БД → env', () => {
     expect((error as Error).message).toContain('Интеграции');
   });
 
-  it('ключи пользователя без env-ключей MCP дают понятную ошибку (KI-064)', async () => {
+  it('per-user креды Ozon не требуют env-ключей и уходят заголовками', async () => {
     const keys = createKeysMock();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('stop after headers');
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     keys.ozonKeys.mockResolvedValueOnce({
       clientId: 'user-client',
@@ -115,15 +154,18 @@ describe('MarketplaceMcpService: ключи из БД → env', () => {
       keys as unknown as ProviderKeysService,
     );
 
-    const error: unknown = await service
-      .call('ozon', 'ozon_cards_list', {}, { userId: 'user-1' })
-      .catch((caught: unknown) => caught);
+    await service
+      .call('ozon', 'ozon_cards_list', {}, {
+        userId: 'user-1',
+        endpoint: 'http://ozon-mcp.test',
+      })
+      .catch(() => undefined);
 
-    expect((error as ApiException).getResponse()).toMatchObject({
-      statusCode: 503,
-      code: ERROR_KEYS.marketplaceUnavailable,
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'X-Ozon-Client-Id': 'user-client',
+      'X-Ozon-Api-Key': 'user-secret',
     });
-    expect((error as Error).message).toContain('MCP-сервер');
   });
 
   it('с env-ключами гейт пройден: без endpoint — mcp_unavailable', async () => {
