@@ -1,0 +1,35 @@
+# Горизонтальное масштабирование (Sprint 34 / HA-34.1, v1.3.0).
+#
+# Override поверх docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.ha.yml \
+#     --profile production up -d --build
+#
+# Трафик распределяет Caddy (deploy/Caddyfile) через внутренний DNS compose:
+# API и llm-worker не публикуют порты на хост. Состояние вынесено в Redis,
+# выплаты защищены распределённой блокировкой, поэтому несколько реплик
+# безопасны для Ledger и BAL.
+#
+# Проверка после поднятия:
+#   pnpm loadtest:ha --url https://<domain> --token <jwt> --requests 300
+
+services:
+  api:
+    # 3 реплики API: '/' и /api/v1 идут через Caddy -> web -> api.
+    deploy:
+      replicas: 3
+    # Прямой published-порт снимаем: он конфликтует с репликами и обходит
+    # Caddy. Для отладки используйте docker compose exec api ... или Caddy.
+    ports: !reset []
+    environment:
+      RATE_LIMIT_STORE: redis
+      BILLING_OUTBOX_DISTRIBUTED_LOCK: "true"
+
+  llm-worker:
+    deploy:
+      replicas: 3
+    environment:
+      RATE_LIMIT_STORE: redis
+
+  sandbox-worker:
+    deploy:
+      replicas: 2

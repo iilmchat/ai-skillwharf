@@ -169,6 +169,13 @@ services:
       # Предыдущие ключи для ротации keyId: CLI pnpm --filter api keys:rotate
       # должен видеть их и внутри контейнера (JSON/CSV, см. .env.example).
       TOKEN_ENCRYPTION_PREVIOUS_KEYS: ${TOKEN_ENCRYPTION_PREVIOUS_KEYS:-}
+      # Внешний KMS (Sprint 34): local | vault | yandex-kms.
+      KMS_PROVIDER: ${KMS_PROVIDER:-local}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TRANSIT_KEY: ${VAULT_TRANSIT_KEY:-skillwharf-credentials}
+      YANDEX_KMS_KEY_ID: ${YANDEX_KMS_KEY_ID:-}
+      YANDEX_KMS_IAM_TOKEN: ${YANDEX_KMS_IAM_TOKEN:-}
       # Egress API: Telegram и Google — только эти домены.
       OUTBOUND_ALLOWLIST: ${API_OUTBOUND_ALLOWLIST:-api.telegram.org,www.googleapis.com,oauth2.googleapis.com,sheets.googleapis.com,docs.googleapis.com,api.ttapi.io,api-performance.ozon.ru,discounts-prices-api.wildberries.ru,ocr.api.cloud.yandex.net,api.tavily.com}
       # Повторы 429/5xx внешних провайдеров (экспоненциальный backoff).

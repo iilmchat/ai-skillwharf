@@ -14,6 +14,7 @@
     "db:seed:demo": "pnpm --filter api db:seed:demo",
     "test": "pnpm --filter @skillwharf/shared build && vitest run",
     "evals:validate": "node scripts/run-evals.mjs --validate-only",
+    "loadtest:ha": "node scripts/load-test-ha.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "seed:staging": "node --env-file-if-exists=.env --experimental-transform-types scripts/seed-staging.ts"
   },
