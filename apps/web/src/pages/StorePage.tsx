@@ -390,6 +390,9 @@ export function StorePage() {
               <NavLink to="/app/skills" className={navLinkClasses}>
                 {t('nav.skills')}
               </NavLink>
+              <NavLink to="/app/marketplace" className={navLinkClasses}>
+                {t('nav.marketplace')}
+              </NavLink>
               <NavLink to="/app/store" className={navLinkClasses}>
                 {t('nav.store')}
               </NavLink>

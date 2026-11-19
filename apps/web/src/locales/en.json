@@ -83,6 +83,7 @@
     "primary": "Primary navigation",
     "chat": "Chat",
     "skills": "Skills",
+    "marketplace": "Marketplace",
     "store": "Store",
     "office": "AI office",
     "finance": "Finance",
@@ -167,6 +168,81 @@
       "sessionExpired": "Your session has expired. Please sign in again.",
       "network": "The server is unreachable. Check your connection.",
       "notFound": "The store is unavailable: the server could not find the skill registry."
+    }
+  },
+  "marketplace": {
+    "title": "Skill marketplace",
+    "subtitle": "A public skill catalog: search by name and description, filter by 12 tracks and install in one click.",
+    "count": "Found: {{count}}",
+    "searchLabel": "Search by name and description",
+    "searchPlaceholder": "For example, OCR or reports",
+    "tracksLabel": "Business tracks",
+    "pricingLabel": "Pricing model",
+    "verifiedOnly": "Verified only (Ed25519)",
+    "verifiedBadge": "Verified Ed25519",
+    "unverifiedBadge": "Unverified",
+    "downloads": "Installs: {{count}}",
+    "loading": "Loading the marketplace…",
+    "emptyTitle": "No skills found",
+    "emptyBody": "Change your search or filters to see other skills.",
+    "errorTitle": "Could not load the marketplace",
+    "retry": "Retry",
+    "pricing": {
+      "free": "Free",
+      "payPerCall": "{{price}} ₽ / call",
+      "payPerOutcome": "{{price}} ₽ / result",
+      "freemium": "Freemium from {{price}} ₽",
+      "subscription": "{{price}} ₽ / month"
+    },
+    "pricingModels": {
+      "all": "All models",
+      "Free": "Free",
+      "Pay-per-Call": "Pay per call",
+      "Pay-per-Outcome": "Pay per outcome",
+      "Freemium": "Freemium",
+      "Subscription": "Subscription"
+    },
+    "tracks": {
+      "all": "All tracks",
+      "A": "Pickup points & logistics",
+      "B": "Development",
+      "C": "E-commerce",
+      "D": "Marketing",
+      "E": "Education",
+      "F": "Content",
+      "G": "HR",
+      "H": "Documents",
+      "I": "OCR",
+      "J": "Finance",
+      "K": "Wholesale",
+      "L": "Production"
+    },
+    "install": {
+      "action": "Install",
+      "installing": "Installing…",
+      "installed": "Installed",
+      "success": "Skill “{{name}}” has been installed."
+    },
+    "details": {
+      "action": "Details",
+      "eyebrow": "Skill details",
+      "descriptionLabel": "Description",
+      "permissionsLabel": "Permissions",
+      "permissionsEmpty": "No permissions specified",
+      "signatureLabel": "Signature status",
+      "signatureVerified": "Ed25519 signature verified",
+      "signatureUnverified": "Signature not verified",
+      "signatureAlgorithm": "Ed25519",
+      "publicKeyId": "Key: {{id}}"
+    },
+    "errors": {
+      "network": "Could not reach the marketplace. Check your connection.",
+      "unavailable": "The marketplace is not deployed on the server yet. Please try again later.",
+      "sessionExpired": "Your session has expired. Please sign in again.",
+      "forbidden": "You do not have access to the marketplace.",
+      "invalidResponse": "The server returned an invalid catalog response.",
+      "installFailed": "Could not install the skill. Please try again.",
+      "unknown": "An unexpected error occurred. Please try again later."
     }
   },
   "theme": {
