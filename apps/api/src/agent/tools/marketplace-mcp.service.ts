@@ -41,6 +41,10 @@ export interface MarketplaceCredentials {
   readonly token?: string;
   /** Входящий вебхук Битрикс24 (секрет, только для заголовка). */
   readonly webhookUrl?: string;
+  /** Креды 1С:Предприятие (OData). */
+  readonly odataUrl?: string;
+  readonly username?: string;
+  readonly password?: string;
 }
 
 /** Заголовки MCP-запроса с per-user кредами (`MCP-24.1`). */
@@ -69,6 +73,16 @@ export function providerCredentialHeaders(
       return credentials.token === undefined
         ? {}
         : { 'X-Moysklad-Token': credentials.token };
+    case '1c':
+      return credentials.odataUrl !== undefined &&
+        credentials.username !== undefined &&
+        credentials.password !== undefined
+        ? {
+            'X-1C-OData-Url': credentials.odataUrl,
+            'X-1C-Username': credentials.username,
+            'X-1C-Password': credentials.password,
+          }
+        : {};
   }
 }
 
@@ -90,6 +104,7 @@ const PROVIDER_TOOL: Readonly<Record<McpProvider, string>> = {
   wb: WB_MCP_TOOL_NAME,
   bitrix24: BITRIX24_GET_DEAL_TOOL_NAME,
   moysklad: MOYSKLAD_CHECK_STOCK_TOOL_NAME,
+  '1c': 'onec_check_stock',
 };
 
 /** Переменные окружения с ключами провайдера. */
@@ -98,6 +113,7 @@ const PROVIDER_KEY_ENV: Readonly<Record<McpProvider, readonly string[]>> = {
   wb: ['WB_API_TOKEN'],
   bitrix24: ['BITRIX24_WEBHOOK_URL'],
   moysklad: ['MOYSKLAD_TOKEN'],
+  '1c': ['ONEC_ODATA_URL', 'ONEC_USERNAME', 'ONEC_PASSWORD'],
 };
 
 /** Переменная окружения с адресом MCP-сервера провайдера. */
@@ -106,6 +122,7 @@ const PROVIDER_MCP_URL_ENV: Readonly<Record<McpProvider, string>> = {
   wb: 'WB_MCP_URL',
   bitrix24: 'BITRIX24_MCP_URL',
   moysklad: 'MOYSKLAD_MCP_URL',
+  '1c': 'ONEC_MCP_URL',
 };
 
 /** Человеческое имя провайдера для сообщений об ошибке. */
@@ -114,6 +131,7 @@ const PROVIDER_LABEL: Readonly<Record<McpProvider, string>> = {
   wb: 'Wildberries',
   bitrix24: 'Битрикс24',
   moysklad: 'МойСклад',
+  '1c': '1С:Предприятие',
 };
 
 /** Названия ключей провайдера для подсказки в сообщении об ошибке. */
@@ -122,6 +140,7 @@ const PROVIDER_KEY_HINT: Readonly<Record<McpProvider, string>> = {
   wb: 'API Token',
   bitrix24: 'входящий webhook',
   moysklad: 'токен API',
+  '1c': 'OData URL, логин и пароль',
 };
 
 /**
@@ -232,6 +251,15 @@ function envCredentials(
 
       return token === null ? null : { source: 'env', token };
     }
+    case '1c': {
+      const odataUrl = readEnv('ONEC_ODATA_URL');
+      const username = readEnv('ONEC_USERNAME');
+      const password = readEnv('ONEC_PASSWORD');
+
+      return odataUrl === null || username === null || password === null
+        ? null
+        : { source: 'env', odataUrl, username, password };
+    }
   }
 }
 
@@ -309,6 +337,19 @@ export class MarketplaceMcpService {
 
           if (resolved !== null) {
             return { source: resolved.source, token: resolved.token };
+          }
+          break;
+        }
+        case '1c': {
+          const resolved = await this.providerKeys.onecKeys(userId);
+
+          if (resolved !== null) {
+            return {
+              source: 'user',
+              odataUrl: resolved.odataUrl,
+              username: resolved.username,
+              password: resolved.password,
+            };
           }
           break;
         }

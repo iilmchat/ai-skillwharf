@@ -36,7 +36,15 @@ export type { McpToolDescriptor } from './mcp-client.js';
  * `bitrix24` и `moysklad` — коннекторы Треков K (Опт) и L (Производство);
  * их действия описаны в `infra/mcp/bitrix24` и `infra/mcp/moysklad`.
  */
-export type McpProvider = 'ozon' | 'wb' | 'bitrix24' | 'moysklad';
+export type McpProvider = 'ozon' | 'wb' | 'bitrix24' | 'moysklad' | '1c';
+
+/** Действия MCP-сервера 1С:Предприятие (OData/HTTP-сервисы). */
+export const ONEC_MCP_ACTIONS = {
+  searchNomenclature: 'onec_search_nomenclature',
+  checkStock: 'onec_check_stock',
+  checkDebt: 'onec_check_debt',
+  createOrder: 'onec_create_order',
+} as const;
 
 /**
  * Действия MCP-сервера Битрикс24 (реальные имена из `tools/list`).
@@ -422,12 +430,31 @@ const MOYSKLAD_ACTION_SCHEMAS = {
   }),
 };
 
+/** Аргументы действий 1С (строго: лишние ключи запрещены). */
+const ONEC_ACTION_SCHEMAS: Record<string, z.ZodType> = {
+  [ONEC_MCP_ACTIONS.searchNomenclature]: z.strictObject({
+    query: z.string().min(1).max(256),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
+  [ONEC_MCP_ACTIONS.checkStock]: z.strictObject({
+    nomenclatureId: z.string().min(1).max(128),
+    warehouseId: z.string().min(1).max(128).optional(),
+  }),
+  [ONEC_MCP_ACTIONS.checkDebt]: z.strictObject({
+    counterpartyId: z.string().min(1).max(128),
+  }),
+  [ONEC_MCP_ACTIONS.createOrder]: z.strictObject({
+    payload: z.record(z.string(), z.unknown()),
+  }),
+};
+
 /** Реестр известных действий по провайдерам. */
 const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
   ozon: OZON_ACTION_SCHEMAS,
   wb: WB_ACTION_SCHEMAS,
   bitrix24: BITRIX24_ACTION_SCHEMAS,
   moysklad: MOYSKLAD_ACTION_SCHEMAS,
+  '1c': ONEC_ACTION_SCHEMAS,
 };
 
 /** Опции создания gateway. */

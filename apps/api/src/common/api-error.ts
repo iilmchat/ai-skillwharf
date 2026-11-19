@@ -167,6 +167,16 @@ export function outboundBlockedError(message: string): ApiException {
   });
 }
 
+/** Неверный секрет вебхук-триггера. */
+export function invalidTriggerSecretError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 401,
+    error: 'Unauthorized',
+    code: 'errors.invalid_trigger_secret',
+    message,
+  });
+}
+
 /** Роль воркспейса недостаточна для действия (ORG-31.2). */
 export function insufficientWorkspaceRoleError(message: string): ApiException {
   return new ApiException({

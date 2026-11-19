@@ -14,6 +14,7 @@ export const KEY_PROVIDERS = [
   'midjourney',
   'bitrix24',
   'moysklad',
+  '1c',
 ] as const;
 
 export type KeyProvider = (typeof KEY_PROVIDERS)[number];
@@ -86,6 +87,34 @@ export const moyskladKeysSchema = z
   .object({ apiToken: moyskladTokenSchema })
   .strict();
 
+/** Абсолютный http(s)-URL OData-сервиса 1С (без учётных данных в URL). */
+export const onecOdataUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine((value) => {
+    const url = parseUrl(value);
+
+    return (
+      url !== null &&
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.username === '' &&
+      url.password === ''
+    );
+  }, 'ожидается абсолютный http(s)-URL OData-сервиса 1С без кредов в URL');
+
+/** Тело `POST /integrations/1c` (Треки H/J/K/L). */
+export const onecKeysSchema = z
+  .object({
+    odataUrl: onecOdataUrlSchema,
+    username: clientIdSchema,
+    password: secretSchema,
+  })
+  .strict();
+
+export const onecSecretSchema = onecKeysSchema;
+
 /** Полезная нагрузка, которая шифруется в `ProviderCredential.secret`. */
 export const ozonSecretSchema = z
   .object({ clientId: clientIdSchema, apiKey: secretSchema })
@@ -123,6 +152,7 @@ export type WildberriesKeys = z.infer<typeof wildberriesKeysSchema>;
 export type MidjourneyKeys = z.infer<typeof midjourneyKeysSchema>;
 export type Bitrix24Keys = z.infer<typeof bitrix24KeysSchema>;
 export type MoyskladKeys = z.infer<typeof moyskladKeysSchema>;
+export type OnecKeys = z.infer<typeof onecKeysSchema>;
 export type ProviderMetadata = z.infer<typeof providerMetadataSchema>;
 
 /** Срок жизни токена Wildberries: продавец выдаёт его на 180 дней. */

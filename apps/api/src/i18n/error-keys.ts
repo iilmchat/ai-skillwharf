@@ -63,6 +63,8 @@ export const ERROR_KEYS = {
   insufficientWorkspaceRole: 'errors.insufficient_workspace_role',
   /** Сумма HITL-одобрения превышает лимит роли (ORG-31.2). */
   hitlLimitExceeded: 'errors.hitl_limit_exceeded',
+  /** Неверный или отсутствующий X-Trigger-Secret (CONNECT-32.2). */
+  invalidTriggerSecret: 'errors.invalid_trigger_secret',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];

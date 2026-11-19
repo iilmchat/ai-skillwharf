@@ -27,6 +27,7 @@ import {
   bitrix24KeysSchema,
   midjourneyKeysSchema,
   moyskladKeysSchema,
+  onecKeysSchema,
   ozonKeysSchema,
   wildberriesKeysSchema,
   type KeyProvider,
@@ -36,6 +37,7 @@ import {
   type Bitrix24IntegrationState,
   type MidjourneyIntegrationState,
   type MoyskladIntegrationState,
+  type OnecIntegrationState,
   type OzonIntegrationState,
   type WildberriesIntegrationState,
 } from './keys/provider-keys.service.js';
@@ -74,6 +76,7 @@ export interface IntegrationsState {
   readonly midjourney: MidjourneyIntegrationState;
   readonly bitrix24: Bitrix24IntegrationState;
   readonly moysklad: MoyskladIntegrationState;
+  readonly onec: OnecIntegrationState;
 }
 
 /**
@@ -138,6 +141,7 @@ export class IntegrationsController {
       midjourney: providers.midjourney,
       bitrix24: providers.bitrix24,
       moysklad: providers.moysklad,
+      onec: providers.onec,
     };
   }
 
@@ -492,6 +496,39 @@ export class IntegrationsController {
       disconnected: await this.providerKeys.disconnect(
         requireUserId(request),
         'moysklad',
+      ),
+    };
+  }
+
+  /** Подключает 1С:Предприятие: `{ odataUrl, username, password }`. */
+  @Post('1c')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить 1С:Предприятие (OData)' })
+  async connectOnec(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<OnecIntegrationState> {
+    const parsed = onecKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { odataUrl, username, password }');
+    }
+
+    return this.providerKeys.connectOnec(requireUserId(request), parsed.data);
+  }
+
+  /** Удаляет ключи 1С пользователя. */
+  @Delete('1c')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить 1С:Предприятие' })
+  async disconnectOnec(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        '1c',
       ),
     };
   }

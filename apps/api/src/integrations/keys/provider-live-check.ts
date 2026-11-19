@@ -141,6 +141,42 @@ export async function verifyMoyskladToken(apiToken: string): Promise<void> {
   );
 }
 
+/** Тело OData `$metadata`: корневой элемент `edmx:Edmx` (необязателен). */
+const onecMetadataSchema = z.object({
+  'edmx:Edmx': z.record(z.string(), z.unknown()).optional(),
+});
+
+/** URL live-проверки 1С: `<odataUrl>/$metadata`. */
+export function onecMetadataUrl(odataUrl: string): string {
+  return `${odataUrl.replace(/\/+$/, '')}/$metadata`;
+}
+
+/** Проверяет доступность OData-сервиса 1С с BASIC-кредо. */
+export async function verifyOnecCredentials(
+  odataUrl: string,
+  username: string,
+  password: string,
+): Promise<void> {
+  if (isIntegrationLiveCheckSkipped()) {
+    return;
+  }
+
+  await requestLiveCheck(
+    '1С:Предприятие',
+    providerRequest({
+      provider: '1c',
+      method: 'GET',
+      url: onecMetadataUrl(odataUrl),
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
+      },
+      schema: onecMetadataSchema,
+      timeoutMs: INTEGRATION_LIVE_CHECK_TIMEOUT_MS,
+      retry: LIVE_CHECK_RETRY,
+    }),
+  );
+}
+
 /**
  * Переводит 401/403 из `providerRequest` (502 для уже настроенной интеграции)
  * в 400 для явного подключения; остальные ошибки не меняет.

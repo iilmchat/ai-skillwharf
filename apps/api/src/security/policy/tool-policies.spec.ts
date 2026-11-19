@@ -58,13 +58,20 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
     blocks: [{ type: 'paragraph', text: 'Текст' }],
   },
   ocr_document: { path: 'scan.png', language: 'ru' },
+  onec_search_nomenclature: { query: ' SKU-1 ' },
+  onec_check_stock: { nomenclatureId: 'nom-1' },
+  onec_check_debt: { counterpartyId: 'cp-1' },
+  onec_create_order: {
+    counterpartyId: 'cp-1',
+    items: [{ nomenclatureId: 'nom-1', quantity: 2 }],
+  },
 };
 
 const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
   it('покрывает политикой все инструменты из tool-schemas.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(27);
+    expect(TOOL_NAMES).toHaveLength(31);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 

@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiException } from '../../common/api-error.js';
 import { ERROR_KEYS } from '../../i18n/error-keys.js';
 import type { ProviderKeysService } from '../../integrations/keys/provider-keys.service.js';
-import { MarketplaceMcpService } from './marketplace-mcp.service.js';
+import {
+  MarketplaceMcpService,
+  providerCredentialHeaders,
+} from './marketplace-mcp.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -11,6 +14,7 @@ interface KeysMock {
   wildberriesToken: MockFn;
   bitrix24Webhook: MockFn;
   moyskladToken: MockFn;
+  onecKeys: MockFn;
 }
 
 function createKeysMock(): KeysMock {
@@ -19,8 +23,54 @@ function createKeysMock(): KeysMock {
     wildberriesToken: vi.fn(async () => null),
     bitrix24Webhook: vi.fn(async () => null),
     moyskladToken: vi.fn(async () => null),
+    onecKeys: vi.fn(async () => null),
   };
 }
+
+describe('1С: креды в заголовках MCP (CONNECT-32.1)', () => {
+  it('пробрасывает OData URL, логин и пароль в X-1C-* заголовки', () => {
+    expect(
+      providerCredentialHeaders('1c', {
+        source: 'user',
+        odataUrl: 'https://1c.example.ru/odata',
+        username: 'admin',
+        password: 'secret',
+      }),
+    ).toEqual({
+      'X-1C-OData-Url': 'https://1c.example.ru/odata',
+      'X-1C-Username': 'admin',
+      'X-1C-Password': 'secret',
+    });
+  });
+
+  it('не отправляет частично заполненные креды', () => {
+    expect(
+      providerCredentialHeaders('1c', { source: 'user', username: 'admin' }),
+    ).toEqual({});
+  });
+
+  it('берёт креды 1С из подключения пользователя', async () => {
+    const keys = createKeysMock();
+
+    keys.onecKeys.mockResolvedValueOnce({
+      odataUrl: 'https://1c.example.ru/odata',
+      username: 'user',
+      password: 'pw',
+      source: 'user',
+    });
+    const service = new MarketplaceMcpService(
+      keys as unknown as ProviderKeysService,
+    );
+
+    await expect(service.credentialsFor('1c', 'user-1')).resolves.toMatchObject({
+      source: 'user',
+      odataUrl: 'https://1c.example.ru/odata',
+      username: 'user',
+      password: 'pw',
+    });
+    expect(keys.onecKeys).toHaveBeenCalledWith('user-1');
+  });
+});
 
 describe('MarketplaceMcpService: ключи из БД → env', () => {
   beforeEach(() => {

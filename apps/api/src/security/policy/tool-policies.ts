@@ -17,6 +17,10 @@ import {
   MoyskladCheckStockToolSchema as MoyskladCheckStockSchema,
   MoyskladCreateOrderToolSchema as MoyskladCreateOrderSchema,
   MoyskladGetCostToolSchema as MoyskladGetCostSchema,
+  OnecCheckDebtToolSchema as OnecCheckDebtSchema,
+  OnecCheckStockToolSchema as OnecCheckStockSchema,
+  OnecCreateOrderToolSchema as OnecCreateOrderSchema,
+  OnecSearchNomenclatureToolSchema as OnecSearchNomenclatureSchema,
 } from '../../agent/tools/tool-schemas.js';
 import type { UserRole } from './policy.types.js';
 
@@ -97,6 +101,8 @@ export interface ToolPolicy {
   readonly approval?: ToolApprovalMode;
   /** Условие HITL по аргументу (`final-stage`); worker фильтрует вызовы. */
   readonly approvalRule?: ToolApprovalRule;
+  /** Pay-per-Call цена вызова в ₽ (CONNECT-32.1: 20 ₽ для инструментов 1С). */
+  readonly priceRub?: number;
 }
 
 const ALL_ROLES = [
@@ -274,6 +280,52 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
     allowedRoles: ALL_ROLES,
     // Создание документа на складе — всегда необратимо: подтверждение HITL.
     approval: 'always',
+  },
+  // --- 1С:Предприятие (CONNECT-32.1): Pay-per-Call 20 ₽ --------------------
+  onec_search_nomenclature: {
+    name: 'onec_search_nomenclature',
+    schema: OnecSearchNomenclatureSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 20,
+  },
+  onec_check_stock: {
+    name: 'onec_check_stock',
+    schema: OnecCheckStockSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 20,
+  },
+  onec_check_debt: {
+    name: 'onec_check_debt',
+    schema: OnecCheckDebtSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 20,
+  },
+  onec_create_order: {
+    name: 'onec_create_order',
+    schema: OnecCreateOrderSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // Создание документа в 1С — необратимое действие: подтверждение HITL.
+    approval: 'always',
+    priceRub: 20,
   },
   // --- Каналы отправки данных: taint блокирует эксфильтрацию --------------
   send_message: {

@@ -64,6 +64,7 @@ model Workspace {
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members        WorkspaceMember[]
   installedSkills InstalledSkill[]
+  webhookTriggers WebhookTrigger[]
 
   @@unique([organizationId, slug])
 }
@@ -365,6 +366,27 @@ model GraphCheckpointWrite {
 
   @@unique([threadId, checkpointNs, checkpointId, taskId, idx])
   @@index([threadId, checkpointNs, checkpointId])
+}
+
+/// Входящий вебхук-триггер Event-Driven агентов (CONNECT-32.2).
+model WebhookTrigger {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  userId          String
+  name            String
+  slug            String    @unique
+  source          String
+  /// Секрет заголовка X-Trigger-Secret (только хеш/значение в БД, не в логах).
+  secretToken     String
+  promptTemplate  String
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  triggerCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([userId])
 }
 
 /// Действие агента, ожидающее решения пользователя (approval или оплата).

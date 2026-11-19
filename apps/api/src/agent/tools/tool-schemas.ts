@@ -160,6 +160,42 @@ export const MoyskladCreateOrderToolSchema = z
   })
   .strict();
 
+/** Инструменты 1С:Предприятие (CONNECT-32.1, треки H/J/K/L). */
+export const OnecSearchNomenclatureToolSchema = z
+  .object({ query: z.string().min(1).max(256) })
+  .strict();
+export const OnecCheckStockToolSchema = z
+  .object({
+    nomenclatureId: z.string().min(1).max(128),
+    warehouseId: z.string().min(1).max(128).optional(),
+  })
+  .strict();
+export const OnecCheckDebtToolSchema = z
+  .object({ counterpartyId: z.string().min(1).max(128) })
+  .strict();
+export const OnecCreateOrderToolSchema = z
+  .object({
+    counterpartyId: z.string().min(1).max(128),
+    items: z
+      .array(
+        z.object({
+          nomenclatureId: z.string().min(1).max(128),
+          quantity: z.number().positive().max(100_000),
+          price: z.number().nonnegative().max(100_000_000).optional(),
+        }),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();
+
+export type OnecSearchNomenclatureArgs = z.infer<
+  typeof OnecSearchNomenclatureToolSchema
+>;
+export type OnecCheckStockArgs = z.infer<typeof OnecCheckStockToolSchema>;
+export type OnecCheckDebtArgs = z.infer<typeof OnecCheckDebtToolSchema>;
+export type OnecCreateOrderArgs = z.infer<typeof OnecCreateOrderToolSchema>;
+
 export type Bitrix24GetDealArgs = z.infer<typeof Bitrix24GetDealToolSchema>;
 export type Bitrix24UpdateDealArgs = z.infer<
   typeof Bitrix24UpdateDealToolSchema
@@ -429,6 +465,22 @@ export const TOOL_REGISTRY = {
   [MOYSKLAD_CREATE_ORDER_TOOL_NAME]: {
     description: MOYSKLAD_CREATE_ORDER_TOOL_DESCRIPTION,
     schema: MoyskladCreateOrderToolSchema,
+  },
+  onec_search_nomenclature: {
+    description: 'Ищет номенклатуру 1С:Предприятие по названию или артикулу',
+    schema: OnecSearchNomenclatureToolSchema,
+  },
+  onec_check_stock: {
+    description: 'Проверяет остаток номенклатуры 1С на складе',
+    schema: OnecCheckStockToolSchema,
+  },
+  onec_check_debt: {
+    description: 'Проверяет задолженность контрагента 1С',
+    schema: OnecCheckDebtToolSchema,
+  },
+  onec_create_order: {
+    description: 'Создаёт заказ покупателя в 1С:Предприятие (требует HITL)',
+    schema: OnecCreateOrderToolSchema,
   },
   [SEND_MESSAGE_TOOL_NAME]: {
     description: SEND_MESSAGE_TOOL_DESCRIPTION,

@@ -21,6 +21,7 @@ import { RegistryModule } from './registry/registry.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
 import { SkillsModule } from './skills/skills.module.js';
 import { WorkspacesModule } from './workspaces/workspaces.module.js';
+import { TriggersModule } from './triggers/triggers.module.js';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     ChatModule,
     SkillsModule,
     WorkspacesModule,
+    TriggersModule,
     RegistryModule,
     MarketplaceModule,
     PromptsModule,

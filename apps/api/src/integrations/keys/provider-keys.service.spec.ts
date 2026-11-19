@@ -203,6 +203,7 @@ describe('ProviderKeysService: хранение и шифрование', () => 
       midjourney: { status: 'disconnected' },
       bitrix24: { status: 'active', source: 'user' },
       moysklad: { status: 'disconnected' },
+      onec: { status: 'disconnected' },
     });
   });
 

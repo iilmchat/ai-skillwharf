@@ -5,6 +5,7 @@ import { TokenCipherService } from '../google/token-cipher.service.js';
 import {
   verifyBitrix24Webhook,
   verifyMoyskladToken,
+  verifyOnecCredentials,
 } from './provider-live-check.js';
 import {
   WB_TOKEN_TTL_DAYS,
@@ -14,6 +15,8 @@ import {
   midjourneySecretSchema,
   moyskladKeysSchema,
   moyskladSecretSchema,
+  onecKeysSchema,
+  onecSecretSchema,
   ozonKeysSchema,
   ozonSecretSchema,
   providerMetadataSchema,
@@ -23,6 +26,7 @@ import {
   type KeyProvider,
   type MidjourneyKeys,
   type MoyskladKeys,
+  type OnecKeys,
   type OzonKeys,
   type WildberriesKeys,
 } from './provider-keys.schemas.js';
@@ -68,12 +72,21 @@ export interface MoyskladIntegrationState {
   readonly error?: string;
 }
 
+/** 1С:Предприятие (Треки H/J/K/L): OData-URL не секрет, виден в статусе. */
+export interface OnecIntegrationState {
+  readonly status: ProviderIntegrationStatus;
+  readonly odataUrl?: string;
+  readonly source?: 'user';
+  readonly error?: string;
+}
+
 export interface ProviderIntegrationStates {
   readonly ozon: OzonIntegrationState;
   readonly wildberries: WildberriesIntegrationState;
   readonly midjourney: MidjourneyIntegrationState;
   readonly bitrix24: Bitrix24IntegrationState;
   readonly moysklad: MoyskladIntegrationState;
+  readonly onec: OnecIntegrationState;
 }
 
 /** Ключи провайдера и источник, из которого они получены. */
@@ -242,6 +255,41 @@ export class ProviderKeysService {
     return { status: 'active', source: 'user' };
   }
 
+  /**
+   * Подключает 1С:Предприятие: basic-креды OData проверяются запросом
+   * `GET <odataUrl>/$metadata` до сохранения в `ProviderCredential`.
+   */
+  async connectOnec(
+    userId: string,
+    keys: OnecKeys,
+  ): Promise<OnecIntegrationState> {
+    const parsed = onecKeysSchema.parse(keys);
+
+    await verifyOnecCredentials(parsed.odataUrl, parsed.username, parsed.password);
+    await this.save(userId, '1c', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.1c_connected', userId }),
+    );
+
+    return { status: 'active', odataUrl: parsed.odataUrl, source: 'user' };
+  }
+
+  /** Ключи 1С из подключения пользователя. */
+  async onecKeys(userId?: string): Promise<(OnecKeys & { source: 'user' }) | null> {
+    const row = await this.find(userId, '1c');
+
+    if (row === null) {
+      return null;
+    }
+
+    const secret = this.decrypt(row.secret, '1c');
+    const parsed = secret === null ? null : onecSecretSchema.safeParse(secret);
+
+    return parsed !== null && parsed.success
+      ? { ...parsed.data, source: 'user' }
+      : null;
+  }
+
   /** Удаляет ключи провайдера; `true` — если запись действительно была. */
   async disconnect(userId: string, provider: KeyProvider): Promise<boolean> {
     const { count } = await this.prisma.providerCredential.deleteMany({
@@ -273,6 +321,7 @@ export class ProviderKeysService {
     const mjRow = byProvider.get('midjourney');
     const bitrixRow = byProvider.get('bitrix24');
     const moyskladRow = byProvider.get('moysklad');
+    const onecRow = byProvider.get('1c');
 
     return {
       ozon: this.describeOzon(ozonRow),
@@ -280,6 +329,7 @@ export class ProviderKeysService {
       midjourney: this.describeMidjourney(mjRow),
       bitrix24: this.describeBitrix24(bitrixRow),
       moysklad: this.describeMoysklad(moyskladRow),
+      onec: this.describeOnec(onecRow),
     };
   }
 
@@ -543,6 +593,23 @@ export class ProviderKeysService {
     }
 
     return { status: 'active', source: 'user' };
+  }
+
+  private describeOnec(
+    row: { secret: string } | undefined,
+  ): OnecIntegrationState {
+    if (row === undefined) {
+      return { status: 'disconnected' };
+    }
+
+    const secret = this.decrypt(row.secret, '1c');
+    const parsed = secret === null ? null : onecSecretSchema.safeParse(secret);
+
+    if (parsed === null || !parsed.success) {
+      return { status: 'error', error: CIPHER_ERROR };
+    }
+
+    return { status: 'active', odataUrl: parsed.data.odataUrl, source: 'user' };
   }
 
   private describeMoysklad(

@@ -19,6 +19,7 @@ import {
 import {
   BITRIX24_MCP_ACTIONS,
   MOYSKLAD_MCP_ACTIONS,
+  ONEC_MCP_ACTIONS,
   mcpProviderError,
 } from './mcp-gateway.js';
 import type {
@@ -31,6 +32,10 @@ import type {
   MoyskladCheckStockArgs,
   MoyskladCreateOrderArgs,
   MoyskladGetCostArgs,
+  OnecCheckDebtArgs,
+  OnecCheckStockArgs,
+  OnecCreateOrderArgs,
+  OnecSearchNomenclatureArgs,
 } from './tool-schemas.js';
 
 /** Контекст вызова ERP-инструмента (endpoint берётся из манифеста навыка). */
@@ -783,5 +788,154 @@ export async function moyskladCreateOrder(
             0,
           )
         : minorToRubles(order.sum),
+  });
+}
+
+/** Инструменты 1С:Предприятие (CONNECT-32.1, треки H/J/K/L). */
+
+const onecNomenclatureSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  article: z.string().optional(),
+});
+const onecNomenclatureListSchema = z.union([
+  z.array(onecNomenclatureSchema),
+  z.object({ value: z.array(onecNomenclatureSchema) }),
+]);
+const onecStockSchema = z.object({
+  balance: numericSchema.optional(),
+  reserve: numericSchema.optional(),
+  warehouse: z.string().optional(),
+});
+const onecDebtSchema = z.object({
+  amount: numericSchema.optional(),
+  currency: z.string().optional(),
+  overdue: z.boolean().optional(),
+});
+const onecOrderSchema = z.object({
+  id: z.string().min(1),
+  number: z.string().optional(),
+  sum: numericSchema.optional(),
+});
+
+/** Поиск номенклатуры 1С по названию/артикулу. */
+export async function onecSearchNomenclature(
+  mcp: MarketplaceMcpService,
+  args: OnecSearchNomenclatureArgs,
+  context: ErpToolContext = {},
+): Promise<string> {
+  const action = ONEC_MCP_ACTIONS.searchNomenclature;
+  const text = await mcp.call('1c', action, { query: args.query }, context);
+  const parsed = parseProviderResult(
+    action,
+    onecNomenclatureListSchema,
+    parseMcpJson(action, text),
+  );
+  const items = Array.isArray(parsed) ? parsed : parsed.value;
+
+  await context.beforeExecute?.();
+
+  return JSON.stringify({ items });
+}
+
+/** Остаток номенклатуры 1С (опционально — по складу). */
+export async function onecCheckStock(
+  mcp: MarketplaceMcpService,
+  args: OnecCheckStockArgs,
+  context: ErpToolContext = {},
+): Promise<string> {
+  const action = ONEC_MCP_ACTIONS.checkStock;
+  const text = await mcp.call(
+    '1c',
+    action,
+    {
+      nomenclatureId: args.nomenclatureId,
+      ...(args.warehouseId === undefined
+        ? {}
+        : { warehouseId: args.warehouseId }),
+    },
+    context,
+  );
+  const stock = parseProviderResult(
+    action,
+    onecStockSchema,
+    parseMcpJson(action, text),
+  );
+
+  await context.beforeExecute?.();
+
+  return JSON.stringify({
+    nomenclatureId: args.nomenclatureId,
+    warehouseId: args.warehouseId ?? null,
+    balance: stock.balance ?? 0,
+    reserve: stock.reserve ?? 0,
+    available: Math.max((stock.balance ?? 0) - (stock.reserve ?? 0), 0),
+  });
+}
+
+/** Задолженность контрагента 1С. */
+export async function onecCheckDebt(
+  mcp: MarketplaceMcpService,
+  args: OnecCheckDebtArgs,
+  context: ErpToolContext = {},
+): Promise<string> {
+  const action = ONEC_MCP_ACTIONS.checkDebt;
+  const text = await mcp.call(
+    '1c',
+    action,
+    { counterpartyId: args.counterpartyId },
+    context,
+  );
+  const debt = parseProviderResult(
+    action,
+    onecDebtSchema,
+    parseMcpJson(action, text),
+  );
+
+  await context.beforeExecute?.();
+
+  return JSON.stringify({
+    counterpartyId: args.counterpartyId,
+    amount: debt.amount ?? 0,
+    currency: debt.currency ?? 'RUB',
+    overdue: debt.overdue ?? false,
+  });
+}
+
+/**
+ * Создаёт заказ покупателя в 1С. Необратимое действие — политика
+ * `onec_create_order` помечена `approval: 'always'` (HITL).
+ */
+export async function onecCreateOrder(
+  mcp: MarketplaceMcpService,
+  args: OnecCreateOrderArgs,
+  context: ErpToolContext = {},
+): Promise<string> {
+  const action = ONEC_MCP_ACTIONS.createOrder;
+  const text = await mcp.call(
+    '1c',
+    action,
+    {
+      payload: {
+        counterpartyId: args.counterpartyId,
+        items: args.items,
+      },
+    },
+    context,
+  );
+  const order = parseProviderResult(
+    action,
+    onecOrderSchema,
+    parseMcpJson(action, text),
+  );
+
+  await context.beforeExecute?.();
+
+  return JSON.stringify({
+    orderId: order.id,
+    number: order.number,
+    sum: order.sum,
+    counterpartyId: args.counterpartyId,
+    positions: args.items.length,
   });
 }
