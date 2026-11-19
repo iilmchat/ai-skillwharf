@@ -3,8 +3,8 @@
 **Базовая точка:** релиз `v1.0.0-ga` (Этапы 0–3, Спринты 1–28 завершены и
 зафиксированы в [ROADMAP.md](ROADMAP.md)).
 
-**Планируемые версии:** `v1.1.0` → `v1.2.0` → `v1.3.0` → `v2.0.0`
-(Спринты 29–36).
+**Текущая версия:** `v2.0.0` (Этапы 4–7 выполнены, Спринты 29–36 завершены).
+**Релизы этапов:** `v1.1.0` → `v1.2.0` → `v1.3.0` → `v2.0.0`.
 
 **Методология:** Stage-Gate (релизы) -> Sprints (2-недельные итерации) ->
 Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), а продолжает его:
@@ -181,13 +181,26 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 36 — Developer Portal & Automated Security Audit
 
-* [ ] **[DEVPORTAL-36.1]** Личный кабинет автора навыков: статистика
+* [x] **[DEVPORTAL-36.1]** Личный кабинет автора навыков: статистика
   установок, версии манифеста, управление ключами подписи Ed25519.
 * [ ] **[DEVPORTAL-36.2]** Автоматический статический и песочный аудит перед
   публикацией в `/app/marketplace`: проверка манифеста, seccomp,
   egress-политики и подписи; блокировка публикации при findings.
 * [ ] **[DEVPORTAL-36.3]** Вывод вознаграждений автору (Revenue Share 85/15):
   история начислений, статус переводов и выгрузка отчёта.
+* [x] **[WEB-36.3]** UI Портала разработчиков на `/app/developer`: KPI автора
+  (навыки, установки, заработано 85%, ожидает выплаты), форма публикации
+  `SKILL.md` с YAML-шаблоном и списком замечаний аудита при
+  `errors.skill_audit_rejected`, таблица навыков с бейджем безопасности и
+  инлайн-редактированием Payout Account, Zod-клиент `/developer/skills`,
+  RU/EN и unit-тесты (без коммита, изменения в рабочем дереве).
+* [x] **[DEVPORTAL-36.0]** Бэкенд портала (DEVPORTAL-36.1/36.2/36.3): модель
+  аудита `MarketplaceSkill` + миграция, `SkillSecurityAuditService`
+  (статический аудит SKILL.md: metadata/приватные сети/опасные команды —
+  `rejected`; подпись, filesystem:write, >5 доменов — `warning`), REST
+  `/developer/skills` (дашборд автора с KPI и Revenue Share 85% + ожидающими
+  выплатами, публикация с аудитом 400 `errors.skill_audit_rejected`,
+  PATCH payout с проверкой владения). Песочный аудит остаётся в DEVPORTAL-36.2.
 
 ---
 
@@ -202,3 +215,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | 2026-11-19 | Sprint 33 (33.1–33.3) | OpenCode / UI | Выполнено | `BillingOutbox` + миграция, outbox в транзакции сплита, `BillingOutboxService` с backoff/dead-letter и тиком (`BILLING_OUTBOX_POLL_MS`), Platform Treasury с реальным `platform_fee`, админ API `/admin/billing/{treasury,reconciliation,outbox/:id/retry}`; вкладка «Финансы и Клиринг» на `/admin?tab=billing` с карточкой кошелька, сверкой и таблицей Outbox; RU/EN и 30 unit-тестов | KI-087 закрыт; OUTBOX-33.3 (сверка с Journal) — остаток |
 | 2026-11-19 | Sprint 34 (34.1–34.2) | OpenCode / Infra | Выполнено | Адаптеры `IKmsEnvelopeProvider`: `LocalAesKmsProvider`, `VaultTransitKmsProvider` и `YandexCloudKmsProvider` с конвертами `kms:*` и миграцией `v1/v2` через `keys:rotate`; распределённая Redis-блокировка `BillingOutboxService` (3 реплики → 1 перевод); `docker-compose.ha.yml` (3/3/2 реплики, Redis rate-limit, distributed lock), KMS-env и CLI `pnpm loadtest:ha` с p50/p95/p99; Runbook разделы 24–25 | KI-053 закрыт полностью |
 | 2026-11-19 | Sprint 35 (35.0, 35.1, 35.3) | OpenCode / UI | Выполнено | Модель `CustomAgentRole` + миграция, CRUD `/workspaces/:id/agents` с RBAC, подхват активных ролей в `ChatService`/граф llm-worker; страница `/app/builder` с Zod-клиентом, автогенерацией `roleKey`, пресетами, HITL/бюджетом, живым превью AI-Офиса и списком агентов; защищённый маршрут, навигация, RU/EN и unit-тесты | BUILDER-35.2 (drag-and-drop из Marketplace) — остаток |
+| 2026-11-19 | Sprint 36 (36.0, 36.1, WEB-36.3) | OpenCode / UI | Выполнено | `SkillSecurityAuditService` (статический аудит SKILL.md, `errors.skill_audit_rejected`), модель аудита + миграция, REST `/developer/skills` с KPI автора, публикацией и PATCH payout; страница `/app/developer` с Zod-клиентом, KPI, формой SKILL.md, бейджами аудита и инлайн-payout, RU/EN и unit-тесты | DEVPORTAL-36.2 (песочный аудит) и 36.3 (история выплат) — бэклог v2.1 |

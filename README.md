@@ -6,7 +6,7 @@
 с долговременной памятью, навыками и встроенной монетизацией.
 
 [![CI](https://github.com/iilmchat/ai-skillwharf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/iilmchat/ai-skillwharf/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.0--ga-blue.svg)](https://github.com/iilmchat/ai-skillwharf/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/iilmchat/ai-skillwharf/releases)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-339933.svg)](https://nodejs.org)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](https://docs.docker.com/compose/)
 
@@ -16,7 +16,7 @@
 
 SkillWharf разворачивается на своём сервере и не требует внешних облачных сервисов: данные, агенты и биллинг остаются под вашим контролем. Интерфейс поддерживает русский и английский языки (RU/EN), а модели подключаются через OpenAI-совместимый API — локальный Ollama или внешний провайдер.
 
-**Текущий релиз:** `v1.0.0-ga` (Этапы 0–3 дорожной карты завершены).
+**Текущий релиз:** `v2.0.0` (Этапы 0–3 и Post-GA 4–7 завершены). Eval-рейлсы и LLM-as-a-Judge, Multi-Agent Supervisor с семантическим кешем, Organizations/Workspaces с RBAC/ABAC, нативный 1С OData MCP и event-driven webhooks, Transactional Outbox с Platform Treasury, HashiCorp Vault / Yandex Cloud KMS и HA-профиль, Visual Agent Builder (`/app/builder`) и Developer Portal с аудитом безопасности навыков (`/app/developer`).
 
 Сайт проекта: <https://skillwharf.ru>.
 

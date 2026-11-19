@@ -4,6 +4,63 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-19
+
+Финальный релиз стратегической дорожной карты: этапы 4–7 (Спринты 29–36)
+завершены. Платформа включает Eval-рейлсы, Multi-Agent Supervisor,
+Organization/Workspace с RBAC/ABAC, 1С OData-коннектор, Transactional Outbox
+с Platform Treasury, внешние KMS (Vault/Yandex), Visual Agent Builder и
+Developer Portal с аудитом безопасности навыков. Тег релиза создаёт Владелец
+продукта.
+
+### Sprint 36: Developer Portal и аудит безопасности навыков
+
+**Бэкенд портала и статический аудит (DEVPORTAL-36.0/36.1).**
+
+- `MarketplaceSkill`: поля `auditStatus` (`passed|warning|rejected`) и
+  `auditFindingsJson` + миграция `20261119150000_add_marketplace_skill_audit`.
+- `SkillSecurityAuditService`: детерминированный статический аудит манифеста и
+  текста SKILL.md. `critical` (cloud metadata `169.254.169.254`, приватные
+  сети, `rm -rf /`, `mkfs`, `dd if=`, `/etc/shadow`, `.env`) → `rejected`;
+  `warning` (нет подписи Ed25519, `filesystem:write`, >5 доменов egress) →
+  `warning` с пометкой. Отчёт валидируется Zod.
+- `GET /api/v1/developer/skills`: список навыков автора с KPI — установки,
+  `author_revenue_share` из Ledger (85%) и ожидающие выплаты из `BillingOutbox`
+  (`pending`/`processing`, payload через Zod).
+- `POST /api/v1/developer/skills`: приём SKILL.md, проверка подписи Ed25519 и
+  аудит; при `rejected` — 400 `errors.skill_audit_rejected` с массивом
+  `findings` (новый помощник ошибки и ключ i18n), при `passed`/`warning` —
+  публикация с сохранением вердикта. `PATCH .../payout` — смена счёта только
+  владельцем навыка (403).
+- Тесты: 6 тестов аудита и 5 тестов портала (блокировка `169.254.169.254`,
+  `rm -rf`, отсутствие подписи, публикация, KPI, защита payout).
+
+**Web UI: страница `/app/developer` (WEB-36.3).**
+
+- `src/lib/developer-portal.ts` (новый): Zod-контракты портала —
+  `auditFindingSchema` (`critical|warning|info`), `developerSkillItemSchema`
+  (Decimal `price` → число, `auditStatus`, `auditFindings?`,
+  `payoutAccountId?`), `developerDashboardSchema` (KPI + `skills`,
+  денежные строки → числа, обёртка `{ dashboard }`), строгая форма
+  `publishDeveloperSkillSchema`. Клиенты `fetchDeveloperDashboard`,
+  `publishDeveloperSkill`, `updateSkillPayoutAccount` для `/developer/skills`.
+- Обработка отказа аудита: `DeveloperPortalError` с полем `findings`,
+  `parseAuditFindings` (поддерживает `findings`/`details`) и
+  `isSkillAuditRejected` для кода `errors.skill_audit_rejected` (400/422).
+  Категории ошибок маппятся в локализованные ключи
+  `getDeveloperPortalErrorMessage` / `DEVELOPER_ERROR_KEYS`.
+- `src/pages/DeveloperPortalPage.tsx` (новый): защищённая страница
+  `/app/developer` — четыре KPI-карточки автора, форма публикации `SKILL.md`
+  (YAML-шаблон, Markdown-инструкция, Payout Account ID) со списком критических
+  замечаний аудита под формой, таблица навыков с бейджами Passed/Warning/
+  Rejected (тултип с findings) и инлайн-редактированием счёта выплат.
+- `src/App.tsx`: ленивый маршрут `/app/developer` под `ProtectedRoute`.
+- Навигация: пункт «Разработчикам» / `Developer Portal` рядом с
+  маркетплейсом в сайдбаре и шапках страниц.
+- RU/EN-ключи `nav.developer`, `errors.skill_audit_rejected` и
+  `developerPortal.*`; unit-тесты `src/lib/developer-portal.test.ts`:
+  схемы, coercion Decimal, отказ аудита с findings и клиентские вызовы.
+
 ### Sprint 35: CustomAgentRole и Visual No-Code Agent Builder
 
 **Бэкенд и Worker: модель, CRUD и подхват ролей (BUILDER-35.0).**
