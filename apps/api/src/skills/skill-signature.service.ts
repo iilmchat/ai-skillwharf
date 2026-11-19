@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   findTrustedKey,
   parseTrustedSkillPublicKeys,
@@ -31,7 +31,8 @@ export class SkillSignatureService {
   private readonly keys: readonly TrustedSkillPublicKey[];
   private readonly requireSigned: boolean;
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  // Примитив env не должен внедряться Nest по типу Object (KI-088).
+  constructor(@Optional() env: NodeJS.ProcessEnv = process.env) {
     this.keys = parseTrustedSkillPublicKeys(env.TRUSTED_SKILL_PUBLIC_KEYS);
     this.requireSigned = (env.REQUIRE_SIGNED_SKILLS ?? '').trim() === 'true';
   }

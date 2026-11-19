@@ -1,4 +1,6 @@
-import { MetricsService } from './metrics.service.js';
+import { Test, type TestingModule } from '@nestjs/testing';
+import { MetricsModule } from './metrics.module.js';
+import { METRICS_ENV, MetricsService } from './metrics.service.js';
 
 describe('MetricsService', () => {
   it('экспортирует стандартные и кастомные метрики в формате Prometheus', async () => {
@@ -28,5 +30,39 @@ describe('MetricsService', () => {
     expect(body).toMatch(
       /llm_cost_total\{[^}]*tenant_id="user-1"[^}]*model="gpt-4o"[^}]*agent_id="office"[^}]*\} 0\.015/,
     );
+  });
+
+  it('KI-088: MetricsService разрешается DI через MetricsModule', async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      imports: [MetricsModule],
+    }).compile();
+
+    const service = moduleRef.get(MetricsService);
+
+    expect(service).toBeInstanceOf(MetricsService);
+    expect(moduleRef.get(METRICS_ENV)).toBe(process.env);
+
+    const { body } = await service.render();
+
+    expect(body).toContain('process_cpu_seconds_total');
+    await moduleRef.close();
+  });
+
+  it('KI-088: env можно переопределить через DI-токен', async () => {
+    const env = { NODE_ENV: 'production', METRICS_HASH_TENANT_ID: 'true' };
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      imports: [MetricsModule],
+    })
+      .overrideProvider(METRICS_ENV)
+      .useValue(env)
+      .compile();
+
+    const service = moduleRef.get(MetricsService);
+
+    service.countLlmCost('user-1', 'gpt-4o', 'office', 1);
+    const { body } = await service.render();
+
+    expect(body).toMatch(/tenant_id="t_[0-9a-f]{12}"/);
+    await moduleRef.close();
   });
 });

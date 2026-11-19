@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import {
   collectDefaultMetrics,
   Counter,
@@ -6,6 +6,9 @@ import {
 } from '@prometheus-io/client';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+
+/** DI-токен окружения (KI-088): примитив нельзя внедрять по типу `Object`. */
+export const METRICS_ENV = 'METRICS_ENV';
 
 /**
  * Метрики Prometheus. Реестр собственный, чтобы в тестах и в приложении не
@@ -60,7 +63,9 @@ export class MetricsService {
 
   private readonly hashTenantId: boolean;
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  constructor(
+    @Optional() @Inject(METRICS_ENV) env: NodeJS.ProcessEnv = process.env,
+  ) {
     // process_*, nodejs_* — стандартные метрики клиента Prometheus.
     collectDefaultMetrics({ register: this.registry });
 
