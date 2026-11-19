@@ -1,4 +1,4 @@
-# MCP-серверы Ozon/Wildberries (Python/SSE) и Битрикс24/МойСклад (Node/SSE).
+# MCP-серверы Ozon/Wildberries (Python/SSE), Битрикс24/МойСклад/1С (Node/SSE).
 # Запуск вместе с основным стеком:
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build
 #
@@ -7,6 +7,7 @@
 #   WB_API_TOKEN
 #   BITRIX24_WEBHOOK_URL, MOYSKLAD_TOKEN, MOYSKLAD_BASE_URL
 #   MOYSKLAD_DEFAULT_ORGANIZATION_ID, MOYSKLAD_DEFAULT_AGENT_ID
+#   ONEC_ODATA_URL, ONEC_USERNAME, ONEC_PASSWORD (1С:Предприятие 8.3)
 #   MCP_AUTH_TOKEN (опционально, общий Bearer-токен для /sse)
 # По умолчанию MCP_ALLOW_MISSING_KEYS=1: креды могут приходить per-request
 # заголовками (MCP-24.1), глобальные env-ключи не обязательны.
@@ -22,6 +23,7 @@ services:
       WB_MCP_URL: http://wb-mcp:5002
       BITRIX24_MCP_URL: http://bitrix24-mcp:5003
       MOYSKLAD_MCP_URL: http://moysklad-mcp:5004
+      ONEC_MCP_URL: http://1c-mcp:5005/sse
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       # Обязательные поля заказа покупателя МойСклада (KI-080).
       MOYSKLAD_DEFAULT_ORGANIZATION_ID: ${MOYSKLAD_DEFAULT_ORGANIZATION_ID:-}
@@ -130,6 +132,31 @@ services:
         [
           'CMD-SHELL',
           'wget -qO- http://127.0.0.1:5004/api/health >/dev/null || exit 1',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  1c-mcp:
+    build:
+      context: ./infra/mcp/1c
+    environment:
+      PORT: 5005
+      ONEC_ODATA_URL: ${ONEC_ODATA_URL:-}
+      ONEC_USERNAME: ${ONEC_USERNAME:-}
+      ONEC_PASSWORD: ${ONEC_PASSWORD:-}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_ALLOW_MISSING_KEYS: ${MCP_ALLOW_MISSING_KEYS:-1}
+    ports:
+      # Только localhost: креды 1С приходят per-request, сервис не наружу.
+      - '127.0.0.1:5005:5005'
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:5005/health >/dev/null || exit 1',
         ]
       interval: 15s
       timeout: 5s
