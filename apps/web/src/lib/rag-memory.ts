@@ -5,18 +5,25 @@ import { api } from './api';
 /**
  * Контракт чтения RAG-памяти.
  *
- * Sprint 14 фиксирует контракт `GET /api/v1/chat/memory`:
- * `{ items: [{ id, content, createdAt }], total? }`. Схема описывает только
- * те поля, которые реально есть в модели `MemoryChunk` (KI-024), и валидирует
- * ответ Zod: при расхождении контракта панель показывает ошибку, а не
- * вымышленные или частично распарсенные записи.
+ * Sprint 14 фиксирует базу `{ items: [{ id, content, createdAt }], total? }`;
+ * Sprint 28 добавляет необязательные `kind`, `source` и `updatedAt` (KI-024).
+ * Поля необязательны для совместимости со старым API: если их нет, панель
+ * показывает только текст и дату создания. Ответ валидируется Zod: при
+ * расхождении контракта панель показывает ошибку, а не вымышленные данные.
  */
+const isoDateSchema = z
+  .string()
+  .refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: 'ожидается дата в формате ISO 8601',
+  });
+
 export const memoryEntrySchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
-  createdAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: 'ожидается дата в формате ISO 8601',
-  }),
+  createdAt: isoDateSchema,
+  kind: z.string().min(1).optional(),
+  source: z.string().nullable().optional(),
+  updatedAt: isoDateSchema.optional(),
 });
 
 export const memoryListSchema = z.object({

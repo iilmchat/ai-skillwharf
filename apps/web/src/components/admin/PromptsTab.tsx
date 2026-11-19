@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { PromptExperimentsPanel } from './PromptExperimentsPanel';
 import {
   adminQueryKeys,
   createPromptVersion,
@@ -242,6 +243,8 @@ function VersionsDrawer({
               ))}
             </ul>
           )}
+
+          <PromptExperimentsPanel promptId={prompt.id} versions={versions} />
 
           <p className="mt-6 text-xs text-on-surface-variant">
             {t('admin.drawer.updatedAt', {

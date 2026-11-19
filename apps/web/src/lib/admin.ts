@@ -26,6 +26,150 @@ export interface PromptVersion {
   createdAt?: string;
 }
 
+/**
+ * Контракт A/B-экспериментов промптов (WEB-28.1).
+ *
+ * API Sprint 28 может отдавать метрики как `metrics: { A, B }`, так и
+ * `variantAMetrics`/`variantBMetrics`, а идентификаторы версий — плоскими
+ * полями или внутри `variantA`/`variantB`. Нормализация происходит внутри
+ * Zod-схемы: наружу всегда уходит один и тот же тип.
+ */
+const numericMetricSchema = z.union([
+  z.number().nonnegative(),
+  z
+    .string()
+    .regex(/^\d+(?:\.\d+)?$/)
+    .transform(Number),
+]);
+
+const percentSchema = z.union([
+  z.number().int(),
+  z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number),
+]);
+
+export const promptExperimentStatsSchema = z.object({
+  calls: numericMetricSchema,
+  avgLatencyMs: numericMetricSchema,
+  avgCost: numericMetricSchema,
+});
+
+const promptExperimentStatsInputSchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return {
+    calls: value.calls ?? value.requests ?? value.count,
+    avgLatencyMs:
+      value.avgLatencyMs ?? value.avgLatency ?? value.averageLatencyMs,
+    avgCost: value.avgCost ?? value.avgCostRub ?? value.averageCost,
+  };
+}, promptExperimentStatsSchema);
+
+const promptExperimentBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  status: z
+    .enum(['running', 'active', 'stopped', 'completed'])
+    .default('running'),
+  variantAVersionId: z.string().min(1),
+  variantBVersionId: z.string().min(1),
+  // API хранит долю 0–100; UI при создании ограничивает её 10–90.
+  trafficSplitB: percentSchema.refine(
+    (value) => value >= 0 && value <= 100,
+    'доля трафика B должна быть от 0 до 100 процентов',
+  ),
+  createdAt: z.string().min(1),
+  stoppedAt: z.string().nullable().optional(),
+  winnerVersionId: z.string().nullable().optional(),
+  promotedVersionId: z.string().optional(),
+  metrics: z
+    .object({
+      A: promptExperimentStatsInputSchema.optional(),
+      B: promptExperimentStatsInputSchema.optional(),
+    })
+    .optional(),
+});
+
+export const promptExperimentSchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const variantA = isRecord(value.variantA) ? value.variantA : undefined;
+  const variantB = isRecord(value.variantB) ? value.variantB : undefined;
+  const metrics = isRecord(value.metrics) ? value.metrics : undefined;
+
+  return {
+    ...value,
+    variantAVersionId:
+      value.variantAVersionId ?? variantA?.versionId ?? variantA?.version,
+    variantBVersionId:
+      value.variantBVersionId ?? variantB?.versionId ?? variantB?.version,
+    trafficSplitB:
+      value.trafficSplitB ?? value.trafficSplit ?? value.trafficSplitPercent,
+    metrics: {
+      A:
+        value.variantAMetrics ??
+        metrics?.A ??
+        metrics?.a ??
+        variantA?.stats ??
+        variantA?.metrics,
+      B:
+        value.variantBMetrics ??
+        metrics?.B ??
+        metrics?.b ??
+        variantB?.stats ??
+        variantB?.metrics,
+    },
+  };
+}, promptExperimentBaseSchema);
+
+export type PromptExperiment = z.infer<typeof promptExperimentSchema>;
+
+export const promptExperimentListSchema = z.preprocess(
+  (value) =>
+    isRecord(value)
+      ? (value.items ?? value.experiments ?? value.data ?? value)
+      : value,
+  z.array(promptExperimentSchema),
+);
+
+export const createPromptExperimentSchema = z
+  .object({
+    name: z.string().trim().min(1).max(128),
+    variantAVersionId: z.string().min(1),
+    variantBVersionId: z.string().min(1),
+    trafficSplitB: z.number().int().min(10).max(90),
+  })
+  .refine((value) => value.variantAVersionId !== value.variantBVersionId, {
+    message: 'варианты должны использовать разные версии',
+    path: ['variantBVersionId'],
+  });
+
+export type CreatePromptExperimentInput = z.infer<
+  typeof createPromptExperimentSchema
+>;
+
+/** Stop может вернуть как обновлённый эксперимент, так и короткий статус. */
+export const promptExperimentStopResponseSchema = z.object({
+  id: z.string().optional(),
+  status: z.string().optional(),
+  promotedVersionId: z.string().optional(),
+  success: z.boolean().optional(),
+});
+
+export type PromptExperimentStopResult = z.infer<
+  typeof promptExperimentStopResponseSchema
+>;
+
+export function isPromptExperimentActive(experiment: PromptExperiment): boolean {
+  return experiment.status === 'running' || experiment.status === 'active';
+}
+
 export const LLM_PROVIDER_TYPES = [
   'OpenAI',
   'YandexGPT',
@@ -114,6 +258,8 @@ export const adminQueryKeys = {
   prompts: ['admin', 'prompts'] as const,
   promptVersions: (promptId: string) =>
     ['admin', 'prompts', promptId, 'versions'] as const,
+  promptExperiments: (promptId: string) =>
+    ['admin', 'prompts', promptId, 'experiments'] as const,
   llmRoutes: ['admin', 'llm-routes'] as const,
   audit: ['admin', 'audit'] as const,
 };
@@ -221,6 +367,49 @@ export async function createPromptVersion(
   return data;
 }
 
+/** GET /api/v1/prompts/:id/experiments. */
+export async function fetchPromptExperiments(
+  promptId: string,
+): Promise<PromptExperiment[]> {
+  const { data } = await api.get<unknown>(
+    `/prompts/${encodeURIComponent(promptId)}/experiments`,
+  );
+
+  return promptExperimentListSchema.parse(data);
+}
+
+/** POST /api/v1/prompts/:id/experiments. */
+export async function createPromptExperiment(
+  promptId: string,
+  payload: CreatePromptExperimentInput,
+): Promise<PromptExperiment> {
+  const input = createPromptExperimentSchema.parse(payload);
+  const { data } = await api.post<unknown>(
+    `/prompts/${encodeURIComponent(promptId)}/experiments`,
+    input,
+  );
+
+  return promptExperimentSchema.parse(data);
+}
+
+/** POST /api/v1/prompts/experiments/:expId/stop. */
+export async function stopPromptExperiment(
+  expId: string,
+  promoteVersionId?: string,
+): Promise<PromptExperimentStopResult> {
+  const { data } = await api.post<unknown>(
+    `/prompts/experiments/${encodeURIComponent(expId)}/stop`,
+    promoteVersionId === undefined ? {} : { promoteVersionId },
+  );
+
+  // 204 No Content — допустимый ответ: обновление списка сделает UI сам.
+  if (data === undefined || data === null || data === '') {
+    return {};
+  }
+
+  return promptExperimentStopResponseSchema.parse(data);
+}
+
 export async function fetchLlmRoutes(): Promise<LlmRoute[]> {
   const { data } = await api.get<unknown>('/admin/llm-routes');
   const items = unwrapList<unknown>(data, [
@@ -291,7 +480,7 @@ export function getAdminErrorMessage(
       return i18n.t('admin.errors.adminOnly');
     }
 
-    if (status === 404) {
+    if (status === 404 || status === 501) {
       return i18n.t('admin.errors.notAvailable');
     }
 

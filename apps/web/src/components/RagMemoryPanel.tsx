@@ -135,13 +135,25 @@ function MemoryEntryCard({
             aria-hidden="true"
             className="size-1.5 shrink-0 rounded-full bg-primary"
           />
-          {t('settings.rag.entryType')}
+          {entry.kind ?? t('settings.rag.entryType')}
         </span>
+        {entry.source != null && (
+          <span className="rounded-full border border-outline-variant px-2.5 py-1">
+            {t('settings.rag.source', { source: entry.source })}
+          </span>
+        )}
         <time dateTime={entry.createdAt} className="tabular-nums">
           {t('settings.rag.createdAt', {
             date: formatMemoryDate(entry.createdAt, language),
           })}
         </time>
+        {entry.updatedAt !== undefined && (
+          <time dateTime={entry.updatedAt} className="tabular-nums">
+            {t('settings.rag.updatedAt', {
+              date: formatMemoryDate(entry.updatedAt, language),
+            })}
+          </time>
+        )}
       </div>
 
       <p className="mt-2 line-clamp-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-on-surface">
@@ -230,10 +242,6 @@ export function RagMemoryPanel() {
           </>
         )}
       </div>
-
-      <p className="mt-4 text-xs leading-relaxed text-on-surface-variant">
-        {t('settings.rag.metadataNote')}
-      </p>
     </section>
   );
 }

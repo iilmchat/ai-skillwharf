@@ -67,6 +67,47 @@ describe('memoryListSchema (контракт Sprint 14)', () => {
     );
   });
 
+  it('принимает метаданные kind/source/updatedAt из Sprint 28', () => {
+    const parsed = memoryListSchema.parse({
+      items: [
+        {
+          ...VALID_PAYLOAD.items[0],
+          kind: 'preference',
+          source: 'conversation:42',
+          updatedAt: '2026-11-19T09:30:00.000Z',
+        },
+      ],
+    });
+
+    expect(parsed.items[0]?.kind).toBe('preference');
+    expect(parsed.items[0]?.source).toBe('conversation:42');
+    expect(parsed.items[0]?.updatedAt).toBe('2026-11-19T09:30:00.000Z');
+  });
+
+  it('остаётся совместимым со старым API без метаданных', () => {
+    const parsed = memoryListSchema.parse(VALID_PAYLOAD);
+
+    expect(parsed.items[0]?.kind).toBeUndefined();
+    expect(parsed.items[0]?.source).toBeUndefined();
+    expect(parsed.items[0]?.updatedAt).toBeUndefined();
+  });
+
+  it('принимает null в source, если бэкенд не указал источник', () => {
+    const parsed = memoryListSchema.parse({
+      items: [{ ...VALID_PAYLOAD.items[0], source: null }],
+    });
+
+    expect(parsed.items[0]?.source).toBeNull();
+  });
+
+  it('отклоняет некорректную дату обновления', () => {
+    expect(
+      memoryListSchema.safeParse({
+        items: [{ ...VALID_PAYLOAD.items[0], updatedAt: 'вчера' }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('отбрасывает неизвестные поля, не ломая разбор', () => {
     const parsed = memoryListSchema.parse({
       ...VALID_PAYLOAD,
@@ -88,6 +129,26 @@ describe('fetchMemoryEntries', () => {
 
     await expect(fetchMemoryEntries()).resolves.toEqual(VALID_PAYLOAD);
     expect(getMock).toHaveBeenCalledWith('/chat/memory');
+  });
+
+  it('возвращает метаданные, если API их передаёт', async () => {
+    getMock.mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            ...VALID_PAYLOAD.items[0],
+            kind: 'fact',
+            source: 'message:7',
+            updatedAt: '2026-11-19T08:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    const result = await fetchMemoryEntries();
+
+    expect(result.items[0]?.kind).toBe('fact');
+    expect(result.items[0]?.source).toBe('message:7');
   });
 
   it('бросает ZodError, если API нарушил контракт', async () => {

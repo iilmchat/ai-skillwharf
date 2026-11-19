@@ -1105,6 +1105,50 @@
       "saving": "Saving…",
       "success": "A new version has been created."
     },
+    "experiments": {
+      "title": "Prompt version A/B testing",
+      "subtitle": "Run an experiment on live traffic and compare variants by calls, latency, and cost.",
+      "nameLabel": "Experiment name",
+      "namePlaceholder": "For example, classification prompt",
+      "variantA": "Variant A",
+      "variantB": "Variant B",
+      "selectVersion": "Select a version",
+      "trafficLabel": "Traffic split",
+      "traffic": "A {{a}}% / B {{b}}%",
+      "start": "Start experiment",
+      "starting": "Starting…",
+      "created": "Experiment started.",
+      "stopped": "Experiment stopped.",
+      "promoted": "Experiment stopped; variant B is now active.",
+      "loading": "Loading experiments…",
+      "empty": "No experiments for this template yet.",
+      "stop": "Stop",
+      "promoteB": "Make variant B active",
+      "createdAt": "Started {{date}}",
+      "status": {
+        "active": "Running",
+        "stopped": "Stopped"
+      },
+      "metrics": {
+        "metric": "Metric",
+        "variant": "{{letter}} · {{version}}",
+        "calls": "Calls",
+        "latency": "Average latency",
+        "cost": "Average cost"
+      },
+      "units": {
+        "ms": " ms",
+        "rub": " ₽"
+      },
+      "errors": {
+        "invalid": "Check the name, versions, and traffic split (10–90%).",
+        "load": "Could not load experiments.",
+        "create": "Could not start the experiment.",
+        "stop": "Could not stop the experiment.",
+        "needVersions": "An experiment requires at least two prompt versions.",
+        "sameVersion": "Choose different versions for variants A and B."
+      }
+    },
     "router": {
       "title": "LLM Router",
       "subtitle": "Model selection rules, base URLs, and priorities.",
@@ -1506,11 +1550,12 @@
       "refreshing": "Refreshing…",
       "loading": "Loading memory entries…",
       "entryType": "Memory chunk",
+      "source": "Source: {{source}}",
       "createdAt": "Created: {{date}}",
+      "updatedAt": "Updated: {{date}}",
       "emptyTitle": "The agent has not remembered anything yet",
       "emptyBody": "Entries will appear here after conversations once the assistant saves details useful for answers.",
       "retry": "Try again",
-      "metadataNote": "The server currently returns only the entry text and creation date; source, type, and relevance will appear later.",
       "errors": {
         "unauthorized": "Your session has expired. Please sign in again.",
         "unavailable": "Memory view is not available yet: the API does not support this section.",
