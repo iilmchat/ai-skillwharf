@@ -1,9 +1,9 @@
-# MCP-коннекторы Битрикс24 и МойСклад (треки K/L)
+# MCP-коннекторы Битрикс24, МойСклад и 1С (треки H/J/K/L)
 
 Документ фиксирует контракт между инструментами агента в API и MCP-серверами
-`bitrix24-mcp` (порт 5003) и `moysklad-mcp` (порт 5004). Серверы описаны в
-`infra/mcp/bitrix24` и `infra/mcp/moysklad`; здесь — только то, на что
-опирается Gateway.
+`bitrix24-mcp` (порт 5003), `moysklad-mcp` (порт 5004) и `1c-mcp` (порт 5005).
+Серверы описаны в `infra/mcp/bitrix24`, `infra/mcp/moysklad` и
+`infra/mcp/1c`; здесь — только то, на что опирается Gateway.
 
 ## Транспорт
 
@@ -12,7 +12,8 @@
 - Общая авторизация контейнеров — `MCP_AUTH_TOKEN` (Bearer на `/sse`).
 - **Per-request креды (MCP-24.1):** Gateway передаёт их заголовками
   `X-Bitrix24-Webhook-Url`, `X-Moysklad-Token`, `X-Ozon-Client-Id`,
-  `X-Ozon-Api-Key`, `X-Wb-Api-Token`. `bitrix24-mcp` и `moysklad-mcp` читают
+  `X-Ozon-Api-Key`, `X-Wb-Api-Token` и `X-1C-OData-Url`/`X-1C-Username`/
+  `X-1C-Password` (1С). `bitrix24-mcp`, `moysklad-mcp` и `1c-mcp` читают
   заголовок на `GET /sse` и могут принять его повторно на `POST /messages`;
   значения не логируются и не попадают в ошибки. Если заголовка нет —
   используется env контейнера (fallback). Некорректный webhook Битрикс24
@@ -20,7 +21,7 @@
 - `MCP_ALLOW_MISSING_KEYS=1` по умолчанию в `docker-compose.mcp.yml`: контейнер
   стартует без глобальных секретов, когда креды приходят per-request.
 - Адрес сервера берётся из `mcp_endpoint` манифеста навыка; fallback —
-  `BITRIX24_MCP_URL`/`MOYSKLAD_MCP_URL` (см. ADR 0004).
+  `BITRIX24_MCP_URL`/`MOYSKLAD_MCP_URL`/`ONEC_MCP_URL` (см. ADR 0004).
 
 ## Инструменты агента → действия MCP
 
@@ -52,6 +53,32 @@
   `/entity/bundle?filter=article=...&limit=1`.
 - Повтор: не более двух попыток с экспоненциальной задержкой (200 мс, затем
   400 мс) на HTTP 429/5xx и сетевые ошибки. 4xx (кроме 429) не повторяются.
+
+### Коннектор 1С:Предприятие 8.3 (CONNECT-32.1, OData)
+
+`1c-mcp` (`infra/mcp/1c/server.mjs`) подключается к публикации
+`odata/standard.odata` конфигураций Управление торговлей / Бухгалтерия / ERP.
+Pod слушает `5005`, наружу выставлен только `127.0.0.1:5005`.
+
+| Инструмент MCP | OData-запрос | Назначение |
+| --- | --- | --- |
+| `1c_nomenclature_list` | `GET /Catalog_Номенклатура?$format=json&$top=…&$filter=…` | Поиск по наименованию (`Description`) или артикулу (`Артикул`) |
+| `1c_stock_balance` | `GET /AccumulationRegister_ТоварыНаСкладах/Balance?$format=json` | Остатки по складам |
+| `1c_counterparty_debt` | `GET /AccumulationRegister_ВзаиморасчетыСКонтрагентами/Balance?$format=json` | Задолженность по ИНН или наименованию |
+| `1c_customer_order_create` | `POST /Document_ЗаказПокупателя?$format=json` | Черновик заказа покупателя |
+
+Креды берутся из заголовков `X-1C-OData-Url` / `X-1C-Username` /
+`X-1C-Password`, при их отсутствии — из `ONEC_ODATA_URL` / `ONEC_USERNAME` /
+`ONEC_PASSWORD`. URL обязан быть `http(s)://…/odata/standard.odata` без
+логина/пароля внутри и без query; Basic-авторизация и `Accept: application/json`
+выставляются сервером. Секреты не логируются и не попадают в текст ошибок.
+Повтор — до двух попыток на 429/5xx и сетевые сбои. Диагностика —
+`GET /health` (или `/api/health`).
+
+Инструменты чтения (`*_list`, `*_balance`) идут без HITL; создание заказа
+покупателя меняет данные 1С и требует подтверждения на уровне навыка, как
+`moysklad_create_order`. Подробности публикации OData на стороне 1С — в
+[GETSTARTED.md](../../GETSTARTED.md) (раздел 3.9).
 
 ## Схемы и ошибки
 

@@ -158,6 +158,33 @@ Egress песочницы задается полем `egress_allowlist` в ма
 
 ### 3.9. MCP и маркетплейсы
 
+#### 1С:Предприятие 8.3 (OData, треки H/J/K/L)
+
+Публикация OData на стороне 1С:
+
+1. В Конфигураторе включите публикацию **OData** (`odata/standard.odata`)
+   для конфигурации УТ / Бухгалтерия / ERP и опубликуйте её на веб-сервере 1С.
+2. Создайте пользователя 1С с правами чтения справочника `Номенклатура`,
+   регистров `ТоварыНаСкладах` / `ВзаиморасчетыСКонтрагентами` и, при необходимости
+   записи документа, `ЗаказПокупателя`.
+3. Убедитесь, что URL доступен из compose-сети:
+   `http(s)://host/base/odata/standard.odata`. Логин и пароль **не** вписывайте
+   в URL — они передаются отдельно.
+
+Заполните `.env`:
+
+```text
+ONEC_ODATA_URL=https://1c.example.com/base/odata/standard.odata
+ONEC_USERNAME=<пользователь 1С>
+ONEC_PASSWORD=<пароль 1С>
+ONEC_MCP_URL=http://1c-mcp:5005/sse
+```
+
+Старт: `docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build`.
+Для мульти-тенанта креды и URL приходят per-request заголовками
+`X-1C-OData-Url`, `X-1C-Username`, `X-1C-Password` — они перекрывают env.
+Проверка сервера: `curl -fsS http://127.0.0.1:5005/health`.
+
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
 | `OZON_CLIENT_ID` | пусто | Client ID Ozon Seller API. |
@@ -170,8 +197,12 @@ Egress песочницы задается полем `egress_allowlist` в ма
 | `MOYSKLAD_BASE_URL` | `https://api.moysklad.ru/api/remap/1.2` | Base URL JSON API 1.2. |
 | `BITRIX24_MCP_URL` | `http://bitrix24-mcp:5003` | Внутренний адрес MCP-сервера Битрикс24 (в `docker-compose.mcp.yml`). |
 | `MOYSKLAD_MCP_URL` | `http://moysklad-mcp:5004` | Внутренний адрес MCP-сервера МойСклада. |
+| `ONEC_ODATA_URL` | пусто | URL публикации `odata/standard.odata` 1С:Предприятия 8.3. |
+| `ONEC_USERNAME` | пусто | Пользователь 1С для Basic-авторизации OData. |
+| `ONEC_PASSWORD` | пусто | Пароль пользователя 1С (секрет, только в `.env`). |
+| `ONEC_MCP_URL` | `http://1c-mcp:5005/sse` | Внутренний адрес MCP-сервера 1С. |
 | `MCP_AUTH_TOKEN` | пусто | Общий Bearer-токен для `/sse` MCP-серверов; пусто — без авторизации. |
-| `MCP_ALLOW_MISSING_KEYS` | `0` | `0` — healthcheck MCP требует ключи Ozon/WB/Битрикс24/МойСклад; `1` — разрешает пустые ключи. |
+| `MCP_ALLOW_MISSING_KEYS` | `0` | `0` — healthcheck MCP требует ключи Ozon/WB/Битрикс24/МойСклад/1С; `1` — разрешает пустые ключи. |
 | `OZON_API_BASE_URL` | `https://api-seller.ozon.ru` | Хост Ozon Seller API. |
 | `OZON_API_TEST_PATH` | `/v1/product/import/prices` | Тестовый write-метод для `scripts/test-integrations.sh`. |
 | `OZON_PERFORMANCE_API_BASE_URL` | `https://api-performance.ozon.ru` | Хост Ozon Performance API. |

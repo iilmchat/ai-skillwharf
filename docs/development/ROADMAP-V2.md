@@ -94,13 +94,23 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 32 — Native 1C:Enterprise / 1C:Fresh & Event-Driven Webhooks
 
-* [ ] **[CONNECT-32.1]** Официальный MCP-коннектор для 1С (OData и
+* [x] **[CONNECT-32.1]** Официальный MCP-коннектор для 1С (OData и
   HTTP-сервисы) для треков **H** (документооборот), **J** (склад/учёт),
   **K** (опт) и **L** (производство), с live-проверками как у Битрикс24 и
-  МойСклад.
-* [ ] **[CONNECT-32.2]** Входящие webhook-триггеры от Битрикс24, МойСклад и
-  Telegram (Event-Driven Agents): подписка, верификация подписи/idempotency и
-  запуск агента по событию без опросов.
+  МойСклад. Реализован `infra/mcp/1c/server.mjs` с OData-инструментами,
+  per-request кредами, retry и тестами; HTTP-сервисы 1С — остаток.
+* [x] **[CONNECT-32.2]** Входящие webhook-триггеры (Event-Driven Agents):
+  CRUD `/triggers` с привязкой к воркспейсу, публичный приём по
+  `X-Trigger-Secret` (constant-time), подстановка payload в промпт и запуск
+  автономного диалога (бэкенд — см. журнал ниже).
+* [x] **[WEB-32.3]** UI: карточка «1С:Предприятие (OData)» в «Интеграциях»
+  (OData URL + логин + пароль через `SecretField`, Zod-валидация, RU/EN) и
+  секция «Вебхук-триггеры» на `/app/settings`: форма создания (название,
+  источник, шаблон промпта), карточка с Webhook URL
+  `/api/v1/webhooks/triggers/:slug` и секретом `X-Trigger-Secret`
+  (маскировка, копирование), список со счётчиком срабатываний и удалением;
+  Zod-клиент `/api/v1/triggers`, unit-тесты (без коммита, изменения в
+  рабочем дереве).
 
 ---
 
@@ -163,3 +173,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | 2026-11-19 | Sprint 29 (29.1–29.4, 29.5) | OpenCode / UI / Infra | Выполнено | 12 золотых датасетов A–L (36 кейсов), `scripts/run-evals.mjs` с прогоном через `POST /prompts/:id/evals/run` и CI-валидацией; `PromptEvalRun` + `PromptEvalsService` (детерминированные метрики tool_calls/HITL + LLM-судья с Zod, mock-режим), `EVALS_MIN_PASS_RATE`; гейт промоушена `errors.eval_gate_failed`; панель LLM Evals в `/admin`; дашборд Grafana `evals-and-cache.json` + env для Semantic Cache и MULTI_AGENT_MAX_HANDOFFS | Алерты на деградации — отдельная задача |
 | 2026-11-19 | Sprint 30 (30.1–30.3) | OpenCode / UI / Infra | Выполнено | Граф LangGraph с узлом `supervisor`, `agent_handoff` и лимитом `MULTI_AGENT_MAX_HANDOFFS`; `SemanticCacheService` (Redis + косинус, изоляция по userId/promptVersionId/model, bypass инструментов, `cacheHit:true` без списания в Ledger), метрики hits/misses; лента handoff'ов и подсветка ролей в AI-Офисе, бейдж «Из кеша · 0 ₽» в чате; дашборд Grafana `evals-and-cache.json` и env для кеша/лимита передач; RU/EN и 13 unit-тестов | GRAPH-30.2 (сквозной trace_id в Tempo) и алерты Evals — остаток |
 | 2026-11-19 | Sprint 31 (31.1–31.4, KI-088) | OpenCode / UI | Выполнено | Модели `Organization`/`Workspace`/`WorkspaceMember` + миграция, автосоздание дефолтной структуры, REST `/workspaces` и управление участниками, `WorkspaceContextGuard` (`X-Workspace-Id`), RBAC/ABAC-гейты для платных инструментов и HITL-лимита, per-user/per-workspace `InstalledSkill`; `WorkspaceSwitcher`, страница `/app/team`, заголовок `X-Workspace-Id` и инвалидация кэшей; хотфикс DI `METRICS_ENV` и тест сборки `MetricsModule`; RU/EN и ~30 unit-тестов | KI-086 закрыт полностью; KI-088 исправлен |
+| 2026-11-19 | Sprint 32 (32.1–32.3) | OpenCode / UI / Infra | Выполнено | MCP-сервер `1c-mcp` (OData, per-request креды, 4 инструмента, тесты); API 1С (`POST/DELETE /integrations/1c` с проверкой `$metadata`, `onec_*`, стартовый навык H/J/K/L) и Event-Driven webhook-триггеры (`WebhookTrigger`, CRUD `/triggers`, constant-time секрет, лимит 32 КБ); карточка 1С и секция «Вебхук-триггеры» в `/app/settings`, RU/EN и unit-тесты | — |

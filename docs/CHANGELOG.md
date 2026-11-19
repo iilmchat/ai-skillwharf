@@ -4,6 +4,87 @@
 
 ## [Unreleased]
 
+### Sprint 32: 1С OData, Event-Driven триггеры и настройки в UI
+
+**Бэкенд: провайдер 1С и вебхук-триггеры (CONNECT-32.1/32.2).**
+
+- 1С:Предприятие в API: провайдер `'1c'` в `ProviderKeysService` (шифрованное
+  хранение `{odataUrl, username, password}` с Zod-валидацией URL и live-проверкой
+  `GET <odataUrl>/$metadata`, `SKIP_INTEGRATION_LIVE_CHECK`), маршруты
+  `POST/DELETE /integrations/1c`, проброс `X-1C-OData-Url`/`X-1C-Username`/
+  `X-1C-Password` в `MarketplaceMcpService`.
+- Четыре инструмента `onec_search_nomenclature`, `onec_check_stock`,
+  `onec_check_debt`, `onec_create_order` с Push в MCP, Zod-схемами и
+  политикой `approval: 'always'` + Pay-per-Call 20 ₽ для `onec_create_order`
+  (и 20 ₽ для остальных 1С-инструментов). Стартовый навык
+  `starter-skills/1c-enterprise/SKILL.md` для треков H/J/K/L.
+- `WebhookTrigger` + миграция; `GET/POST/DELETE /api/v1/triggers` с привязкой к
+  активному воркспейсу (slug и secretToken генерируются `randomBytes`),
+  публичный `POST /api/v1/webhooks/triggers/:slug` с constant-time проверкой
+  `X-Trigger-Secret`, лимитом payload 32 КБ, подстановкой `{{payload}}`/
+  `{{source}}` в шаблон и запуском агента от имени владельца триггера.
+- Тесты: заголовки и креды 1С, HITL-политика и вызов `onec_create_order`,
+  создание триггера, constant-time секрет, autonomous-диалог и лимит payload.
+  `pnpm test` — 1579 тестов.
+
+**MCP-сервер 1С через OData (инфраструктура, CONNECT-32.1).**
+
+- `infra/mcp/1c/server.mjs`: Node.js ESM MCP-сервер для 1С:Предприятия 8.3
+  (УТ/Бухгалтерия/ERP) с транспортом `GET /sse` + `POST /messages` и
+  диагностикой `GET /health`. Авторизация контейнеров — `MCP_AUTH_TOKEN`;
+  per-request креды — `X-1C-OData-Url`, `X-1C-Username`, `X-1C-Password` с
+  fallback на `ONEC_*`. URL валидируется как `http(s)://…/odata/standard.odata`
+  без userinfo/query; Basic-авторизация и `Accept: application/json`;
+  повтор до двух попыток на 429/5xx, секреты не попадают в логи и ошибки.
+- Инструменты: `1c_nomenclature_list`, `1c_stock_balance`,
+  `1c_counterparty_debt`, `1c_customer_order_create` (треки H/J/K/L).
+  Добавлены Dockerfile, 10 тестов на `node:test`, сервис `1c-mcp` на порту
+  5005 в `docker-compose.mcp.yml` с healthcheck и `ONEC_MCP_URL` в API.
+- Обновлены `.env.example`, `docs/architecture/MCP-ERP-Connectors.md` и
+  `GETSTARTED.md` (публикация OData в 1С и подключение к SkillWharf);
+  `CONNECT-32.1` отмечен `[x]` в `ROADMAP-V2.md`.
+
+**Web UI: карточка 1С и вебхук-тригеры в `/app/settings` (WEB-32.3).**
+
+- `src/lib/integrations.ts`: добавлен провайдер `'1c'` в
+  `KEY_INTEGRATION_PROVIDERS`, схема `oneCIntegrationSchema` и поле `oneC`
+  в `integrationsSchema` (по умолчанию `disconnected`). Zod-контракт
+  подключения: `oneCOdataUrlSchema` (абсолютный `http://`/`https://` URL),
+  `oneCUsernameSchema` и `oneCPasswordSchema` (непустые строки),
+  `oneCCredentialsSchema`. Клиент `connectKeyIntegration` отправляет
+  `POST /integrations/1c` с `{ odataUrl, username, password }`,
+  `disconnectKeyIntegration('1c')` — `DELETE /integrations/1c`. Операции
+  `1cConnect`/`1cDisconnect` добавлены в маппинг ошибок; отказ провайдера
+  показывает ключ `settings.integrations.oneC.credentialsRejected`.
+- `src/components/IntegrationIcon.tsx`: текстовый бейдж `1C` для новой
+  карточки.
+- `src/components/IntegrationsSection.tsx`: карточка «1С:Предприятие» с
+  полями OData URL, логин и пароль. Пароль использует `SecretField` с
+  маскировкой, кнопки «Подключить»/«Отключить», статус, локализованные
+  ошибки валидации и ответа API. Универсальный `ProviderKeyCard` сужен до
+  провайдеров с одним секретом (`SimpleKeyProvider`).
+- `src/lib/triggers.ts` (новый): Zod-контракт триггеров (`triggerSchema`,
+  `triggerListSchema`, `createTriggerInputSchema`, `createdTriggerSchema`),
+  клиенты `fetchTriggers`/`createTrigger`/`deleteTrigger` для
+  `/api/v1/triggers`, хелпер `getTriggerWebhookUrl(slug, origin)` для адреса
+  `/api/v1/webhooks/triggers/:slug` и категории ошибок
+  `getTriggerErrorKind`. Кэш TanStack Query разделён по `userId`.
+- `src/components/TriggersSection.tsx` (новый): секция «Вебхук-триггеры
+  (Автозапуск агентов)» на `/app/settings` рядом с интеграциями. Форма
+  создания (название, источник Битрикс24/МойСклад/1С/свой вебхук, шаблон
+  промпта с `{{payload}}`), карточка с готовым Webhook URL и секретом
+  `X-Trigger-Secret` (маскировка, «Показать/Скрыть», «Скопировать»), список
+  активных триггеров со счётчиком срабатываний и удалением.
+- RU/EN-ключи `settings.integrations.oneC.*` и `settings.triggers.*` в
+  `src/locales/{ru,en}.json`; обновлено описание группы внешних сервисов.
+- Unit-тесты Zod-схем 1С и триггеров, клиентов и маппинга ошибок в
+  `src/lib/integrations.test.ts` и `src/lib/triggers.test.ts`.
+
+UI сверен с API-контрактом (`onec: { status, odataUrl?, source?, error? }`) и
+устойчив к отсутствию эндпоинтов (404) — показывается локализованное
+сообщение. Все задачи Sprint 32 (`CONNECT-32.1`, `CONNECT-32.2`, `WEB-32.3`)
+завершены.
+
 ### Sprint 31: мульти-тенантность, команды и хотфикс DI (KI-086/088)
 
 **Хотфикс KI-088 (DI-контейнер).**
