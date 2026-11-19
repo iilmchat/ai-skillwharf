@@ -1,6 +1,6 @@
 # Product & Engineering Roadmap — SkillWharf
 
-**Текущая версия:** `v0.2.0-pilot` (Спринты 1–22 завершены, идёт **Sprint 23**)
+**Текущая версия:** `v1.0.0-ga` (Этапы 0–3 завершены)
 **Методология:** Stage-Gate (Релизы) -> Sprints (2-недельные итерации) -> Atomic Tasks.
 **Правило для AI-агентов (обязательно):**
 
@@ -75,9 +75,9 @@
 
 ### Sprint 28: Control Plane v2 & Qdrant Scale
 
-* [ ] **[WEB-28.1]** UI и API для A/B-тестирования версий системных промптов на реальном трафике с метриками latency/cost/feedback (закрытие **KI-009**).
-* [ ] **[API-28.2]** Динамические per-model тарифы LLM в Ledger и Prometheus вместо единого `LLM_COST_PER_1K_TOKENS` (закрытие **KI-040**).
-* [ ] **[INFRA-28.3]** Векторный адаптер **Qdrant** как опциональный бэкенд долговременной памяти при росте базы эмбеддингов (ADR 0002) + метаданные чанков памяти (закрытие **KI-024**).
+* [x] **[WEB-28.1]** UI управления A/B-экспериментами версий системных промптов в Control Plane: запуск, доля трафика, сравнение latency/cost по вариантам, остановка и повышение версии B (закрытие **KI-009**; feedback как метрика API пока не отдаётся).
+* [x] **[API-28.2]** Динамические per-model тарифы LLM (input/output отдельно) в Ledger и Prometheus + `METRICS_HASH_TENANT_ID` против кардинальности (закрытие **KI-040**; коммит — см. журнал ниже).
+* [x] **[INFRA-28.3]** Векторный адаптер **Qdrant** как опциональный бэкенд долговременной памяти при росте базы эмбеддингов (ADR 0002) + метаданные чанков памяти (закрытие **KI-024**).
 
 ---
 
@@ -86,8 +86,9 @@
 | Дата | Спринт / Задача | Агент | Статус | Коммит / Детали | Найденные проблемы (KI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-18 | Sprint 22 (22.1–22.3) | Infra / OpenCode / UI | Выполнено | Добавлены MCP-серверы Битрикс24/МойСклад, инструменты CRM/ERP и UI карточки | KI-075..KI-081 |
-| 2026-11-18 | Sprint 23 (23.1–23.3) | Infra / OpenCode / UI | В работе | Промпты отправлены: инвайты, live-проверки ERP, KI-076/079/081 | — |
+| 2026-11-18 | Sprint 23 (23.1–23.5) | Infra / OpenCode / UI | Выполнено | Live smoke `--bitrix24`/`--moysklad`, `REGISTRATION_MODE`/инвайты, HITL в `llm-worker` и закрытые ERP-кейсы | KI-073, KI-075, KI-076, KI-079, KI-081 |
 | 2026-11-18 | Sprint 24 (24.1–24.6) | Infra / OpenCode / UI | Выполнено | MCP per-request креды, новые методы K/L, маппинг контрагента, Pay-per-Call Hold→Capture, лендинг-симулятор и E2E `Chat → tool_calls → HITL → Ledger` (QA-24.4) | KI-049 закрыт; KI-084/KI-085 — остаточные |
 | 2026-11-18 | Sprint 25 (25.1–25.3) | Infra / OpenCode | Выполнено | `ISandboxRuntimeProvider` + `FirecrackerSandboxProvider` (fail closed без KVM), SNI/Host egress-прокси с DNS-rebinding guard, K8s-манифесты `deploy/k8s/` (gVisor RuntimeClass, Job миграций, Deployment, NetworkPolicy) и гайд `KUBERNETES-DEPLOY.md` | KI-028, KI-037, KI-042 закрыты |
 | 2026-11-18 | Sprint 26 (26.1–26.4) | Infra / OpenCode | Выполнено | `internal-jwt.ts` (TTL 60, iss/aud/jti, fail-closed в production) и guards в api/worker; envelope `v2` с keyId + previous keys и CLI `keys:rotate`; Grafana OIDC с Basic-фолбэком и Tempo с OTLP-экспортёром; шифрование offsite `.enc`, SHA-256-сайдкар, SSE-S3 и изолированный restore-drill с проверкой append-only-триггеров | KI-018, KI-035, KI-036, KI-038, KI-045, KI-053 закрыты; mTLS/KMS, Object Lock и SSO для Prometheus — остаток |
 | 2026-11-19 | Sprint 27 (27.1–27.3) | OpenCode / UI | Выполнено | `skill-signing.ts` (каноническая Ed25519-подпись), `SkillSignatureService` с `TRUSTED_SKILL_PUBLIC_KEYS`/`REQUIRE_SIGNED_SKILLS`, CLI `skill:keygen`/`skill:sign`, модель `MarketplaceSkill` + миграция, `MarketplaceController`, `RevenueShareService` и сплит 85/15 через BAL/Ledger в транзакции; витрина `/app/marketplace` с Zod-контрактом, фильтрами 12 треков, установкой в 1 клик, окном деталей, RU/EN и тестами | KI-086 закрыт; KI-087 — перевод ЮKassa не атомарен со сплитом |
+| 2026-11-19 | Sprint 28 (28.1–28.3) | OpenCode / UI / Infra | Выполнено | API A/B-экспериментов (`PromptExperiment`, детерминированный выбор по conversationId, метрики по вариантам) и панель управления в Control Plane; per-model тарифы input/output и `METRICS_HASH_TENANT_ID`; метаданные `MemoryChunk` и опциональный `QdrantVectorStore`; Compose-профиль `qdrant` с томом и env-переменными. Релиз `v1.0.0-ga` | KI-009, KI-024, KI-040 закрыты; feedback-метрика API и invoice-реконсиляция тарифов — остаток |

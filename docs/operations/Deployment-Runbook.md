@@ -1942,3 +1942,71 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 подключения и гейт, но не на сам запрос к Seller API — контейнер
 аутентифицируется своими env-ключами. Полностью личный ключ работает для
 Midjourney (TTAPI вызывается напрямую из API).
+
+## 22. Масштабирование векторной памяти: переход с pgvector на Qdrant
+
+По умолчанию эмбеддинги долговременной памяти хранятся в **pgvector** — в том
+же PostgreSQL, что и остальные данные (`EMBEDDINGS_*` задаёт модель, см.
+раздел «Настройка LLM»). Это достаточно для пилота: отдельный сервис не
+поднимается. При росте базы эмбеддингов, когда pgvector начинает ограничивать
+поиск, подключается выделенная векторная БД **Qdrant** (ADR 0002, INFRA-28.3).
+
+### Переменные
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `VECTOR_STORE_PROVIDER` | `pgvector` | Провайдер хранилища: `pgvector` или `qdrant` |
+| `QDRANT_URL` | `http://qdrant:6333` | Адрес Qdrant внутри compose-сети |
+| `QDRANT_API_KEY` | пусто | API-ключ (секрет, только в `.env`) |
+| `QDRANT_COLLECTION` | `skillwharf_memory` | Коллекция для эмбеддингов памяти |
+
+### Запуск стека с Qdrant
+
+```bash
+# 1. Обычный стек — всё остаётся на pgvector, Qdrant не поднимается.
+docker compose up -d
+
+# 2. Переход на Qdrant: включаем профиль и провайдер.
+#    В .env: VECTOR_STORE_PROVIDER=qdrant, при внешнем Qdrant — QDRANT_URL
+#    и QDRANT_API_KEY.
+docker compose --profile qdrant up -d
+
+# 3. Staging: порт 6333 открыт только на 127.0.0.1 для отладки и импорта.
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --profile qdrant up -d
+```
+
+Сервис `qdrant` использует образ `qdrant/qdrant:v1.12.4`, том `qdrant_data`
+(`/qdrant/storage`) и healthcheck `GET /readyz`. Порты `6333`/`6334` в базовом
+compose **не публикуются**: API обращается к Qdrant по внутренней сети. На
+production не открывайте 6333 наружу без отдельного решения по безопасности —
+Qdrant без `QDRANT_API_KEY` не требует аутентификации.
+
+### Проверка Qdrant
+
+```bash
+# Состояние сервиса и здоровье (в staging, где порт на localhost).
+docker compose --profile qdrant ps qdrant
+curl -fsS http://127.0.0.1:6333/readyz
+curl -fsS http://127.0.0.1:6333/collections/skillwharf_memory
+
+# Логи и том.
+docker compose --profile qdrant logs -f qdrant
+docker volume inspect ai-skillwharf_qdrant_data
+```
+
+### Переход и откат
+
+1. Снимите бэкап PostgreSQL (`scripts/backup-db.sh`) — он содержит текущие
+   эмбеддинги в pgvector и является точкой отката.
+2. Задайте `VECTOR_STORE_PROVIDER=qdrant` (и при необходимости
+   `QDRANT_COLLECTION`), поднимите профиль `qdrant`.
+3. Убедитесь, что коллекция создана и поиск по памяти работает; данные
+   эмбеддингов нужно переиндексировать — миграция из pgvector в Qdrant в
+   инфраструктурной части не выполняется (это задача приложения).
+4. Откат: верните `VECTOR_STORE_PROVIDER=pgvector` и перезапустите `api`.
+   Сервис Qdrant можно оставить поднятым или остановить вместе с профилем;
+   том `qdrant_data` сохраняется до явного `docker compose down -v`.
+
+`QDRANT_COLLECTION` меняйте только вместе с миграцией данных: старая
+коллекция останется в томе, но поиск начнёт работать по новому имени.

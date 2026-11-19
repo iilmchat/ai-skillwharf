@@ -12,7 +12,7 @@
 | KI-006 | Инфраструктура | Средняя | Исправлено | LangChain/LangGraph вынесены в `apps/llm-worker`; API собирается без `@langchain/*`, размер образа — см. детали |
 | KI-007 | Инфраструктура | Высокая | Исправлено | Миграции вынесены в one-shot `db-migrate`; API-реплики ждут его успешного завершения |
 | KI-008 | Sandbox | Высокая | Исправлено | Egress по манифесту: `egress_allowlist` → iptables-allowlist в sandbox-контейнере, без списка сеть запрещена (deny by default) |
-| KI-009 | Frontend | Низкая | Открыто | Интерфейс A/B-тестирования промптов пока не реализован |
+| KI-009 | Frontend | Низкая | Исправлено | UI A/B-экспериментов в Control Plane: запуск, доли трафика, сравнение latency/cost, остановка и повышение версии B |
 | KI-010 | LLM Router | Средняя | Исправлено | `LlmRouter` v2: fallback-цепочки по `priority`/`taskType`, budget guardrails на маршрут через Ledger, 502 при исчерпании всех маршрутов |
 | KI-011 | Marketplace | Средняя | Открыто | MCP-серверы `ozon_mcp` и `wb_mcp` работают в режиме заглушки и возвращают демонстрационные данные |
 | KI-012 | Marketplace | Средняя | Исправлено | Telegram (Bot API, webhook) и Google Workspace (OAuth, Sheets/Docs/Calendar) работают реально; оставшиеся внешние API (Midjourney, Ozon, WB) — отдельные задачи Sprint 19+ |
@@ -27,7 +27,7 @@
 | KI-021 | LLM | Средняя | Исправлено | Дневной лимит токенов резервируется до вызова LLM (reserve-before-call) с reconcile после ответа и откатом при ошибке; лимит не превышается при гонке |
 | KI-022 | LLM | Средняя | Исправлено | При отсутствии `usage` (GigaChat) расход оценивается fallback-токенизатором и учитывается в счётчике и биллинге |
 | KI-023 | Frontend/Backend | Высокая | Исправлено | Read-API `GET /api/v1/chat/memory` с Zod-контрактом, права владельца и пагинацией; UI-панель памяти готова и включается флагом |
-| KI-024 | Frontend/Backend | Низкая | Открыто | `MemoryChunk` не хранит тип, источник, `updatedAt` и confidence; UI показывает только текст и дату создания |
+| KI-024 | Frontend/Backend | Низкая | Исправлено | read-API памяти отдаёт `kind`/`source`/`updatedAt`; UI показывает бейдж типа, источник и дату обновления (релевантность не сохраняется) |
 | KI-025 | Frontend/Backend | Низкая | Исправлено | Все коды ошибок API (`invalid_request`, `policy_blocked`, MCP, лимиты) маппятся в UI по `code` с i18n RU/EN; текстовый fallback сохранён |
 | KI-026 | Sandbox | Низкая | Открыто | Seccomp-профиль рассчитан на linux/amd64 и проверяется smoke-тестом вне worker; смена профиля требует перезапуска worker |
 | KI-027 | Security | Средняя | Исправлено | MCP Gateway использует `tools/list` для dynamic discovery и отклоняет неизвестные actions до вызова; при недоступности — structural-only с логом |
@@ -43,7 +43,7 @@
 | KI-037 | Инфраструктура | Низкая | Исправлено | Для Kubernetes добавлен Job `prisma migrate deploy` (`backoffLimit: 3`, без параллельных реплик); Compose one-shot остаётся для локального пилота |
 | KI-038 | Observability | Низкая | Исправлено | OTel Collector шлёт спаны в Grafana Tempo (`tempo:4317`), блоки в томе `tempo_data`, retention 7 дней; sampling/TLS и latency usage-спанов — остаток |
 | KI-039 | Observability | Низкая | Открыто | Sentry включён только для backend-ошибок и только при DSN; PII-фильтр — эвристика по regex, frontend Sentry и алертинг не подключены |
-| KI-040 | Observability | Низкая | Открыто | `llm_cost_total` считает стоимость по единому `LLM_COST_PER_1K_TOKENS`, без per-model тарифов/скидок; `tenant_id` — unbounded user id, возможна кардинальность Prometheus |
+| KI-040 | Observability | Низкая | Исправлено | Per-model тарифы input/output (`LLM_MODEL_PRICING_JSON`, поля `LlmRoute`) в Ledger и `llm_cost_total`; `METRICS_HASH_TENANT_ID` (в production по умолчанию) хеширует tenant_id |
 | KI-041 | LLM Router | Низкая | Исправлено | Control Plane UI не показывал и не редактировал `taskType`/`dailyCostLimit`; поля добавлены в форму создания и редактирования, лимит выведен в таблице, ответ API валидируется Zod |
 | KI-042 | Sandbox | Средняя | Исправлено | Egress: SNI/Host-фильтрация по точному FQDN, DNS-pinning с denylist приватных/metadata IP, forward-прокси в `sandbox-worker`; остаточные ротация CDN и IPv4-only ExtraHosts — ниже |
 | KI-043 | Persistence/MCP | Низкая | Открыто | Resolved-записи `PendingApproval` не чистятся retention-job; MCP `tools/list` кешируется на время SSE-сессии, изменения набора действий подхватываются после переподключения |
@@ -212,6 +212,20 @@ KI-029 (обход allowlist через интерпретаторы).
 **План:** Добавить в раздел «Промпты» выбор версий, доли трафика, метрики
 (latency, cost, пользовательский feedback) и остановку эксперимента. Для
 этого сначала нужен API экспериментов и привязка запросов к варианту.
+
+**Закрыто в Sprint 28 (WEB-28.1 + API-28.1):** в drawer'е версий Control Plane
+появилась форма запуска (две версии, доля B 10–90%), список экспериментов с
+таблицей `calls`/`avgLatencyMs`/`avgCost` и кнопки остановки/повышения версии
+B. Ответы валидируются Zod, при отсутствии API (404/501) показывается
+локализованное сообщение.
+
+API-часть: модель `PromptExperiment` и миграция; эндпоинты
+`GET/POST /prompts/:id/experiments` и `POST /prompts/experiments/:id/stop`
+(роли admin/owner, Zod-валидация, только один `running` на промпт);
+детерминированный выбор варианта по SHA-256 хешу `conversationId` в
+`PromptsService.resolveSystemPrompt`; агрегаты запросов, средней задержки и
+средней стоимости по вариантам в `metricsJson`. Метрика пользовательского
+feedback по-прежнему не отдаётся — в UI она не отображается.
 
 ### KI-010 — LlmRouter использует упрощённую логику выбора
 
@@ -635,6 +649,19 @@ Docker-сборке выполнен (KI-030); осталось включить
 этого вывести бейджи типа/источника, дату обновления и (опционально)
 нормализованную релевантность с явной подписью, что это не «точность».
 
+**Закрыто в Sprint 28 (UI + API):** схема `memoryEntrySchema` принимает
+необязательные `kind`/`source`/`updatedAt`, `RagMemoryPanel` показывает их
+в карточке записи; для старого API сохраняется нейтральный бейдж и дата
+создания.
+
+API-часть: `MemoryChunk` получил `source` (nullable), `kind` (default `fact`)
+и `updatedAt` (`@updatedAt`) с миграцией; `MemoryService.remember` принимает
+`source`/`kind`, `GET /api/v1/chat/memory` отдаёт новые поля через
+`MemoryItemSchema`. Релевантность по-прежнему вычисляется только при поиске и
+не сохраняется — в UI она не показывается. Одновременно добавлен интерфейс
+`IVectorMemoryStore` с pgvector по умолчанию и опциональным `QdrantVectorStore`
+(`VECTOR_STORE_PROVIDER=qdrant`, INFRA-28.3).
+
 ### KI-025 — Не все ошибки API маппились в UI по `code`
 
 **Влияние:** Часть ошибок API отдаёт машиночитаемый `code`, но UI переводил
@@ -1011,9 +1038,21 @@ production. Считать фильтр defense-in-depth, а не гаранти
 не как биллинг; деньги сверять по Ledger/провайдеру. Для контроля
 кардинальности ограничить retention/агрегацию в Prometheus.
 
-**План:** Ввести тарифы по модели/провайдеру (таблица или конфиг), учитывать
-input/output отдельно, добавить per-model стоимость и метрику расхождения
-с фактическим счётом; при необходимости агрегировать tenant'ов.
+**Исправлено (Sprint 28, API-28.2):**
+
+- `LLM_MODEL_PRICING_JSON` (Zod-карта `model → {inputCostPer1k,
+  outputCostPer1k}`) и поля `LlmRoute.inputCostPer1k`/`outputCostPer1k`
+  переопределяют legacy `LLM_COST_PER_1K_TOKENS`.
+- `calculateModelCost` считает `(promptTokens * inputRate +
+  completionTokens * outputRate) / 1000` с округлением до копеек;
+  `LlmBudgetService.settle` передаёт модель и маршрут, поэтому Ledger и OTel
+  используют ту же стоимость, что и метрика.
+- `METRICS_HASH_TENANT_ID=true` (по умолчанию в `NODE_ENV=production`)
+  заменяет `tenant_id` в `llm_cost_total` на короткий SHA-256-префикс `t_…`,
+  устраняя unbounded cardinality; в dev/тестах поведение прежнее.
+
+**Остаток:** сверки с фактическим счётом провайдера (invoice reconciliation)
+нет — тарифы задаются администратором вручную.
 
 ### KI-041 — Control Plane UI не редактировал поля LLM Router
 

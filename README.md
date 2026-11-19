@@ -6,7 +6,7 @@
 с долговременной памятью, навыками и встроенной монетизацией.
 
 [![CI](https://github.com/iilmchat/ai-skillwharf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/iilmchat/ai-skillwharf/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/iilmchat/ai-skillwharf/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0--ga-blue.svg)](https://github.com/iilmchat/ai-skillwharf/releases)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-339933.svg)](https://nodejs.org)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](https://docs.docker.com/compose/)
 
@@ -16,6 +16,8 @@
 
 SkillWharf разворачивается на своём сервере и не требует внешних облачных сервисов: данные, агенты и биллинг остаются под вашим контролем. Интерфейс поддерживает русский и английский языки (RU/EN), а модели подключаются через OpenAI-совместимый API — локальный Ollama или внешний провайдер.
 
+**Текущий релиз:** `v1.0.0-ga` (Этапы 0–3 дорожной карты завершены).
+
 Сайт проекта: <https://skillwharf.ru>.
 
 **Стек:** TypeScript (Node.js 24+) · NestJS · Fastify · LangGraph · PostgreSQL (pgvector) · React · Caddy · Docker.
@@ -24,7 +26,7 @@ SkillWharf разворачивается на своём сервере и не
 
 - **Автономные агенты** — состояние сохраняется, работа продолжается после перезапуска.
 - **Три уровня расширяемости** — Tools (действия), Skills (инструкции), Plugins (исполняемый код).
-- **Безопасность** — выполнение стороннего кода в изолированной песочнице (Docker, в планах Firecracker).
+- **Безопасность** — выполнение стороннего кода в изолированной песочнице: Docker по умолчанию, Firecracker/gVisor для Enterprise-кластеров (`deploy/k8s/`, ADR 0002).
 - **Монетизация** — Pay-per-Call, Freemium и Pay-per-Outcome (Эскроу) с поддержкой ЮKassa.
 - **Control Plane** — управление промптами, LLM-роутами и аудитом без перезапуска сервера.
 - **AI-Офис** — визуальный слой с Human-in-the-Loop для контроля агентов.

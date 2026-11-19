@@ -4,6 +4,71 @@
 
 ## [Unreleased]
 
+## [1.0.0-ga] - 2026-11-19
+
+Финальный релиз дорожной карты: этапы 0–3 завершены. Self-hosted платформа
+с изолированными навыками, биллингом, открытым маркетплейсом и масштабируемой
+векторной памятью. Тег релиза создаёт Владелец продукта.
+
+### Sprint 28: A/B-эксперименты, per-model тарифы, память и Qdrant
+
+**Backend (API-28.1 / API-28.2 / INFRA-28.3).**
+
+- `API-28.1` (KI-009): модель `PromptExperiment` и миграция; эндпоинты
+  `GET/POST /prompts/:id/experiments` и `POST /prompts/experiments/:expId/stop`
+  для admin/owner с Zod-валидацией и запретом двух `running`-экспериментов на
+  промпт. `PromptsService.resolveSystemPrompt` выбирает вариант по SHA-256
+  хешу `conversationId` (один диалог — одна версия); `metricsJson` хранит
+  запросы, суммарную latency и стоимость, а список отдаёт средние значения
+  `avgLatencyMs`/`avgCost`. Остановка поддерживает промоушен победителя;
+  действия пишутся в AuditLog.
+- `API-28.2` (KI-040): `LLM_MODEL_PRICING_JSON` и поля `LlmRoute`
+  `inputCostPer1k`/`outputCostPer1k` с fallback на `LLM_COST_PER_1K_TOKENS`.
+  `calculateModelCost` считает input/output раздельно; `LlmBudgetService`
+  использует ту же стоимость в Ledger, OTel и `llm_cost_total`. Флаг
+  `METRICS_HASH_TENANT_ID` (по умолчанию включён в production) заменяет
+  `tenant_id` на короткий хеш против взрыва кардинальности.
+- `INFRA-28.3` (KI-024): `MemoryChunk` получил `source`, `kind` (default
+  `fact`) и `updatedAt`; `GET /api/v1/chat/memory` отдаёт новые поля.
+  Выделен `IVectorMemoryStore`: `PgVectorMemoryStore` по умолчанию и
+  `QdrantVectorStore` при `VECTOR_STORE_PROVIDER=qdrant` (HTTP API Qdrant через
+  `fetch`, фильтр по userId и валидация ответов через Zod).
+- Тесты: 6 тестов A/B (распределение, метрики, stop/promote, Zod), 5 тестов
+  per-model тарифов, 3 теста Qdrant с mock HTTP, обновлённые тесты памяти с
+  новыми полями. `pnpm test` — 1457 тестов.
+
+**Web UI (WEB-28.1, KI-009/KI-024).**
+
+- `WEB-28.1` (KI-009): в drawer'е версий шаблона Control Plane добавлен блок
+  «A/B-тестирование версий». Клиент (`src/lib/admin.ts`) валидирует Zod-схемы
+  списка/создания/остановки экспериментов и поддерживает запросы
+  `GET/POST /prompts/:id/experiments` и
+  `POST /prompts/experiments/:expId/stop`. Форма выбирает версии A/B и долю
+  трафика B (10–90%), карточка показывает статус, распределение и сравнение
+  вызовов, задержки и стоимости, а также кнопки остановки и повышения версии B.
+  При 404/501 показывается локализованное сообщение о недоступности API.
+- UI-часть KI-024: схема `src/lib/rag-memory.ts` принимает необязательные
+  `kind`, `source` и `updatedAt` при полной обратной совместимости со старым
+  ответом; `RagMemoryPanel` показывает бейдж типа, источник и дату обновления,
+  заглушка «метаданные появятся позже» удалена. RU/EN-ключи и unit-тесты
+  обновлены.
+
+**Инфраструктура (INFRA-28.3, ADR 0002).**
+
+- `INFRA-28.3` (ADR 0002): в `docker-compose.yml` добавлен сервис `qdrant`
+  (`qdrant/qdrant:v1.12.4`) в профиле `qdrant`: постоянный том
+  `qdrant_data:/qdrant/storage`, healthcheck `GET /readyz`, без публикации
+  портов 6333/6334 в базовом стеке. По умолчанию стек остаётся лёгким на
+  pgvector. В `docker-compose.staging.yml` порт 6333 открыт только на
+  `127.0.0.1` для отладки и импорта коллекций.
+- В `api` проброшены `VECTOR_STORE_PROVIDER` (по умолчанию `pgvector`),
+  `QDRANT_URL` (`http://qdrant:6333`), `QDRANT_API_KEY` и
+  `QDRANT_COLLECTION` (`skillwharf_memory`); все переменные документированы
+  в `.env.example`.
+- В `docs/operations/Deployment-Runbook.md` добавлен раздел 22 с порядком
+  запуска `--profile qdrant`, проверкой и процедурой отката на pgvector.
+  `INFRA-28.3` отмечен `[x]` в Roadmap.
+
 ### Sprint 27: Ed25519-подписи, публичный реестр, Revenue Share и витрина
 
 **API-27.1 / API-27.2 (backend, подписи и монетизация).**
