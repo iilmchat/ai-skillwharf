@@ -49,6 +49,10 @@ import type {
 import { LlmWorkerClient } from '../agent/llm-worker.client.js';
 import { SemanticCacheService } from '../llm/semantic-cache.service.js';
 import { WorkspacesService } from '../workspaces/workspaces.service.js';
+import {
+  customAgentRoleContextSchema,
+  type CustomAgentRoleContext,
+} from '../workspaces/custom-agents.schemas.js';
 
 /** Сколько последних сообщений уходит в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
@@ -93,6 +97,8 @@ interface PreparedMessage {
   userRole: UserRole;
   toolSkills: Record<string, WorkerToolSkillContext[]>;
   systemPrompt: string;
+  /** Активные кастомные роли воркспейса (BUILDER-35.1/35.2/35.3). */
+  customRoles: CustomAgentRoleContext[];
   tools: ReturnType<AgentToolsService['buildDescriptors']>;
 }
 
@@ -125,6 +131,45 @@ export function orchestrationFromSkills(
   return roles.length >= 2
     ? { orchestrationMode: 'supervisor', agentRoles: roles }
     : { orchestrationMode: 'single' };
+}
+
+type Orchestration = ReturnType<typeof orchestrationFromSkills>;
+
+/** Добавляет roleKey кастомных ролей к списку ролей графа (не более 5). */
+export function mergeCustomAgentRoles(
+  base: Orchestration,
+  custom: readonly CustomAgentRoleContext[],
+): Orchestration {
+  if (custom.length === 0) {
+    return base;
+  }
+
+  const roles = [...(base.agentRoles ?? []), ...custom.map((role) => role.roleKey)];
+
+  return {
+    orchestrationMode: 'supervisor',
+    agentRoles: [...new Set(roles)].slice(0, 5),
+  };
+}
+
+/** Инструкции и навыки активных ролей — в системный промпт сессии. */
+export function customRolesPrompt(
+  custom: readonly CustomAgentRoleContext[],
+): string {
+  if (custom.length === 0) {
+    return '';
+  }
+
+  const blocks = custom.map((role) =>
+    [
+      `### ${role.name} (${role.roleKey})`,
+      role.systemPrompt,
+      `Навыки: ${role.skillSlugs.length > 0 ? role.skillSlugs.join(', ') : 'нет'}`,
+      `HITL: ${role.hitlPolicy}; дневной лимит: ${role.dailyBudgetRub === null ? 'без ограничения' : `${role.dailyBudgetRub} ₽`}`,
+    ].join('\n'),
+  );
+
+  return `\n\n## Кастомные роли воркспейса\n${blocks.join('\n\n')}`;
 }
 
 /** Роли, которые понимает policy engine; неизвестная роль — «user». */
@@ -627,7 +672,10 @@ export class ChatService {
       ...(prepared.skills.length === 0
         ? {}
         : { skillId: prepared.skills.map((skill) => skill.id).join(',') }),
-      ...orchestrationFromSkills(prepared.skills),
+      ...mergeCustomAgentRoles(
+        orchestrationFromSkills(prepared.skills),
+        prepared.customRoles,
+      ),
       traceId: randomUUID(),
     };
   }
@@ -741,17 +789,20 @@ export class ChatService {
       select: { role: true },
     });
     const userRole = normalizeUserRole(user?.role);
-    const systemPrompt = withMemoryContext(
-      await this.promptsService.getActiveSystemPrompt(
-        undefined,
-        conversationId,
-      ),
-      memoryContext,
-    );
+    const customRoles = await this.loadCustomRoles(userId);
+    const systemPrompt =
+      withMemoryContext(
+        await this.promptsService.getActiveSystemPrompt(
+          undefined,
+          conversationId,
+        ),
+        memoryContext,
+      ) + customRolesPrompt(customRoles);
 
     return {
       messages,
       skills,
+      customRoles,
       approvalRequiredTools: resolveApprovalTools(skills),
       approvalRules: resolveApprovalRules(skills),
       outcomePrices: resolveOutcomePrices(skills),
@@ -761,6 +812,41 @@ export class ChatService {
       systemPrompt,
       tools: this.toolsService.buildDescriptors(skills),
     };
+  }
+
+  /** Подхватывает активные кастомные роли дефолтного воркспейса пользователя. */
+  private async loadCustomRoles(
+    userId: string,
+  ): Promise<CustomAgentRoleContext[]> {
+    if (this.workspaces === undefined) {
+      return [];
+    }
+
+    const active = await this.workspaces.resolveActive(userId, undefined);
+
+    if (active === null) {
+      return [];
+    }
+
+    const rows = await this.prisma.customAgentRole.findMany({
+      where: { workspaceId: active.workspaceId, isActive: true },
+      select: {
+        roleKey: true,
+        name: true,
+        systemPrompt: true,
+        skillSlugs: true,
+        hitlPolicy: true,
+        dailyBudgetRub: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return customAgentRoleContextSchema.array().parse(
+      rows.map((row) => ({
+        ...row,
+        dailyBudgetRub: row.dailyBudgetRub?.toNumber() ?? null,
+      })),
+    );
   }
 
   private async assertConversationOwner(

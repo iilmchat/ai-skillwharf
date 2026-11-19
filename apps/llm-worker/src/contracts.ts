@@ -5,13 +5,13 @@ export const userRoleSchema = z.enum(['guest', 'user', 'admin', 'owner']);
 
 export type UserRole = z.infer<typeof userRoleSchema>;
 
-/** Профильные роли субагентов мультиагентного графа (GRAPH-30.1). */
-export const agentRoleSchema = z.enum([
-  'researcher',
-  'drafter',
-  'reviewer',
-  'analyst',
-  'operator',
+/** Профильные роли графа + кастомные roleKey воркспейса (GRAPH-30.1, BUILDER-35.1). */
+export const customAgentRoleKeySchema = z
+  .string()
+  .regex(/^[a-z0-9-]{2,40}$/, 'ожидается kebab-case roleKey');
+export const agentRoleSchema = z.union([
+  z.enum(['researcher', 'drafter', 'reviewer', 'analyst', 'operator']),
+  customAgentRoleKeySchema,
 ]);
 export type AgentRole = z.infer<typeof agentRoleSchema>;
 

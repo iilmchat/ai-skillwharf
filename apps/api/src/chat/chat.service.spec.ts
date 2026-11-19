@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   GraphEvent,
@@ -41,6 +42,13 @@ interface Harness {
     conversation: { findUnique: MockFn; update: MockFn };
     message: { create: MockFn; findMany: MockFn };
     user: { findUnique: MockFn };
+    customAgentRole: { findMany: MockFn };
+  };
+  workspaces: {
+    resolveActive: MockFn;
+    assertRole: MockFn;
+    payingRoles: MockFn;
+    assertHitlLimit: MockFn;
   };
   worker: { run: MockFn; resume: MockFn };
   billing: { getBalance: MockFn; cancelHold: MockFn };
@@ -83,9 +91,21 @@ function pendingRecord(
   };
 }
 
+interface HarnessOptions {
+  readonly customRoles?: readonly {
+    roleKey: string;
+    name: string;
+    systemPrompt: string;
+    skillSlugs: string[];
+    hitlPolicy: string;
+    dailyBudgetRub: Prisma.Decimal | null;
+  }[];
+}
+
 function createHarness(
   runEvents: readonly GraphEvent[] = [],
   resumeEvents: readonly GraphEvent[] = [],
+  options: HarnessOptions = {},
 ): Harness {
   const prisma = {
     conversation: {
@@ -100,6 +120,19 @@ function createHarness(
       ]),
     },
     user: { findUnique: vi.fn(async () => ({ role: 'user' })) },
+    customAgentRole: {
+      findMany: vi.fn(async () => options.customRoles ?? []),
+    },
+  };
+  const workspaces = {
+    resolveActive: vi.fn(async () => ({
+      workspaceId: '11111111-1111-1111-1111-111111111111',
+      role: 'owner',
+      hitlApprovalLimitRub: null,
+    })),
+    assertRole: vi.fn(async () => undefined),
+    payingRoles: vi.fn(() => new Set(['owner', 'admin', 'operator'])),
+    assertHitlLimit: vi.fn(async () => undefined),
   };
   const worker = {
     run: vi.fn(() => events(runEvents)),
@@ -154,11 +187,14 @@ function createHarness(
     checkpoints as unknown as ConstructorParameters<typeof ChatService>[7],
     pending as unknown as ConstructorParameters<typeof ChatService>[8],
     tools as unknown as ConstructorParameters<typeof ChatService>[9],
+    undefined,
+    workspaces as unknown as ConstructorParameters<typeof ChatService>[10],
   );
 
   return {
     service,
     prisma,
+    workspaces,
     worker,
     billing,
     skills,
@@ -193,6 +229,43 @@ describe('ChatService (llm-worker client)', () => {
     expect(request.memoryContext).toBe(MEMORY_CONTEXT);
     expect(request.systemPrompt).toContain(MEMORY_CONTEXT);
     expect(request.systemPrompt).toContain('## Долговременная память');
+  });
+
+  it('подхватывает активные кастомные роли воркспейса (BUILDER-35.1)', async () => {
+    const harness = createHarness([doneEvent('готово')], [], {
+      customRoles: [
+        {
+          roleKey: 'purchase-manager',
+          name: 'Менеджер по закупкам',
+          systemPrompt: 'Согласовывай договоры и проверяй поставщиков.',
+          skillSlugs: ['erp-orders'],
+          hitlPolicy: 'high_risk',
+          dailyBudgetRub: new Prisma.Decimal('250.00'),
+        },
+      ],
+    });
+
+    await harness.service.streamMessage('u1', 'c1', 'проверь поставщика', () => {});
+
+    const request = harness.worker.run.mock.calls[0]?.[0] as RunGraphRequest;
+
+    expect(harness.workspaces.resolveActive).toHaveBeenCalledWith('u1', undefined);
+    expect(harness.prisma.customAgentRole.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          workspaceId: '11111111-1111-1111-1111-111111111111',
+          isActive: true,
+        },
+      }),
+    );
+    expect(request.orchestrationMode).toBe('supervisor');
+    expect(request.agentRoles).toContain('purchase-manager');
+    expect(request.systemPrompt).toContain('## Кастомные роли воркспейса');
+    expect(request.systemPrompt).toContain(
+      'Согласовывай договоры и проверяй поставщиков.',
+    );
+    expect(request.systemPrompt).toContain('erp-orders');
+    expect(request.systemPrompt).toContain('250 ₽');
   });
 
   it('resolveApprovalRules передаёт условие HITL по stageId (KI-079)', () => {

@@ -65,6 +65,7 @@ model Workspace {
   members        WorkspaceMember[]
   installedSkills InstalledSkill[]
   webhookTriggers WebhookTrigger[]
+  customAgentRoles CustomAgentRole[]
 
   @@unique([organizationId, slug])
 }
@@ -508,4 +509,30 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([entityType, entityId])
+}
+
+/// Кастомная роль агента AI-Офиса из No-Code конструктора (BUILDER-35.1/35.2/35.3).
+model CustomAgentRole {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  /// Отображаемое название «стола» в AI-Офисе.
+  name           String
+  /// Латинский slug роли, уникальный в паре с воркспейсом.
+  roleKey        String
+  description    String?
+  /// Инструкции агента (сливаются в системный промпт сессии).
+  systemPrompt   String
+  /// Список подключённых навыков (marketplaceSlug или имя навыка).
+  skillSlugs     String[]
+  /// never | high_risk | always.
+  hitlPolicy     String   @default("high_risk")
+  /// Лимит расходов агента в сутки; NULL — без ограничения.
+  dailyBudgetRub Decimal? @db.Decimal(18, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, roleKey])
+  @@index([workspaceId])
 }

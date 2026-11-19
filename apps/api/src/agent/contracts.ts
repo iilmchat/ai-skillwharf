@@ -5,12 +5,15 @@ export const userRoleSchema = z.enum(['guest', 'user', 'admin', 'owner']);
 
 export type UserRole = z.infer<typeof userRoleSchema>;
 
-export const agentRoleSchema = z.enum([
-  'researcher',
-  'drafter',
-  'reviewer',
-  'analyst',
-  'operator',
+/** Ключ кастомной роли из No-Code конструктора (BUILDER-35.1). */
+export const customAgentRoleKeySchema = z
+  .string()
+  .regex(/^[a-z0-9-]{2,40}$/, 'ожидается kebab-case roleKey');
+
+/** Профильные роли графа + кастомные roleKey воркспейса. */
+export const agentRoleSchema = z.union([
+  z.enum(['researcher', 'drafter', 'reviewer', 'analyst', 'operator']),
+  customAgentRoleKeySchema,
 ]);
 export type AgentRole = z.infer<typeof agentRoleSchema>;
 
@@ -146,20 +149,8 @@ export const agentHandoffEventSchema = z
     type: z.literal('agent_handoff'),
     conversationId: z.string(),
     traceId: z.string(),
-    fromRole: z.union([z.literal('supervisor'), z.enum([
-      'researcher',
-      'drafter',
-      'reviewer',
-      'analyst',
-      'operator',
-    ])]),
-    toRole: z.enum([
-      'researcher',
-      'drafter',
-      'reviewer',
-      'analyst',
-      'operator',
-    ]),
+    fromRole: z.union([z.literal('supervisor'), agentRoleSchema]),
+    toRole: agentRoleSchema,
     reason: z.string(),
   })
   .strict();
