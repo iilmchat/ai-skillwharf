@@ -187,6 +187,16 @@ export function marketplaceSkillNotFoundError(message: string): ApiException {
   });
 }
 
+/** Промоушен A/B-победителя заблокирован гейтом качества Evals. */
+export function evalGateFailedError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'errors.eval_gate_failed',
+    message,
+  });
+}
+
 /** Загруженный документ больше лимита multipart (15 МБ). */
 export function documentTooLargeError(message: string): ApiException {
   return new ApiException({

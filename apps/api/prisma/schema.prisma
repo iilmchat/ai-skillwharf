@@ -194,6 +194,7 @@ model PromptTemplate {
   updatedAt   DateTime        @updatedAt
   versions    PromptVersion[]
   experiments PromptExperiment[]
+  evalRuns    PromptEvalRun[]
 }
 
 /// Версия содержимого промпта. Активной считается последняя версия.
@@ -228,6 +229,28 @@ model PromptExperiment {
   prompt            PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
 
   @@index([promptId, status])
+}
+
+/// Прогон автоматической оценки качества версии промпта (EVAL-29.2/29.3).
+/// `resultsJson` — детализация по каждому кейсу (метрики и вердикт судьи).
+model PromptEvalRun {
+  id           String    @id @default(uuid())
+  promptId     String
+  versionId    String
+  /// Фильтр трека A..L; NULL — весь датасет.
+  trackFilter  String?
+  totalCases   Int
+  passedCases  Int
+  passRate     Float
+  avgScore     Float
+  status       String    @default("running")
+  resultsJson  Json?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+  prompt       PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([promptId, createdAt])
+  @@index([versionId, status])
 }
 
 /// Правило выбора LLM-провайдера. Меньший priority выбирается первым.

@@ -57,6 +57,8 @@ export const ERROR_KEYS = {
   invalidSkillSignature: 'errors.invalid_skill_signature',
   /** Навык каталога не найден или не опубликован (API-27.2). */
   marketplaceSkillNotFound: 'errors.marketplace_skill_not_found',
+  /** Промоушен версии заблокирован: нет зелёного Eval-прогона (EVAL-29.3). */
+  evalGateFailed: 'errors.eval_gate_failed',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];

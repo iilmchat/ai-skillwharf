@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -14,7 +15,9 @@ import {
   type PromptVersion,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service.js';
+import { evalGateFailedError } from '../common/api-error.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PromptEvalsService } from './prompt-evals.service.js';
 import {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_SYSTEM_PROMPT_NAME,
@@ -50,6 +53,7 @@ export class PromptsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    @Optional() private readonly evals?: PromptEvalsService,
   ) {}
 
   /** Засевает дефолтный промпт, если его ещё нет в БД. */
@@ -332,6 +336,22 @@ export class PromptsService {
         throw new BadRequestException(
           'Победитель должен быть версией того же промпта',
         );
+      }
+
+      // EVAL-29.3: без зелёного прогона Evals версию нельзя повышать.
+      const requireEval =
+        input.requirePassingEval === true ||
+        (input.requirePassingEval === undefined &&
+          this.evals?.gatePromotion === true);
+
+      if (requireEval && this.evals !== undefined) {
+        const passing = await this.evals.hasPassingEval(input.promoteVersionId);
+
+        if (!passing) {
+          throw evalGateFailedError(
+            `Версия ${input.promoteVersionId} не прошла Evals: нет успешного прогона`,
+          );
+        }
       }
     }
 

@@ -17,6 +17,8 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CreatePromptVersionDto } from './dto/create-prompt-version.dto.js';
 import type { ExperimentView } from './prompt-experiment.schemas.js';
+import type { EvalRunView } from './prompt-eval.schemas.js';
+import { PromptEvalsService } from './prompt-evals.service.js';
 import { PromptsService, type PromptTemplateView } from './prompts.service.js';
 
 interface AuthenticatedRequest extends Request {
@@ -27,7 +29,10 @@ interface AuthenticatedRequest extends Request {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin', 'owner')
 export class PromptsController {
-  constructor(private readonly promptsService: PromptsService) {}
+  constructor(
+    private readonly promptsService: PromptsService,
+    private readonly evalsService: PromptEvalsService,
+  ) {}
 
   @Get()
   list(): Promise<PromptTemplateView[]> {
@@ -85,6 +90,19 @@ export class PromptsController {
       body ?? {},
       this.userId(request),
     );
+  }
+
+  /** История прогонов автоматической оценки промпта. */
+  @Get(':id/evals')
+  evalRuns(@Param('id') id: string): Promise<EvalRunView[]> {
+    return this.evalsService.listRuns(id);
+  }
+
+  /** Запуск прогона Evals для версии промпта (опционально — по треку). */
+  @Post(':id/evals/run')
+  @HttpCode(HttpStatus.CREATED)
+  runEval(@Param('id') id: string, @Body() body: unknown): Promise<EvalRunView> {
+    return this.evalsService.runEvalForPrompt(id, body);
   }
 
   private userId(request: AuthenticatedRequest): string {

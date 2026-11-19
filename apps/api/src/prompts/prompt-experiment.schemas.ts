@@ -24,6 +24,8 @@ export type CreateExperimentInput = z.infer<typeof createExperimentSchema>;
 /** POST /prompts/experiments/:expId/stop — остановка с опциональным промоушеном. */
 export const stopExperimentSchema = z.object({
   promoteVersionId: z.string().min(1).optional(),
+  /** Явное требование зелёного Evals-прогона для этого промоушена. */
+  requirePassingEval: z.boolean().optional(),
 });
 
 export type StopExperimentInput = z.infer<typeof stopExperimentSchema>;
