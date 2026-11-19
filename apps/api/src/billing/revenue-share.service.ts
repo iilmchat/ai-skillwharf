@@ -65,7 +65,7 @@ export class RevenueShareService {
         idempotencyKey: z.string().min(1),
       })
       .parse(input);
-    const installed = await this.prisma.installedSkill.findUnique({
+    const installed = await this.prisma.installedSkill.findFirst({
       where: { name: parsed.skillName },
       select: { marketplaceSlug: true },
     });

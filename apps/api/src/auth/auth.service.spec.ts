@@ -27,6 +27,9 @@ interface PrismaMock {
     update: MockFn;
     delete: MockFn;
   };
+  workspaceMember: { findFirst: MockFn; upsert: MockFn };
+  organization: { upsert: MockFn };
+  workspace: { upsert: MockFn };
 }
 
 interface JwtMock {
@@ -67,6 +70,12 @@ describe('AuthService', () => {
         update: vi.fn(),
         delete: vi.fn(),
       },
+      workspaceMember: {
+        findFirst: vi.fn(async () => ({ id: 'member-1' })),
+        upsert: vi.fn(async () => ({ id: 'member-1' })),
+      },
+      organization: { upsert: vi.fn(async () => ({ id: 'org-1' })) },
+      workspace: { upsert: vi.fn(async () => ({ id: 'workspace-1' })) },
     };
     jwt = { signAsync: vi.fn(), verifyAsync: vi.fn() };
 
@@ -101,6 +110,26 @@ describe('AuthService', () => {
       expect(data.passwordHash).not.toBe(PASSWORD);
       await expect(argon2.verify(data.passwordHash, PASSWORD)).resolves.toBe(
         true,
+      );
+    });
+
+    it('при регистрации создаёт дефолтные organization/workspace с ролью owner', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: USER_ID, email: EMAIL });
+      prisma.workspaceMember.findFirst.mockResolvedValue(null);
+
+      await service.register({ email: EMAIL, password: PASSWORD });
+
+      expect(prisma.organization.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.workspace.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ isDefault: true, slug: 'default' }),
+        }),
+      );
+      expect(prisma.workspaceMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ userId: USER_ID, role: 'owner' }),
+        }),
       );
     });
 

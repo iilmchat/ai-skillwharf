@@ -12,7 +12,8 @@ type MockFn = ReturnType<typeof vi.fn>;
 
 interface PrismaMock {
   installedSkill: {
-    upsert: MockFn;
+    findFirst: MockFn;
+    create: MockFn;
     findMany: MockFn;
     findUnique: MockFn;
     update: MockFn;
@@ -65,19 +66,12 @@ code: |
 # Dangerous Skill
 `;
 
-interface UpsertArgs {
-  where: { name: string };
-  create: {
+interface CreateArgs {
+  data: {
     name: string;
     version: string;
     author: string;
     manifest: Record<string, unknown>;
-  };
-  update: {
-    version: string;
-    author: string;
-    manifest: Record<string, unknown>;
-    isEnabled?: boolean;
   };
 }
 
@@ -88,7 +82,8 @@ describe('SkillsService', () => {
   beforeEach(async () => {
     prisma = {
       installedSkill: {
-        upsert: vi.fn(),
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'skill-1' })),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
@@ -177,7 +172,7 @@ name: [незакрытый массив
 
   describe('installSkill', () => {
     it('валидирует манифест и сохраняет навык в каталог', async () => {
-      prisma.installedSkill.upsert.mockResolvedValue({
+      prisma.installedSkill.create.mockResolvedValue({
         id: 'skill-1',
         name: 'web-researcher-pro',
       });
@@ -189,29 +184,23 @@ name: [незакрытый массив
         warning: SKILL_PERMISSION_WARNING,
       });
       expect(result).not.toHaveProperty('danger');
-      expect(prisma.installedSkill.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.installedSkill.create).toHaveBeenCalledTimes(1);
 
-      const [args] = prisma.installedSkill.upsert.mock.calls[0] as [UpsertArgs];
-      expect(args.where).toEqual({ name: 'web-researcher-pro' });
-      expect(args.create).toMatchObject({
+      const [args] = prisma.installedSkill.create.mock.calls[0] as [CreateArgs];
+      expect(args.data).toMatchObject({
         name: 'web-researcher-pro',
         version: '1.2.0',
         author: 'SkillWharf Team',
       });
-      expect(args.create.manifest).toMatchObject({
+      expect(args.data.manifest).toMatchObject({
         name: 'web-researcher-pro',
         version: '1.2.0',
         permissions: ['network', 'filesystem'],
       });
-      expect(args.update).toMatchObject({
-        version: '1.2.0',
-        author: 'SkillWharf Team',
-        isEnabled: true,
-      });
     });
 
     it('возвращает danger для опасного кода в манифесте', async () => {
-      prisma.installedSkill.upsert.mockResolvedValue({
+      prisma.installedSkill.create.mockResolvedValue({
         id: 'skill-2',
         name: 'dangerous-skill',
       });
@@ -224,11 +213,11 @@ name: [незакрытый массив
         danger: SKILL_CODE_DANGER,
       });
       // Опасный навык не отклоняется, а помечается флагами.
-      expect(prisma.installedSkill.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.installedSkill.create).toHaveBeenCalledTimes(1);
     });
 
     it('не выставляет флаги для безопасного навыка', async () => {
-      prisma.installedSkill.upsert.mockResolvedValue({
+      prisma.installedSkill.create.mockResolvedValue({
         id: 'skill-3',
         name: 'weather-api',
       });
@@ -255,7 +244,7 @@ version: 1
 ---
 `),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.installedSkill.upsert).not.toHaveBeenCalled();
+      expect(prisma.installedSkill.create).not.toHaveBeenCalled();
     });
   });
 
@@ -276,14 +265,14 @@ version: 1
 
   describe('seedStarterSkills', () => {
     it('загружает стартовые навыки из каталога starter-skills', async () => {
-      prisma.installedSkill.upsert.mockResolvedValue({ id: 'skill-1' });
+      prisma.installedSkill.create.mockResolvedValue({ id: 'skill-1' });
 
       const seeded = await service.seedStarterSkills();
 
       expect(seeded).toBe(24);
 
-      const names = (prisma.installedSkill.upsert.mock.calls as [UpsertArgs][])
-        .map(([args]) => args.where.name)
+      const names = (prisma.installedSkill.create.mock.calls as [CreateArgs][])
+        .map(([args]) => args.data.name)
         .sort();
 
       expect(names).toEqual([
@@ -314,19 +303,15 @@ version: 1
       ]);
 
       const codeRunner = (
-        prisma.installedSkill.upsert.mock.calls as [UpsertArgs][]
-      ).find(([args]) => args.where.name === 'code-runner');
+        prisma.installedSkill.create.mock.calls as [CreateArgs][]
+      ).find(([args]) => args.data.name === 'code-runner');
 
-      expect(codeRunner?.[0].create.manifest).toMatchObject({
+      expect(codeRunner?.[0].data.manifest).toMatchObject({
         requiresApproval: true,
       });
 
-      // Сидинг не должен включать навыки, выключенные администратором.
-      for (const [args] of prisma.installedSkill.upsert.mock.calls as [
-        UpsertArgs,
-      ][]) {
-        expect(args.update).not.toHaveProperty('isEnabled');
-      }
+      // Сидинг создаёт навыки через create и не трогает isEnabled существующих.
+      expect(prisma.installedSkill.update).not.toHaveBeenCalled();
     });
   });
 

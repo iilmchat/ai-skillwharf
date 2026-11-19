@@ -36,6 +36,51 @@ model User {
   telegramBot      TelegramBot?
   googleCredential GoogleCredential?
   providerCredentials ProviderCredential[]
+  ownedOrganizations Organization[] @relation("OrganizationOwner")
+  workspaceMembers  WorkspaceMember[]
+  installedSkills   InstalledSkill[]
+}
+
+/// Мульти-тенантная иерархия (Sprint 31 / ORG-31.1).
+model Organization {
+  id        String      @id @default(uuid())
+  name      String
+  slug      String      @unique
+  ownerId   String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  owner     User        @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  workspaces Workspace[]
+}
+
+model Workspace {
+  id             String           @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  isDefault      Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        WorkspaceMember[]
+  installedSkills InstalledSkill[]
+
+  @@unique([organizationId, slug])
+}
+
+model WorkspaceMember {
+  id                   String   @id @default(uuid())
+  workspaceId          String
+  userId               String
+  role                 String   @default("viewer")
+  /// Порог суммы HITL-одобрения в ₽; NULL — без ограничения (ABAC).
+  hitlApprovalLimitRub Decimal? @db.Decimal(18, 2)
+  createdAt            DateTime @default(now())
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
 }
 
 model Session {
@@ -129,16 +174,26 @@ model LedgerEntry {
 
 model InstalledSkill {
   id          String   @id @default(uuid())
-  name        String   @unique
+  /// Имя не глобально уникально: один навык может быть установлен разными
+  /// пользователями/воркспейсами (KI-086, ORG-31.2).
+  name        String
   version     String
   author      String
   manifest    Json
   isEnabled   Boolean  @default(true)
   /// slug навыка в публичном каталоге (API-27.2), если установлен оттуда.
   marketplaceSlug String?
+  /// Per-user/per-workspace изоляция установок (KI-086, ORG-31.2).
+  userId      String?
+  workspaceId String?
   installedAt DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
+  @@unique([name, userId, workspaceId])
   @@index([marketplaceSlug])
+  @@index([userId])
+  @@index([workspaceId])
 }
 
 /// Публичный каталог навыков (API-27.2, ADR 0002).

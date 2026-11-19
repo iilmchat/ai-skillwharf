@@ -13,6 +13,7 @@ import {
   registrationClosedError,
 } from '../common/api-error.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ensureDefaultWorkspace } from '../workspaces/workspace-defaults.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto, registerSchema } from './dto/register.dto.js';
 import type { JwtPayload } from './jwt.strategy.js';
@@ -147,10 +148,17 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(parsed.data.password);
 
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: { email: parsed.data.email, passwordHash },
       select: { id: true, email: true },
     });
+
+    // ORG-31.1: новый пользователь сразу получает дефолтные organization
+    // и workspace с ролью owner. Старые аккаунты инициализируются лениво
+    // при первом обращении к /workspaces.
+    await ensureDefaultWorkspace(this.prisma, user.id, user.email);
+
+    return user;
   }
 
   /** KI-073: `closed` — всегда 403; `invite` — только с верным кодом. */

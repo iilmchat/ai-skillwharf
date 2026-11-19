@@ -10,6 +10,10 @@ import {
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import {
+  WorkspaceContextGuard,
+  workspaceFromRequest,
+} from '../workspaces/workspace-context.guard.js';
+import {
   MarketplaceService,
   type InstallMarketplaceResult,
   type MarketplaceListResult,
@@ -30,7 +34,7 @@ interface AuthenticatedRequest extends Request {
  * пользователь — устанавливает в 1 клик.
  */
 @Controller('marketplace/skills')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceContextGuard)
 export class MarketplaceController {
   constructor(private readonly marketplace: MarketplaceService) {}
 
@@ -38,7 +42,11 @@ export class MarketplaceController {
   list(@Req() request: AuthenticatedRequest): Promise<MarketplaceListResult> {
     // Query валидируется Zod внутри сервиса: внешние данные не доверяются.
     // userId из JWT нужен для флага installed в выдаче каталога (KI-086).
-    return this.marketplace.listSkills(request.query, this.userId(request));
+    return this.marketplace.listSkills(
+      request.query,
+      this.userId(request),
+      workspaceFromRequest(request)?.workspaceId,
+    );
   }
 
   @Post()
@@ -54,7 +62,11 @@ export class MarketplaceController {
     @Req() request: AuthenticatedRequest,
     @Param('slug') slug: string,
   ): Promise<InstallMarketplaceResult> {
-    return this.marketplace.install(this.userId(request), slug);
+    return this.marketplace.install(
+      this.userId(request),
+      slug,
+      workspaceFromRequest(request)?.workspaceId,
+    );
   }
 
   private userId(request: AuthenticatedRequest): string {

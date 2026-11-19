@@ -167,6 +167,26 @@ export function outboundBlockedError(message: string): ApiException {
   });
 }
 
+/** Роль воркспейса недостаточна для действия (ORG-31.2). */
+export function insufficientWorkspaceRoleError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 403,
+    error: 'Forbidden',
+    code: 'errors.insufficient_workspace_role',
+    message,
+  });
+}
+
+/** Сумма операции превышает per-member лимит HITL-одобрения. */
+export function hitlLimitExceededError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 403,
+    error: 'Forbidden',
+    code: 'errors.hitl_limit_exceeded',
+    message,
+  });
+}
+
 /** Подпись SKILL.md невалидна или неподписанный навык запрещён политикой. */
 export function invalidSkillSignatureError(message: string): ApiException {
   return new ApiException({

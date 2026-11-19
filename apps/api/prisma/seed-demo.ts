@@ -124,22 +124,27 @@ async function seedStarterSkills(): Promise<string[]> {
 
     const manifest = parsed.data;
 
-    await prisma.installedSkill.upsert({
-      where: { name: manifest.name },
-      create: {
-        name: manifest.name,
-        version: manifest.version,
-        author: manifest.author.name,
-        manifest: manifest as unknown as Prisma.InputJsonValue,
-        isEnabled: true,
-      },
-      update: {
-        version: manifest.version,
-        author: manifest.author.name,
-        manifest: manifest as unknown as Prisma.InputJsonValue,
-        isEnabled: true,
-      },
+    const existing = await prisma.installedSkill.findFirst({
+      where: { name: manifest.name, userId: null, workspaceId: null },
+      select: { id: true },
     });
+    const data = {
+      version: manifest.version,
+      author: manifest.author.name,
+      manifest: manifest as unknown as Prisma.InputJsonValue,
+      isEnabled: true,
+    };
+
+    if (existing === null) {
+      await prisma.installedSkill.create({
+        data: { name: manifest.name, ...data },
+      });
+    } else {
+      await prisma.installedSkill.update({
+        where: { id: existing.id },
+        data,
+      });
+    }
     installed.push(manifest.name);
   }
 

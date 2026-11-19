@@ -234,21 +234,28 @@ export class SkillsService implements OnModuleInit {
     const version = manifest.version;
     const author = manifest.author.name;
 
-    return this.prisma.installedSkill.upsert({
-      where: { name: manifest.name },
-      create: {
-        name: manifest.name,
-        version,
-        author,
-        manifest: manifestJson,
-      },
-      update: {
-        version,
-        author,
-        manifest: manifestJson,
-        ...(enableOnUpdate ? { isEnabled: true } : {}),
-      },
-    });
+    // Составной уникальный ключ с nullable-колонками не поддерживается как
+    // Prisma `where`, поэтому ищем запись явно и создаём/обновляем её.
+    return this.prisma.installedSkill
+      .findFirst({
+        where: { name: manifest.name, userId: null, workspaceId: null },
+        select: { id: true },
+      })
+      .then((existing) =>
+        existing === null
+          ? this.prisma.installedSkill.create({
+              data: { name: manifest.name, version, author, manifest: manifestJson },
+            })
+          : this.prisma.installedSkill.update({
+              where: { id: existing.id },
+              data: {
+                version,
+                author,
+                manifest: manifestJson,
+                ...(enableOnUpdate ? { isEnabled: true } : {}),
+              },
+            }),
+      );
   }
 
   /** Включает или выключает установленный навык. */

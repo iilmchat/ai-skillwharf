@@ -48,6 +48,7 @@ import type {
 } from '../agent/contracts.js';
 import { LlmWorkerClient } from '../agent/llm-worker.client.js';
 import { SemanticCacheService } from '../llm/semantic-cache.service.js';
+import { WorkspacesService } from '../workspaces/workspaces.service.js';
 
 /** Сколько последних сообщений уходит в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
@@ -299,6 +300,7 @@ export class ChatService {
     private readonly pendingApprovalService: PendingApprovalService,
     private readonly toolsService: AgentToolsService,
     @Optional() private readonly semanticCache?: SemanticCacheService,
+    @Optional() private readonly workspaces?: WorkspacesService,
   ) {}
 
   /**
@@ -311,6 +313,7 @@ export class ChatService {
     approved: boolean,
     onDelta?: (text: string) => void,
     onOfficeEvent?: (event: OfficeEvent) => void,
+    workspaceId?: string,
   ): Promise<ChatReply | null> {
     await this.assertConversationOwner(userId, conversationId);
 
@@ -319,6 +322,21 @@ export class ChatService {
 
     if (pending === null || pending.userId !== userId) {
       return null;
+    }
+
+    // ORG-31.2: viewer не может одобрять HITL; лимит роли проверяется по
+    // сумме зарезервированных hold-проводок.
+    if (approved && this.workspaces !== undefined) {
+      await this.workspaces.assertRole(
+        userId,
+        this.workspaces.payingRoles(),
+        workspaceId,
+      );
+      await this.workspaces.assertHitlLimit(
+        userId,
+        await this.pendingAmountRub(pending.holds.map((hold) => hold.entryId)),
+        workspaceId,
+      );
     }
 
     onOfficeEvent?.({
@@ -352,6 +370,24 @@ export class ChatService {
     await this.rememberReply(userId, result.reply);
 
     return { conversationId, reply: result.reply };
+  }
+
+  /** Сумма зарезервированных hold-проводок в ₽ (для ABAC-лимита HITL). */
+  private async pendingAmountRub(entryIds: readonly string[]): Promise<number> {
+    if (entryIds.length === 0) {
+      return 0;
+    }
+
+    try {
+      const rows = await this.prisma.ledgerEntry.findMany({
+        where: { id: { in: [...entryIds] } },
+        select: { amount: true },
+      });
+
+      return rows.reduce((sum, row) => sum + row.amount.toNumber(), 0);
+    } catch {
+      return 0;
+    }
   }
 
   /** Список диалогов пользователя, ожидающих `approve_action`. */
@@ -395,6 +431,30 @@ export class ChatService {
     return { deleted: await this.memoryService.clear(userId) };
   }
 
+  /** viewer не может запускать платные инструменты (ORG-31.2). */
+  private async assertPaidToolsAllowed(
+    userId: string,
+    prepared: PreparedMessage,
+  ): Promise<void> {
+    if (this.workspaces === undefined) {
+      return;
+    }
+
+    const paid = prepared.skills.some((skill) => {
+      const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+      return (
+        parsed.success &&
+        (parsed.data.pricing?.model === 'Pay-per-Call' ||
+          parsed.data.pricing?.model === 'Pay-per-Outcome')
+      );
+    });
+
+    if (paid) {
+      await this.workspaces.assertRole(userId, this.workspaces.payingRoles());
+    }
+  }
+
   /** Ключ семантического кеша строго изолирован по userId/промпту/модели. */
   private cacheQuery(
     userId: string,
@@ -424,6 +484,7 @@ export class ChatService {
     content: string,
   ): Promise<ChatReply> {
     const prepared = await this.prepareMessage(userId, conversationId, content);
+    await this.assertPaidToolsAllowed(userId, prepared);
 
     this.logAgentContext(
       userId,
@@ -485,6 +546,7 @@ export class ChatService {
     onOfficeEvent?: (event: OfficeEvent) => void,
   ): Promise<ChatReply> {
     const prepared = await this.prepareMessage(userId, conversationId, content);
+    await this.assertPaidToolsAllowed(userId, prepared);
 
     this.logAgentContext(
       userId,

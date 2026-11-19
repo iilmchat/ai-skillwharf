@@ -114,6 +114,7 @@ export class MarketplaceService {
   async listSkills(
     rawQuery: unknown,
     userId?: string,
+    workspaceId?: string,
   ): Promise<MarketplaceListResult> {
     const query: MarketplaceListQuery =
       marketplaceListQuerySchema.parse(rawQuery ?? {});
@@ -149,20 +150,23 @@ export class MarketplaceService {
     ]);
     const slugs = rows.map((row) => row.slug);
     const installedRows =
-      userId === undefined || slugs.length === 0
+      slugs.length === 0
         ? []
         : await this.prisma.installedSkill.findMany({
-            where: { marketplaceSlug: { in: slugs } },
+            where: {
+              marketplaceSlug: { in: slugs },
+              ...(userId === undefined
+                ? {}
+                : { userId, ...(workspaceId === undefined ? {} : { workspaceId }) }),
+            },
             select: { marketplaceSlug: true },
           });
 
-    // NOTE: в текущей схеме InstalledSkill глобальный (нет колонки userId),
-    // поэтому фильтр `where: { userId, marketplaceSlug: { in: slugs } }`
-    // невозможен без миграции. userId принимается для совместимости вызова
-    // и логируется; как только схема станет per-user, фильтр добавится.
+    // KI-086: флаг installed инженерится строго для текущего пользователя
+    // и воркспейса. Без userId сохраняется прежнее поведение (глобальный поиск).
     if (userId !== undefined) {
       this.logger.debug(
-        JSON.stringify({ event: 'marketplace.list', userId, count: rows.length }),
+        JSON.stringify({ event: 'marketplace.list', userId, workspaceId, count: rows.length }),
       );
     }
 
@@ -254,6 +258,7 @@ export class MarketplaceService {
   async install(
     userId: string,
     slug: string,
+    workspaceId?: string,
   ): Promise<InstallMarketplaceResult> {
     const skill = await this.prisma.marketplaceSkill.findUnique({
       where: { slug },
@@ -275,35 +280,48 @@ export class MarketplaceService {
     const manifest = parsed.value.manifest as unknown as Prisma.InputJsonValue;
 
     return this.prisma.$transaction(async (tx) => {
-      const installed = await tx.installedSkill.upsert({
-        where: { name: skill.name },
-        create: {
+      // Один и тот же навык может быть установлен разными пользователями —
+      // ищем персональную запись, а не глобальную по имени (KI-086).
+      const existing = await tx.installedSkill.findFirst({
+        where: {
           name: skill.name,
-          version: skill.version,
-          author: skill.authorName,
-          manifest,
-          marketplaceSlug: skill.slug,
+          userId: userId ?? null,
+          ...(workspaceId === undefined ? {} : { workspaceId }),
         },
-        update: {
-          version: skill.version,
-          author: skill.authorName,
-          manifest,
-          marketplaceSlug: skill.slug,
-          isEnabled: true,
-        },
+        select: { id: true },
       });
+      const data = {
+        version: skill.version,
+        author: skill.authorName,
+        manifest,
+        marketplaceSlug: skill.slug,
+        isEnabled: true,
+      };
+      const installed =
+        existing === null
+          ? await tx.installedSkill.create({
+              data: {
+                name: skill.name,
+                userId,
+                ...(workspaceId === undefined ? {} : { workspaceId }),
+                ...data,
+              },
+            })
+          : await tx.installedSkill.update({
+              where: { id: existing.id },
+              data,
+            });
       const updated = await tx.marketplaceSkill.update({
         where: { slug },
         data: { downloadsCount: { increment: 1 } },
         select: { downloadsCount: true },
       });
 
-      // InstalledSkill в текущей схеме глобальный (как и в `installSkill`);
-      // потребитель фиксируется структурированным логом для аудита.
       this.logger.log(
         JSON.stringify({
           event: 'marketplace.skill_installed',
           userId,
+          workspaceId,
           slug: skill.slug,
         }),
       );

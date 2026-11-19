@@ -8,6 +8,7 @@ import { MemoryModule } from '../memory/memory.module.js';
 import { PromptsModule } from '../prompts/prompts.module.js';
 import { SecurityModule } from '../security/security.module.js';
 import { SkillsModule } from '../skills/skills.module.js';
+import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatGateway } from './chat.gateway.js';
 import { ChatService } from './chat.service.js';
@@ -24,6 +25,7 @@ import { ChatPersistenceModule } from './persistence/persistence.module.js';
     SkillsModule,
     MemoryModule,
     PromptsModule,
+    WorkspacesModule,
     // HITL-ожидания и checkpoint-хранилище (PostgreSQL).
     ChatPersistenceModule,
   ],

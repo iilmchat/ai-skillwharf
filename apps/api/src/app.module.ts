@@ -20,6 +20,7 @@ import { PromptsModule } from './prompts/prompts.module.js';
 import { RegistryModule } from './registry/registry.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
 import { SkillsModule } from './skills/skills.module.js';
+import { WorkspacesModule } from './workspaces/workspaces.module.js';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SkillsModule } from './skills/skills.module.js';
     AuthModule,
     ChatModule,
     SkillsModule,
+    WorkspacesModule,
     RegistryModule,
     MarketplaceModule,
     PromptsModule,

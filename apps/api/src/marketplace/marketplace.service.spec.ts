@@ -97,14 +97,27 @@ function createHarness(allRows: Array<Record<string, unknown>>): Harness {
         return record;
       }),
       findUnique: vi.fn(async () => null),
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        const record = { id: `installed-${installed.length + 1}`, ...args.data };
+        installed.push(record);
+        return record;
+      }),
       findMany: vi.fn(
-        async ({ where }: { where?: { marketplaceSlug?: { in: string[] } } } = {}) =>
+        async ({
+          where,
+        }: {
+          where?: { marketplaceSlug?: { in: string[] }; userId?: string; workspaceId?: string };
+        } = {}) =>
           installed.filter(
             (item) =>
-              where?.marketplaceSlug?.in === undefined ||
-              where.marketplaceSlug.in.includes(
-                String(item.marketplaceSlug ?? ''),
-              ),
+              (where?.marketplaceSlug?.in === undefined ||
+                where.marketplaceSlug.in.includes(
+                  String(item.marketplaceSlug ?? ''),
+                )) &&
+              (where?.userId === undefined || item.userId === where.userId) &&
+              (where?.workspaceId === undefined ||
+                item.workspaceId === where.workspaceId),
           ),
       ),
     },
@@ -195,15 +208,39 @@ describe('MarketplaceService (API-27.2)', () => {
       expect(bySlug.get('seo-audit')?.installed).toBe(true);
       expect(bySlug.get('finance-report')?.installed).toBe(false);
       expect(harness.prisma.installedSkill.findMany).toHaveBeenCalledWith({
-        where: { marketplaceSlug: { in: expect.arrayContaining(['seo-audit']) } },
+        where: {
+          marketplaceSlug: { in: expect.arrayContaining(['seo-audit']) },
+          userId: 'user-1',
+        },
         select: { marketplaceSlug: true },
       });
     });
 
-    it('без userId не делает запрос в InstalledSkill и installed=false', async () => {
+    it('изолирует флаг installed между двумя пользователями (KI-086)', async () => {
+      await harness.service.install('user-1', 'seo-audit', 'workspace-a');
+
+      const first = await harness.service.listSkills({}, 'user-1', 'workspace-a');
+      const second = await harness.service.listSkills({}, 'user-2', 'workspace-b');
+
+      expect(
+        first.items.find((item) => item.slug === 'seo-audit')?.installed,
+      ).toBe(true);
+      expect(
+        second.items.find((item) => item.slug === 'seo-audit')?.installed,
+      ).toBe(false);
+      expect(harness.installed[0]).toMatchObject({
+        userId: 'user-1',
+        workspaceId: 'workspace-a',
+      });
+    });
+
+    it('без userId использует глобальный поиск и installed=false', async () => {
       const result = await harness.service.listSkills({});
 
-      expect(harness.prisma.installedSkill.findMany).not.toHaveBeenCalled();
+      expect(harness.prisma.installedSkill.findMany).toHaveBeenCalledWith({
+        where: { marketplaceSlug: { in: expect.any(Array) } },
+        select: { marketplaceSlug: true },
+      });
       expect(result.items.every((item) => item.installed === false)).toBe(true);
     });
 

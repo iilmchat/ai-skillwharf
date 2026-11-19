@@ -59,6 +59,10 @@ export const ERROR_KEYS = {
   marketplaceSkillNotFound: 'errors.marketplace_skill_not_found',
   /** Промоушен версии заблокирован: нет зелёного Eval-прогона (EVAL-29.3). */
   evalGateFailed: 'errors.eval_gate_failed',
+  /** Роль воркспейса не позволяет выполнить действие (ORG-31.2). */
+  insufficientWorkspaceRole: 'errors.insufficient_workspace_role',
+  /** Сумма HITL-одобрения превышает лимит роли (ORG-31.2). */
+  hitlLimitExceeded: 'errors.hitl_limit_exceeded',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];
