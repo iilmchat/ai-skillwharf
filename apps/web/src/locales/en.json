@@ -974,6 +974,11 @@
       "finished": "Task finished",
       "approved": "Resuming after approval"
     },
+    "handoff": {
+      "title": "Recent handoffs",
+      "fromBadge": "Handing off",
+      "toBadge": "Receiving"
+    },
     "payment": {
       "title": "Payment pending (Pay-per-Outcome)",
       "body": "The Pay-per-Outcome tool holds funds until the action is confirmed."
@@ -1315,6 +1320,10 @@
     "assistant": "Assistant:",
     "imageAlt": "Image from the agent",
     "typing": "Assistant is typing…",
+    "cacheHit": {
+      "label": "Cached · 0 ₽",
+      "tooltip": "Answer found in the semantic cache without spending tokens."
+    },
     "messageLabel": "Message",
     "inputPlaceholder": "Write a message…",
     "inputWaiting": "Waiting for connection…",

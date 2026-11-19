@@ -35,6 +35,7 @@ import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import { useTokenQuota } from '../hooks/useTokenQuota';
 import { ledgerQueryKey } from '../lib/ledger';
 import { normalizeProvider } from '../lib/llm';
+import { isCacheHitMessage } from '../lib/message-metadata';
 import { pendingApprovalsQueryKey } from '../lib/pending-approvals';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
@@ -96,6 +97,22 @@ function MessageBubble({
           imageAltFallback={t('chat.imageAlt')}
           labels={labels}
         />
+        {!isUser && isCacheHitMessage(message) && (
+          <span
+            title={t('chat.cacheHit.tooltip')}
+            className="mt-2 inline-flex items-center gap-1 rounded-full border border-tertiary/30 bg-tertiary-container px-2 py-0.5 text-[11px] font-semibold text-on-tertiary-container"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="size-3"
+            >
+              <path d="M11.2 1.8a.6.6 0 0 0-1.05-.42L4.1 8.2a.6.6 0 0 0 .43 1.02h3.3l-1.05 6.9a.4.4 0 0 0 .7.3l6.1-7.2a.6.6 0 0 0-.45-1h-3.2l1.27-6a.4.4 0 0 0 0-.82Z" />
+            </svg>
+            {t('chat.cacheHit.label')}
+          </span>
+        )}
       </div>
     </li>
   );

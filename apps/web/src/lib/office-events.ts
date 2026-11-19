@@ -1,8 +1,39 @@
+import { z } from 'zod';
+
 /** Статусы, которые понимает визуальный слой AI-Офиса. */
 export type OfficeAgentStatus = 'idle' | 'working' | 'waiting_approval';
 
 /** Причина остановки агента: оплата или обычное одобрение. */
 export type OfficeApprovalReason = 'payment' | 'approval';
+
+const officeAgentStatusSchema = z.enum([
+  'idle',
+  'working',
+  'waiting_approval',
+]);
+
+const officeApprovalReasonSchema = z.enum(['payment', 'approval']);
+
+/**
+ * Передача задачи между ролями (Sprint 30, GRAPH-30.1).
+ *
+ * Валидируется Zod: некорректный payload не должен ломать ленту передач.
+ */
+export const officeHandoffSchema = z.object({
+  fromRole: z.string().min(1),
+  toRole: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+export type OfficeHandoff = z.infer<typeof officeHandoffSchema>;
+
+const baseOfficeEventSchema = z.object({
+  agentId: z.string().min(1),
+  status: officeAgentStatusSchema,
+  task: z.string().min(1),
+  reason: officeApprovalReasonSchema.optional(),
+  conversationId: z.string().min(1).optional(),
+});
 
 /** Событие AI-Офиса из WebSocket (`office_event`). */
 export interface OfficeEvent {
@@ -11,6 +42,9 @@ export interface OfficeEvent {
   task: string;
   reason?: OfficeApprovalReason;
   conversationId?: string;
+  /** `agent_handoff` приходит вместе с полями `fromRole`/`toRole`/`reason`. */
+  type?: 'agent_handoff';
+  handoff?: OfficeHandoff;
 }
 
 /** MVP-бэкенд использует одного агента с этим идентификатором. */
@@ -20,35 +54,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isOfficeAgentStatus(value: unknown): value is OfficeAgentStatus {
+function isHandoffPayload(value: Record<string, unknown>): boolean {
   return (
-    value === 'idle' ||
-    value === 'working' ||
-    value === 'waiting_approval'
+    value.type === 'agent_handoff' ||
+    (typeof value.fromRole === 'string' && typeof value.toRole === 'string')
   );
 }
 
-function isOfficeApprovalReason(
-  value: unknown,
-): value is OfficeApprovalReason {
-  return value === 'payment' || value === 'approval';
-}
-
-/** Валидирует payload события: неизвестные поля не должны ломать офис. */
+/**
+ * Валидирует payload события: неизвестные поля не должны ломать офис.
+ * Обычное событие меняет статус агента, `agent_handoff` дополнительно несёт
+ * пару ролей и причину передачи.
+ */
 export function parseOfficeEvent(value: unknown): OfficeEvent | null {
   if (!isRecord(value)) {
-    return null;
-  }
-
-  const { agentId, status, task } = value;
-
-  if (
-    typeof agentId !== 'string' ||
-    agentId === '' ||
-    !isOfficeAgentStatus(status) ||
-    typeof task !== 'string' ||
-    task === ''
-  ) {
     return null;
   }
 
@@ -56,11 +75,46 @@ export function parseOfficeEvent(value: unknown): OfficeEvent | null {
     typeof value.conversationId === 'string' && value.conversationId !== ''
       ? value.conversationId
       : undefined;
-  const reason = isOfficeApprovalReason(value.reason)
-    ? value.reason
-    : undefined;
+  const approvalReason = officeApprovalReasonSchema.safeParse(value.reason);
 
-  return { agentId, status, task, reason, conversationId };
+  if (isHandoffPayload(value)) {
+    const handoff = officeHandoffSchema.safeParse(value);
+
+    if (!handoff.success) {
+      return null;
+    }
+
+    return {
+      agentId:
+        typeof value.agentId === 'string' && value.agentId !== ''
+          ? value.agentId
+          : DEFAULT_OFFICE_AGENT_ID,
+      status: officeAgentStatusSchema.safeParse(value.status).success
+        ? (value.status as OfficeAgentStatus)
+        : 'working',
+      task:
+        typeof value.task === 'string' && value.task !== ''
+          ? value.task
+          : handoff.data.reason,
+      ...(approvalReason.success ? { reason: approvalReason.data } : {}),
+      ...(conversationId === undefined ? {} : { conversationId }),
+      type: 'agent_handoff',
+      handoff: handoff.data,
+    };
+  }
+
+  const parsed = baseOfficeEventSchema.safeParse(value);
+
+  if (!parsed.success) {
+    return null;
+  }
+
+  return {
+    ...parsed.data,
+    ...(parsed.data.conversationId === undefined
+      ? {}
+      : { conversationId: parsed.data.conversationId }),
+  };
 }
 
 /** Идентификатор диалога из события `stream_end` или `office_event`. */

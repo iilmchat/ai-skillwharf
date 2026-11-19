@@ -14,6 +14,10 @@ import {
 } from '../lib/chat-errors';
 import { isLlmAuthError, llmAuthErrorMessage } from '../lib/llm';
 import {
+  parseAssistantMessageMetadata,
+  type AssistantMessageMetadata,
+} from '../lib/message-metadata';
+import {
   parseOfficeEvent,
   type OfficeApprovalReason,
 } from '../lib/office-events';
@@ -33,6 +37,8 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
+  /** Метаданные ответа ассистента (например, попадание в семантический кеш). */
+  metadata?: AssistantMessageMetadata;
 }
 
 /** Ожидание HITL: агент остановился и ждёт решения пользователя. */
@@ -63,6 +69,7 @@ export interface ChatSession {
 interface ChatReply {
   conversationId?: string;
   reply: string;
+  metadata?: unknown;
 }
 
 interface PendingReply {
@@ -294,6 +301,8 @@ export function useChatSession(): ChatSession {
   const conversationIdRef = useRef<string | null>(null);
   const streamMessageIdRef = useRef<string | null>(null);
   const streamedTextRef = useRef('');
+  const streamedMetadataRef = useRef<AssistantMessageMetadata>({});
+  const ackMetadataRef = useRef<AssistantMessageMetadata>({});
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -471,6 +480,7 @@ export function useChatSession(): ChatSession {
       const pending = pendingRef.current;
       const eventConversationId = getPayloadConversationId(payload);
       const activeConversationId = conversationIdRef.current;
+      streamedMetadataRef.current = parseAssistantMessageMetadata(payload);
 
       if (
         eventConversationId !== undefined &&
@@ -535,6 +545,8 @@ export function useChatSession(): ChatSession {
       pendingRef.current = null;
       streamMessageIdRef.current = null;
       streamedTextRef.current = '';
+      streamedMetadataRef.current = {};
+      ackMetadataRef.current = {};
     };
   }, [accessToken, attempt]);
 
@@ -548,6 +560,8 @@ export function useChatSession(): ChatSession {
       setIsStreaming(false);
       streamMessageIdRef.current = null;
       streamedTextRef.current = '';
+      streamedMetadataRef.current = {};
+      ackMetadataRef.current = {};
       setNotice(null);
       setNoticeTopUp(false);
       pendingTopUpRef.current = false;
@@ -598,6 +612,7 @@ export function useChatSession(): ChatSession {
           }
 
           if (isChatReply(response)) {
+            ackMetadataRef.current = parseAssistantMessageMetadata(response);
             pending.resolve(response.reply);
             return;
           }
@@ -614,11 +629,28 @@ export function useChatSession(): ChatSession {
 
             // Служебные ответы вроде `errors.insufficient_funds` приходят
             // потоком как обычный текст — переводим их и показываем notice.
-            if (messageId !== null && normalized.content !== streamedText) {
+            const streamedMetadata = streamedMetadataRef.current;
+            const hasMetadata = Object.keys(streamedMetadata).length > 0;
+
+            if (
+              messageId !== null &&
+              (normalized.content !== streamedText || hasMetadata)
+            ) {
               setMessages((current) =>
                 current.map((message) =>
                   message.id === messageId
-                    ? { ...message, content: normalized.content }
+                    ? {
+                        ...message,
+                        content: normalized.content,
+                        ...(hasMetadata
+                          ? {
+                              metadata: {
+                                ...message.metadata,
+                                ...streamedMetadata,
+                              },
+                            }
+                          : {}),
+                      }
                     : message,
                 ),
               );
@@ -633,6 +665,7 @@ export function useChatSession(): ChatSession {
           }
 
           const normalized = normalizeAssistantReply(reply);
+          const metadata = ackMetadataRef.current;
 
           setMessages((current) => [
             ...current,
@@ -640,6 +673,7 @@ export function useChatSession(): ChatSession {
               id: crypto.randomUUID(),
               role: 'assistant',
               content: normalized.content,
+              ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
             },
           ]);
 
@@ -661,6 +695,8 @@ export function useChatSession(): ChatSession {
           setIsStreaming(false);
           streamMessageIdRef.current = null;
           streamedTextRef.current = '';
+          streamedMetadataRef.current = {};
+      ackMetadataRef.current = {};
         });
     },
     [],

@@ -247,11 +247,14 @@ function AgentDesk({
   agent,
   isSelected,
   channels,
+  handoffRole,
   onSelect,
 }: {
   agent: OfficeAgent;
   isSelected: boolean;
   channels: readonly IntegrationProvider[];
+  /** Участие в последней передаче задачи между ролями. */
+  handoffRole?: 'from' | 'to';
   onSelect: (agentId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -268,7 +271,15 @@ function AgentDesk({
         whileHover={shouldReduceMotion === true ? undefined : { y: -4 }}
         className={`group relative flex h-full flex-col rounded-2xl border p-5 shadow-sm transition-colors ${meta.card} ${
           isWaiting ? 'office-await' : ''
-        } ${isSelected ? 'ring-2 ring-primary/60 ring-offset-2 ring-offset-surface' : ''}`}
+        } ${
+          isSelected
+            ? 'ring-2 ring-primary/60 ring-offset-2 ring-offset-surface'
+            : handoffRole === 'to'
+              ? 'ring-2 ring-primary/50 ring-offset-2 ring-offset-surface'
+              : handoffRole === 'from'
+                ? 'ring-2 ring-tertiary/50 ring-offset-2 ring-offset-surface'
+                : ''
+        }`}
       >
         <button
           type="button"
@@ -330,6 +341,20 @@ function AgentDesk({
             <h3 className="font-display text-lg font-bold text-on-surface">
               {agent.name}
             </h3>
+            {handoffRole !== undefined && (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  handoffRole === 'to'
+                    ? 'bg-primary-container text-on-primary-container'
+                    : 'bg-tertiary-container text-on-tertiary-container'
+                }`}
+              >
+                <span aria-hidden="true">{handoffRole === 'to' ? '⇢' : '⇠'}</span>
+                {handoffRole === 'to'
+                  ? t('office.handoff.toBadge')
+                  : t('office.handoff.fromBadge')}
+              </span>
+            )}
             {agent.live && (
               <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
                 <span
@@ -651,6 +676,7 @@ export function OfficePage() {
   const [isLive, setIsLive] = useState(false);
 
   const conversationId = useOfficeStore((state) => state.conversationId);
+  const handoffs = useOfficeStore((state) => state.handoffs);
   const queryClient = useQueryClient();
   const pendingQuery = usePendingApprovals();
   const integrationsQuery = useIntegrations();
@@ -669,6 +695,43 @@ export function OfficePage() {
       pendingApprovals.find((item) => item.conversationId === conversationId),
     [pendingApprovals, conversationId],
   );
+
+  const visibleHandoffs = useMemo(
+    () =>
+      conversationId === null
+        ? handoffs
+        : handoffs.filter(
+            (item) =>
+              item.conversationId === null ||
+              item.conversationId === conversationId,
+          ),
+    [handoffs, conversationId],
+  );
+  const latestHandoff = visibleHandoffs[0] ?? null;
+
+  function handoffRoleFor(agent: OfficeAgent): 'from' | 'to' | undefined {
+    if (latestHandoff === null) {
+      return undefined;
+    }
+
+    const candidates = [
+      t(agent.roleKey),
+      agent.name,
+      agent.roleKey.split('.').pop() ?? '',
+    ].map((value) => value.trim().toLocaleLowerCase());
+    const from = latestHandoff.fromRole.trim().toLocaleLowerCase();
+    const to = latestHandoff.toRole.trim().toLocaleLowerCase();
+
+    if (candidates.includes(to)) {
+      return 'to';
+    }
+
+    if (candidates.includes(from)) {
+      return 'from';
+    }
+
+    return undefined;
+  }
 
   const displayAgents = useMemo(() => {
     if (activePending === undefined) {
@@ -741,6 +804,11 @@ export function OfficePage() {
         activeConversationId !== null &&
         event.conversationId !== activeConversationId
       ) {
+        return;
+      }
+
+      // Передача ролей не меняет статус карточки: ленту обновляет office.store.
+      if (event.handoff !== undefined) {
         return;
       }
 
@@ -1083,6 +1151,38 @@ export function OfficePage() {
               </section>
             )}
 
+            {visibleHandoffs.length > 0 && (
+              <section
+                aria-label={t('office.handoff.title')}
+                className="mt-8 rounded-2xl border border-outline-variant bg-surface-container p-4 sm:p-5"
+              >
+                <h2 className="font-display text-base font-bold text-on-surface">
+                  {t('office.handoff.title')}
+                </h2>
+                <ul className="mt-3 space-y-2">
+                  {visibleHandoffs.map((handoff) => (
+                    <li
+                      key={`${handoff.receivedAt}-${handoff.fromRole}-${handoff.toRole}`}
+                      className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm"
+                    >
+                      <span className="font-medium text-on-surface-variant">
+                        {handoff.fromRole}
+                      </span>
+                      <span aria-hidden="true" className="text-primary">
+                        →
+                      </span>
+                      <span className="font-semibold text-on-surface">
+                        {handoff.toRole}
+                      </span>
+                      <span className="text-on-surface-variant">
+                        — {handoff.reason}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             <motion.ul
               initial="hidden"
               animate="show"
@@ -1095,6 +1195,7 @@ export function OfficePage() {
                   agent={agent}
                   channels={channels}
                   isSelected={agent.id === selectedAgentId}
+                  handoffRole={handoffRoleFor(agent)}
                   onSelect={handleSelect}
                 />
               ))}
