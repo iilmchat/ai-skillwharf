@@ -73,6 +73,12 @@ const FinancePage = lazy(() =>
   })),
 );
 
+const AgentBuilderPage = lazy(() =>
+  import('./pages/AgentBuilderPage').then((module) => ({
+    default: module.AgentBuilderPage,
+  })),
+);
+
 const AdminPage = lazy(() =>
   import('./pages/AdminPage').then((module) => ({
     default: module.AdminPage,
@@ -176,6 +182,14 @@ function App() {
             }
           />
           <Route path="/app/office" element={<OfficePage />} />
+          <Route
+            path="/app/builder"
+            element={
+              <ProtectedRoute>
+                <AgentBuilderPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/admin"
             element={

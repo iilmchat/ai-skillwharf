@@ -156,6 +156,37 @@ localStorage (`skillwharf-workspace`), а HTTP-клиент (`src/lib/api.ts`)
 и `errors.hitl_limit_exceeded` показываются локализованными уведомлениями.
 Лимит принимается числом, Decimal-строкой или `null` (без лимита).
 
+## Конструктор агентов (No-Code Builder)
+
+Защищённая страница `/app/builder` (Sprint 35, BUILDER-35.1/35.3) позволяет
+собрать кастомного агента — «стол» AI-Офиса — без кода. Пункт «Конструктор»
+добавлен в основную навигацию. Контракт и клиент — `src/lib/agent-builder.ts`,
+все ответы валидируются Zod:
+
+- `hitlPolicySchema`: `never` / `high_risk` / `always`;
+- `customAgentRoleSchema`: `id`, `workspaceId`, `name`, `roleKey`, `description?`,
+  `systemPrompt`, `skillSlugs`, `hitlPolicy`, `dailyBudgetRub` (число,
+  Decimal-строка или `null`), `isActive`, `createdAt`;
+- `createCustomAgentSchema`: строгая форма; `roleKey` генерируется из названия
+  (кириллица транслитерируется, `generateRoleKey`) и проверяется регулярным
+  выражением `^[a-z0-9-]{2,40}$` (совпадает с backend). Ограничения полей
+  формы (`name` 2–80, `systemPrompt` от 10 символов, slug навыка) тоже
+  приведены к контракту API.
+
+Клиент: `fetchWorkspaceAgents(workspaceId)` →
+`GET /api/v1/workspaces/:id/agents`, `createWorkspaceAgent` → `POST`,
+`updateWorkspaceAgent` → `PATCH .../agents/:agentId`, `deleteWorkspaceAgent` →
+`DELETE .../agents/:agentId`. Ключ кэша — `['workspace-agents', workspaceId]`.
+
+Интерфейс двухколоночный: слева форма (название, описание, чекбоксы
+установленных навыков, редактор системного промпта с пресетами «Менеджер
+продаж» / «Аналитик склада» / «Контролёр документов», радиокнопки HITL и
+дневной бюджет), справа — живое превью карточки стола AI-Офиса и список
+созданных агентов с переключателем активности и удалением. Пользователи с
+ролью `viewer` видят данные, но не могут изменять их. RU/EN-ключи —
+`nav.builder` и `builder.*`. Если API ещё не выкачен (404), раздел показывает
+локализованное сообщение вместо падения.
+
 ## Картинки в чате
 
 Ответ ассистента разбирается на текст и изображения (`src/lib/message-images.ts`).

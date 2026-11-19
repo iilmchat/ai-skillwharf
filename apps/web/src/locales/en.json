@@ -90,9 +90,85 @@
     "marketplace": "Marketplace",
     "store": "Store",
     "office": "AI office",
+    "builder": "Agent Builder",
     "finance": "Finance",
     "settings": "Settings",
     "admin": "Control plane"
+  },
+  "builder": {
+    "title": "Agent Builder",
+    "subtitle": "Build a new agent (an AI Office desk) without code: skills, system prompt, HITL policy, and a daily budget.",
+    "workspace": "Workspace: {{name}}",
+    "readOnly": "You have the viewer role: you can see agents but cannot create or change them.",
+    "backToChat": "Back to chat",
+    "form": {
+      "title": "Agent setup",
+      "name": "AI Office desk name",
+      "namePlaceholder": "For example, Sales Manager",
+      "description": "Description",
+      "roleKey": "Role Key (optional)",
+      "roleKeyPlaceholder": "manager-sales",
+      "roleKeyHint": "Leave it empty to generate the key from the name (Latin/transliteration).",
+      "skills": "Agent skills",
+      "noSkills": "No installed skills yet.",
+      "systemPrompt": "System prompt",
+      "hitl": "HITL policy",
+      "budget": "Daily budget, ₽",
+      "budgetHint": "Leave empty for no limit. The limit is checked before paid tool calls.",
+      "isActive": "Agent is active",
+      "create": "Create agent",
+      "creating": "Creating…",
+      "created": "Agent created; it will appear in the list."
+    },
+    "presets": {
+      "sales": {
+        "label": "Sales Manager",
+        "prompt": "You are a sales manager. Work with CRM deals and customers: clarify needs, prepare commercial offers, and follow the approval policy for deals."
+      },
+      "warehouse": {
+        "label": "Warehouse Analyst",
+        "prompt": "You are a warehouse analyst. Check stock, reserves, and movements, warn about shortages, and never change data without confirmation."
+      },
+      "documents": {
+        "label": "Document Controller",
+        "prompt": "You are a document controller. Extract data from incoming files, verify details, and always ask for confirmation before publishing any document."
+      }
+    },
+    "hitl": {
+      "never": "No pauses",
+      "high_risk": "Critical actions only",
+      "always": "Confirm every step"
+    },
+    "preview": {
+      "label": "Agent card preview",
+      "title": "Live preview",
+      "subtitle": "This is how the desk will look in the AI Office.",
+      "untitled": "New agent",
+      "roleKeyPending": "role-key will be generated on create",
+      "noDescription": "No description provided",
+      "noSkills": "No skills connected",
+      "budget": "Budget: {{amount}} ₽/day",
+      "noBudget": "No budget limit",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "list": {
+      "title": "Workspace agents",
+      "loading": "Loading agents…",
+      "retry": "Try again",
+      "empty": "No custom agents yet. Create the first one with the form on the left.",
+      "toggle": "Toggle {{name}}",
+      "active": "On",
+      "inactive": "Off",
+      "delete": "Delete"
+    },
+    "errors": {
+      "invalid": "Check the name, system prompt, and role key.",
+      "load": "Could not load workspace agents.",
+      "create": "Could not create the agent.",
+      "update": "Could not update the agent.",
+      "delete": "Could not delete the agent."
+    }
   },
   "workspace": {
     "switcherLabel": "Workspace",

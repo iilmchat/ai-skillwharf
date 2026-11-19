@@ -402,6 +402,9 @@ export function StorePage() {
               <NavLink to="/app/office" className={navLinkClasses}>
                 {t('nav.office')}
               </NavLink>
+              <NavLink to="/app/builder" className={navLinkClasses}>
+                {t('nav.builder')}
+              </NavLink>
               {isAdmin && (
                 <NavLink to="/admin" className={navLinkClasses}>
                   {t('nav.admin')}

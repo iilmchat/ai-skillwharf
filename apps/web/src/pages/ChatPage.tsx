@@ -467,6 +467,23 @@ export function ChatPage() {
               {t('nav.office')}
             </NavLink>
 
+            <NavLink to="/app/builder" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              {t('nav.builder')}
+            </NavLink>
+
             <NavLink to="/app/finance" className={navItemClasses}>
               <svg
                 aria-hidden="true"

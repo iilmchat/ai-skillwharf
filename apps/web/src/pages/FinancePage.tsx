@@ -421,6 +421,9 @@ export function FinancePage() {
               <NavLink to="/app/settings" className={navLinkClasses}>
                 {t('nav.settings')}
               </NavLink>
+              <NavLink to="/app/builder" className={navLinkClasses}>
+                {t('nav.builder')}
+              </NavLink>
             </nav>
           </div>
 
