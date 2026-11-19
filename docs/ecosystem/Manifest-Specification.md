@@ -111,6 +111,16 @@ Gateway использует эту схему (через библиотеку 
       "type": "string",
       "pattern": "^sha256:[a-f0-9]{64}$",
       "description": "Хеш тела файла (Markdown Body) для защиты от подмены."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9+/]+={0,2}$",
+      "description": "Ed25519-подпись канонического манифеста и Markdown Body (API-27.1)."
+    },
+    "publicKeyId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,64}$",
+      "description": "keyId публичного ключа издателя из реестра TRUSTED_SKILL_PUBLIC_KEYS."
     }
   }
 }
@@ -131,6 +141,24 @@ Gateway использует эту схему (через библиотеку 
 - Оба поля проверяются Zod-схемой `SkillManifestSchema` из
   `@skillwharf/shared` при установке навыка и при сборке runtime-контекста
   Agent Gateway.
+
+### 2.2 Ed25519-подпись (API-27.1)
+
+Поля `signature` и `publicKeyId` опциональны. Подпись вычисляется по
+**каноническому** представлению: ключи манифеста сортируются рекурсивно,
+тело SKILL.md входит отдельным полем `body`, а сами `signature` и
+`publicKeyId` из подписи исключаются (они добавляются в frontmatter уже после
+подписи). Поэтому переносы строк, порядок ключей и отступы в YAML не влияют на
+проверку, а подмена хотя бы одного символа в теле файла делает подпись
+недействительной.
+
+- Генерация пары: `pnpm --filter api skill:keygen`.
+- Подпись файла: `SKILL_SIGNING_PRIVATE_KEY=<base64> pnpm --filter api skill:sign <path>`.
+- Публичный ключ регистрируется как `<keyId>:<base64 SPKI>` в
+  `TRUSTED_SKILL_PUBLIC_KEYS` (JSON-объект/массив тоже поддерживается).
+- Невалидная подпись → `400 errors.invalid_skill_signature`. При
+  `REQUIRE_SIGNED_SKILLS=true` неподписанные навыки отклоняются при установке;
+  по умолчанию политика выключена для локальных навыков.
 
 ## 3. Пример валидного SKILL.md
 

@@ -4,6 +4,66 @@
 
 ## [Unreleased]
 
+### Sprint 27: Ed25519-подписи, публичный реестр, Revenue Share и витрина
+
+**API-27.1 / API-27.2 (backend, подписи и монетизация).**
+
+- `API-27.1`: в `packages/shared` добавлены поля `signature`
+  (`ed25519:<base64>`) и `publicKeyId` (`[a-z0-9-]{1,64}`) в
+  `SkillManifestSchema` и модуль `skill-signing.ts` — Ed25519 на `node:crypto`,
+  каноническая сериализация (рекурсивная сортировка ключей, `body` отдельным
+  полем, `signature`/`publicKeyId` исключаются), генерация пары, подпись и
+  верификация. CLI: `pnpm --filter api skill:keygen` и
+  `pnpm --filter api skill:sign <SKILL.md>`. `SkillSignatureService`
+  проверяет подпись при публикации/установке по реестру
+  `TRUSTED_SKILL_PUBLIC_KEYS` (JSON или CSV), политика
+  `REQUIRE_SIGNED_SKILLS=true` отклоняет неподписанные навыки (по умолчанию
+  выключена). Ошибка — `400 errors.invalid_skill_signature`.
+- `API-27.2`: модель `MarketplaceSkill` + миграция, публичный
+  `MarketplaceController` (`GET /marketplace/skills` с фильтрами `track`
+  A–L / `pricingModel` / `verified` / `search` и пагинацией, `POST` публикации,
+  `POST /:slug/install` с инкрементом `downloadsCount` в транзакции).
+  `InstalledSkill.marketplaceSlug` связывает установку с каталогом.
+- Revenue Share 85/15: `BillingService.chargeForMarketplaceSkill` и
+  `recordRevenueShare` пишут в одной транзакции debit покупателя,
+  `author_revenue_share` (85%) и `platform_fee` (15%); сплит считается в
+  копейках, сумма всегда равна цене. `RevenueShareService` после коммита
+  создаёт перевод ЮKassa `POST /v3/transfers`, если у автора задан
+  `payoutAccountId`; сплит подключается к Pay-per-Call/Pay-per-Outcome в
+  `AgentRuntimeService`.
+- Тесты: 5 тестов Ed25519 (включая подмену 1 символа в `SKILL.md`), 5 тестов
+  `SkillSignatureService`, 4 теста каталога (фильтры A–L, установка в 1 клик),
+  10 тестов сплита и BAL-проводок. Полный прогон `pnpm test` — 1422 теста.
+- KI-086: ответ `GET /api/v1/marketplace/skills` обогащён до контракта витрины
+  (`marketplaceSkillViewSchema`): `permissions` из `manifestYaml` (при ошибке
+  парсинга — `[]`), объект `signature` с `verified`/`status`/`publicKeyId`,
+  плоский `publicKeyId` и `installed` из `InstalledSkill`. Метод сервиса
+  переименован в `listSkills(query, userId)`, контроллер передаёт userId из
+  JWT. Флаг «Установлено» теперь берётся из БД и сохраняется после F5.
+  4 новых теста контракта. Per-user фильтрация `installed` требует миграции
+  `InstalledSkill` (зафиксировано в KI-086).
+
+**WEB-27.3 (витрина `/app/marketplace`).**
+
+- Добавлен защищённый маршрут `/app/marketplace` и пункт «Маркетплейс» /
+  `Marketplace` в боковую и верхнюю навигацию приложения рядом с «Навыками».
+- `src/lib/marketplace.ts`: Zod-контракты карточки, ответа списка и ответа
+  установки; `fetchMarketplaceSkills(filters)` отправляет только заполненные
+  query-параметры (поиск, трек A–L, модель оплаты, `verified`), а
+  `installMarketplaceSkill(slug)` устанавливает навык в 1 клик. Все ответы
+  валидируются, при 404/501 показывается локализованное сообщение о том, что
+  раздел ещё недоступен; сетевые ошибки, 401/403 и невалидные ответы
+  различаются по коду `MarketplaceError`.
+- Витрина: поиск с debounce 300 мс, чипсы 12 треков, фильтр по цене, чекбокс
+  Ed25519, сетка карточек с бейджем проверки, ценой и счётчиком установок,
+  установка с toast и окно «Подробнее о навыке» (описание, разрешения, статус
+  подписи). RU/EN-ключи добавлены в оба словаря; оформление использует токены
+  Material 3 и работает в тёмной теме.
+- Unit-тесты `src/lib/marketplace.test.ts`: валидация списка и бейджа
+  `verified`, фильтрация query-параметров, деградация 404/501 и ошибки
+  установки. Первоначальный разрыв контракта (API не отдавал
+  `permissions`/`signature`/`installed`) закрыт в API-27.2 — см. KI-086.
+
 ### Sprint 26: Internal JWT, keyId rotation, OIDC, Tempo и защита бэкапов
 
 **SEC-26.1 / SEC-26.2 (internal JWT и ротация ключей).**

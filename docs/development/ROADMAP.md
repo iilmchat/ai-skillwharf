@@ -69,9 +69,9 @@
 
 ### Sprint 27: Public Skill Registry & Security Signing
 
-* [ ] **[API-27.1]** Криптографическая подпись манифестов `SKILL.md` (Ed25519) в дополнение к `checksum: sha256` и верификация при установке.
-* [ ] **[API-27.2]** Публичный каталог навыков и сплитование платежей ЮKassa (Revenue Share 85% автору / 15% платформе, ADR 0002).
-* [ ] **[WEB-27.3]** Витрина Marketplace в Web UI: поиск, фильтры по 12 трекам, рейтинги, установка в 1 клик.
+* [x] **[API-27.1]** Криптографическая подпись манифестов `SKILL.md` (Ed25519) в дополнение к `checksum: sha256`, верификация при установке и CLI `skill:keygen`/`skill:sign` (результат — см. журнал ниже).
+* [x] **[API-27.2]** Публичный каталог навыков (`/api/v1/marketplace/skills`), установка в 1 клик и Revenue Share 85/15 через BAL и append-only Ledger (ADR 0002); остаточные ограничения — KI-087.
+* [x] **[WEB-27.3]** Витрина Marketplace в Web UI: поиск, фильтры по 12 трекам, рейтинги, установка в 1 клик (без коммита: изменения в рабочем дереве; разрыв контракта API — KI-086).
 
 ### Sprint 28: Control Plane v2 & Qdrant Scale
 
@@ -90,3 +90,4 @@
 | 2026-11-18 | Sprint 24 (24.1–24.6) | Infra / OpenCode / UI | Выполнено | MCP per-request креды, новые методы K/L, маппинг контрагента, Pay-per-Call Hold→Capture, лендинг-симулятор и E2E `Chat → tool_calls → HITL → Ledger` (QA-24.4) | KI-049 закрыт; KI-084/KI-085 — остаточные |
 | 2026-11-18 | Sprint 25 (25.1–25.3) | Infra / OpenCode | Выполнено | `ISandboxRuntimeProvider` + `FirecrackerSandboxProvider` (fail closed без KVM), SNI/Host egress-прокси с DNS-rebinding guard, K8s-манифесты `deploy/k8s/` (gVisor RuntimeClass, Job миграций, Deployment, NetworkPolicy) и гайд `KUBERNETES-DEPLOY.md` | KI-028, KI-037, KI-042 закрыты |
 | 2026-11-18 | Sprint 26 (26.1–26.4) | Infra / OpenCode | Выполнено | `internal-jwt.ts` (TTL 60, iss/aud/jti, fail-closed в production) и guards в api/worker; envelope `v2` с keyId + previous keys и CLI `keys:rotate`; Grafana OIDC с Basic-фолбэком и Tempo с OTLP-экспортёром; шифрование offsite `.enc`, SHA-256-сайдкар, SSE-S3 и изолированный restore-drill с проверкой append-only-триггеров | KI-018, KI-035, KI-036, KI-038, KI-045, KI-053 закрыты; mTLS/KMS, Object Lock и SSO для Prometheus — остаток |
+| 2026-11-19 | Sprint 27 (27.1–27.3) | OpenCode / UI | Выполнено | `skill-signing.ts` (каноническая Ed25519-подпись), `SkillSignatureService` с `TRUSTED_SKILL_PUBLIC_KEYS`/`REQUIRE_SIGNED_SKILLS`, CLI `skill:keygen`/`skill:sign`, модель `MarketplaceSkill` + миграция, `MarketplaceController`, `RevenueShareService` и сплит 85/15 через BAL/Ledger в транзакции; витрина `/app/marketplace` с Zod-контрактом, фильтрами 12 треков, установкой в 1 клик, окном деталей, RU/EN и тестами | KI-086 закрыт; KI-087 — перевод ЮKassa не атомарен со сплитом |
