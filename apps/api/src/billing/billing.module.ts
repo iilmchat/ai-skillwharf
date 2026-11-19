@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { BILLING_PROVIDER } from './billing.constants.js';
+import { AdminBillingController } from './admin-billing.controller.js';
 import { BillingController } from './billing.controller.js';
+import { BillingOutboxService } from './billing-outbox.service.js';
 import { BillingService } from './billing.service.js';
 import { RevenueShareService } from './revenue-share.service.js';
 import { FreemiumResetService } from './freemium-reset.service.js';
@@ -10,10 +12,11 @@ import { YooKassaProvider } from './providers/yookassa.provider.js';
 
 @Module({
   imports: [AuthModule],
-  controllers: [BillingController],
+  controllers: [BillingController, AdminBillingController],
   providers: [
     BillingService,
     RevenueShareService,
+    BillingOutboxService,
     // Месячный сброс Freemium-лимитов: таймер внутри процесса, unref-нутый.
     FreemiumResetService,
     MockYooKassaProvider,
@@ -30,6 +33,7 @@ import { YooKassaProvider } from './providers/yookassa.provider.js';
   exports: [
     BillingService,
     RevenueShareService,
+    BillingOutboxService,
     MockYooKassaProvider,
     YooKassaProvider,
     BILLING_PROVIDER,

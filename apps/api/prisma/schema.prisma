@@ -101,6 +101,24 @@ model Transaction {
   user      User     @relation(fields: [userId], references: [id])
 }
 
+/// Transactional Outbox для внешних выплат Revenue Share (Sprint 33 / KI-087).
+model BillingOutbox {
+  id             String    @id @default(uuid())
+  eventType      String    @default("yookassa_author_transfer")
+  idempotencyKey String    @unique
+  payloadJson    Json
+  /// pending | processing | sent | failed_dead
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  nextRetryAt    DateTime  @default(now())
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  @@index([status, nextRetryAt])
+}
+
 model Conversation {
   id        String    @id @default(uuid())
   title     String

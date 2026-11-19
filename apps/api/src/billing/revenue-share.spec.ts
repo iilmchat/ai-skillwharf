@@ -50,6 +50,12 @@ describe('BillingService.chargeForMarketplaceSkill', () => {
           id: `entry-${data.idempotencyKey}`,
         })),
       },
+      user: {
+        upsert: vi.fn(async () => ({ id: 'treasury-user' })),
+      },
+      billingOutbox: {
+        create: vi.fn(async () => ({ id: 'outbox-1' })),
+      },
     };
     const prisma = {
       ledgerEntry: { findUnique: vi.fn(async () => null) },
@@ -92,6 +98,57 @@ describe('BillingService.chargeForMarketplaceSkill', () => {
     expect(tx.wallet.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: AUTHOR } }),
     );
+  });
+
+  it('в одной транзакции создаёт Outbox и зачисляет 15% на Platform Treasury', async () => {
+    const { service, tx, prisma } = harness();
+
+    await service.chargeForMarketplaceSkill({
+      userId: BUYER,
+      authorId: AUTHOR,
+      skillName: 'seo-audit',
+      price: 100,
+      idempotencyKey: 'charge-outbox',
+      payoutAccountId: 'yoo-account-1',
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.user.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: 'treasury@system.skillwharf.local' },
+      }),
+    );
+    expect(tx.billingOutbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          idempotencyKey: 'revenue-share:charge-outbox',
+          status: 'pending',
+          eventType: 'yookassa_author_transfer',
+        }),
+      }),
+    );
+    const platformEntry = tx.ledgerEntry.create.mock.calls
+      .map((call: [{ data: { type: string; walletId: string; amount: Prisma.Decimal } }]) => call[0].data)
+      .find((entry) => entry.type === 'platform_fee');
+
+    expect(platformEntry).toMatchObject({
+      walletId: 'wallet-author',
+      amount: new Prisma.Decimal('15.00'),
+    });
+  });
+
+  it('без payoutAccountId не создаёт Outbox', async () => {
+    const { service, tx } = harness();
+
+    await service.chargeForMarketplaceSkill({
+      userId: BUYER,
+      authorId: AUTHOR,
+      skillName: 'seo-audit',
+      price: 100,
+      idempotencyKey: 'charge-no-payout',
+    });
+
+    expect(tx.billingOutbox.create).not.toHaveBeenCalled();
   });
 
   it('запрещает автору покупать собственный навык', async () => {

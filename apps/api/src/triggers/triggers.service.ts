@@ -49,7 +49,8 @@ export class TriggersService {
     raw: unknown,
   ): Promise<CreatedTriggerView> {
     const input = createTriggerSchema.parse(raw ?? {});
-    const slug = randomBytes(16).toString('base64url').toLowerCase().slice(0, 24);
+    // hex вместо base64url: slug безопасен для URL и не содержит `_`/`~`.
+    const slug = randomBytes(16).toString('hex').slice(0, 24);
     const secretToken = randomBytes(32).toString('base64url');
     const row = await this.prisma.webhookTrigger.create({
       data: {

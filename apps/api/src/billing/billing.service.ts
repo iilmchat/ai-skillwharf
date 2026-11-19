@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -57,6 +57,18 @@ export interface RevenueShareChargeInput {
   readonly skillName: string;
   readonly price: number;
   readonly idempotencyKey: string;
+  /** Счёт ЮKassa автора: наличие создаёт outbox-задачу на выплату 85%. */
+  readonly payoutAccountId?: string | null;
+}
+
+/** Системный пользователь, на котором лежит кошелёк Platform Treasury. */
+export const TREASURY_EMAIL = 'treasury@system.skillwharf.local';
+
+export interface ReconciliationReport {
+  readonly ledgerRub: string;
+  readonly walletsRub: string;
+  readonly balanced: boolean;
+  readonly discrepancyRub: string;
 }
 
 /** Запись истории операций для отдачи в API. */
@@ -630,7 +642,14 @@ export class BillingService {
   async chargeForMarketplaceSkill(
     input: RevenueShareChargeInput,
   ): Promise<RevenueShareChargeResult> {
-    const { userId, authorId, skillName, price, idempotencyKey } = input;
+    const {
+      userId,
+      authorId,
+      skillName,
+      price,
+      idempotencyKey,
+      payoutAccountId,
+    } = input;
 
     this.assertPositiveAmount(price);
     this.assertIdempotencyKey(idempotencyKey);
@@ -693,19 +712,38 @@ export class BillingService {
           },
         });
 
-        // Платформенный кошелёк отдельной моделью не представлен: комиссия
-        // фиксируется проводкой на кошельке покупателя с нулевым изменением
-        // баланса (информационная запись в append-only Ledger).
+        // KI-087: 15% реально зачисляются на кошелёк Platform Treasury.
+        const treasuryWallet = await ensureTreasuryWallet(tx);
         const platformEntry = await tx.ledgerEntry.create({
           data: {
-            walletId: buyerWallet.id,
+            walletId: treasuryWallet.id,
             amount: platformDecimal,
-            balanceAfter: buyerWallet.balance,
+            balanceAfter: treasuryWallet.balance,
             type: 'platform_fee',
             description: `Комиссия платформы 15% за навык ${skillName}`,
             idempotencyKey: `${idempotencyKey}:platform`,
           },
         });
+
+        // Transactional Outbox: задача на перевод автору создаётся В той же
+        // транзакции, что и списание — выплата не потеряется при сбое процесса.
+        if (payoutAccountId !== undefined && payoutAccountId !== null && author > 0) {
+          await tx.billingOutbox.create({
+            data: {
+              eventType: 'yookassa_author_transfer',
+              idempotencyKey: `revenue-share:${idempotencyKey}`,
+              payloadJson: {
+                payoutAccountId,
+                amountRub: author.toFixed(2),
+                skillName,
+                description: `Revenue Share: ${skillName}`,
+              } as Prisma.InputJsonValue,
+              status: 'pending',
+              attempts: 0,
+              nextRetryAt: new Date(),
+            },
+          });
+        }
 
         return {
           balance: formatBalance(buyerWallet.balance),
@@ -747,6 +785,7 @@ export class BillingService {
     readonly skillName: string;
     readonly amount: number;
     readonly idempotencyKey: string;
+    readonly payoutAccountId?: string | null;
   }): Promise<{ authorEntryId: string; platformEntryId: string }> {
     this.assertPositiveAmount(input.amount);
     this.assertIdempotencyKey(input.idempotencyKey);
@@ -762,9 +801,6 @@ export class BillingService {
     const platformDecimal = new Prisma.Decimal(platform);
 
     return this.prisma.$transaction(async (tx) => {
-      const payerWallet = await tx.wallet.findUniqueOrThrow({
-        where: { userId: input.payerUserId },
-      });
       const authorWallet = await tx.wallet.upsert({
         where: { userId: input.authorId },
         create: { userId: input.authorId, balance: authorDecimal },
@@ -780,16 +816,39 @@ export class BillingService {
           idempotencyKey: `${input.idempotencyKey}:author`,
         },
       });
+      const treasuryWallet = await ensureTreasuryWallet(tx);
       const platformEntry = await tx.ledgerEntry.create({
         data: {
-          walletId: payerWallet.id,
+          walletId: treasuryWallet.id,
           amount: platformDecimal,
-          balanceAfter: payerWallet.balance,
+          balanceAfter: treasuryWallet.balance,
           type: 'platform_fee',
           description: `Комиссия платформы 15% за навык ${input.skillName}`,
           idempotencyKey: `${input.idempotencyKey}:platform`,
         },
       });
+
+      if (
+        input.payoutAccountId !== undefined &&
+        input.payoutAccountId !== null &&
+        author > 0
+      ) {
+        await tx.billingOutbox.create({
+          data: {
+            eventType: 'yookassa_author_transfer',
+            idempotencyKey: `revenue-share:${input.idempotencyKey}`,
+            payloadJson: {
+              payoutAccountId: input.payoutAccountId,
+              amountRub: author.toFixed(2),
+              skillName: input.skillName,
+              description: `Revenue Share: ${input.skillName}`,
+            } as Prisma.InputJsonValue,
+            status: 'pending',
+            attempts: 0,
+            nextRetryAt: new Date(),
+          },
+        });
+      }
 
       return {
         authorEntryId: authorEntry.id,
@@ -945,6 +1004,50 @@ export class BillingService {
 
     return entry ? this.replayEscrow(entry, userId) : null;
   }
+
+  /** Ленивое создание системного пользователя и кошелька Platform Treasury. */
+  async treasuryBalance(): Promise<WalletBalance> {
+    const wallet = await ensureTreasuryWallet(this.prisma);
+
+    return {
+      balance: formatBalance(wallet.balance),
+      heldBalance: formatBalance(wallet.heldBalance),
+    };
+  }
+
+  /**
+   * Сверка append-only Ledger с балансами кошельков: credit − debit должен
+   * совпадать с суммой `balance + heldBalance` (PENDING не меняет итог).
+   */
+  async reconciliation(): Promise<ReconciliationReport> {
+    const [credit, debit, wallets] = await Promise.all([
+      this.prisma.ledgerEntry.aggregate({
+        where: { type: 'credit' },
+        _sum: { amount: true },
+      }),
+      this.prisma.ledgerEntry.aggregate({
+        where: { type: 'debit' },
+        _sum: { amount: true },
+      }),
+      this.prisma.wallet.aggregate({
+        _sum: { balance: true, heldBalance: true },
+      }),
+    ]);
+    const ledger = new Prisma.Decimal(credit._sum.amount ?? 0).minus(
+      debit._sum.amount ?? 0,
+    );
+    const walletSum = new Prisma.Decimal(wallets._sum.balance ?? 0).plus(
+      wallets._sum.heldBalance ?? 0,
+    );
+    const discrepancy = ledger.minus(walletSum);
+
+    return {
+      ledgerRub: ledger.toFixed(2),
+      walletsRub: walletSum.toFixed(2),
+      balanced: discrepancy.isZero(),
+      discrepancyRub: discrepancy.toFixed(2),
+    };
+  }
 }
 
 /**
@@ -968,6 +1071,30 @@ export function splitRevenueShare(price: number): {
     author: authorKopecks / 100,
     platform: platformKopecks / 100,
   };
+}
+
+/** Создаёт (если нужно) системного пользователя и его кошелёк. */
+async function ensureTreasuryWallet(
+  client: Prisma.TransactionClient | PrismaService,
+): Promise<{ id: string; balance: Prisma.Decimal; heldBalance: Prisma.Decimal }> {
+  const user = await client.user.upsert({
+    where: { email: TREASURY_EMAIL },
+    create: {
+      email: TREASURY_EMAIL,
+      // Пользователь не может логиниться: пароль недостижим для входа.
+      passwordHash: createHash('sha256').update(randomUUID()).digest('hex'),
+      role: 'system',
+    },
+    update: {},
+    select: { id: true },
+  });
+
+  return client.wallet.upsert({
+    where: { userId: user.id },
+    create: { userId: user.id },
+    update: {},
+    select: { id: true, balance: true, heldBalance: true },
+  });
 }
 
 function formatBalance(balance: Prisma.Decimal): string {

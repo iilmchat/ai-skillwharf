@@ -1,11 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import {
   BillingService,
   splitRevenueShare,
   type RevenueShareChargeResult,
 } from './billing.service.js';
-import { YooKassaProvider } from './providers/yookassa.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 /** Входные данные платного вызова навыка из каталога. */
@@ -32,19 +31,15 @@ const chargeInputSchema = z.object({
 /**
  * Revenue Share 85/15 (Sprint 27 / API-27.2).
  *
- * Ledger-сплит выполняется `BillingService` в одной транзакции.
- * Внешний перевод ЮKassa выполняется после коммита БД (сетевой вызов
- * не может быть частью транзакции): ошибка перевода логируется и не
- * откатывает уже списанные средства — операция идемпотентна по `idempotencyKey`.
+ * Ledger-сплит и outbox-задача на перевод автору создаются `BillingService`
+ * в одной транзакции (Sprint 33 / KI-087). Доставкой во внешнюю систему
+ * занимается `BillingOutboxService` с retry и dead-letter.
  */
 @Injectable()
 export class RevenueShareService {
-  private readonly logger = new Logger(RevenueShareService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly billing: BillingService,
-    private readonly yookassa: YooKassaProvider,
   ) {}
 
   /**
@@ -110,6 +105,7 @@ export class RevenueShareService {
       skillName: skill.name,
       amount,
       idempotencyKey: parsed.idempotencyKey,
+      payoutAccountId: skill.payoutAccountId,
     });
     const charge: RevenueShareChargeResult = {
       balance: '',
@@ -121,7 +117,7 @@ export class RevenueShareService {
       platformEntryId: entries.platformEntryId,
     };
 
-    return this.payout(skill, charge, parsed.idempotencyKey);
+    return { charge };
   }
 
   async chargeForMarketplaceSkill(
@@ -149,53 +145,17 @@ export class RevenueShareService {
       return { charge: null, reason: 'no_revenue_share' };
     }
 
-    const charge = await this.billing.chargeForMarketplaceSkill({
-      userId: input.userId,
-      authorId: skill.authorId,
-      skillName: skill.name,
-      price,
-      idempotencyKey: input.idempotencyKey,
-    });
-
-    return this.payout(
-      {
+    // Outbox создаётся внутри транзакции списания — отдельный best-effort
+    // перевод больше не нужен (KI-087).
+    return {
+      charge: await this.billing.chargeForMarketplaceSkill({
+        userId: input.userId,
+        authorId: skill.authorId,
+        skillName: skill.name,
+        price,
+        idempotencyKey: input.idempotencyKey,
         payoutAccountId: skill.payoutAccountId,
-        name: skill.name,
-      },
-      charge,
-      input.idempotencyKey,
-    );
-  }
-
-  /** Перевод ЮKassa после коммита BAL-операций (best effort, идемпотентно). */
-  private async payout(
-    skill: { payoutAccountId: string | null; name: string },
-    charge: RevenueShareChargeResult,
-    idempotencyKey: string,
-  ): Promise<MarketplaceChargeReport> {
-    if (skill.payoutAccountId === null || !this.yookassa.isConfigured()) {
-      return { charge };
-    }
-
-    try {
-      const transferId = await this.yookassa.createTransfer(
-        skill.payoutAccountId,
-        Number(charge.authorAmount),
-        `revenue-share:${idempotencyKey}`,
-        `Revenue Share: ${skill.name}`,
-      );
-
-      return { charge, transferId };
-    } catch (error) {
-      this.logger.error(
-        JSON.stringify({
-          event: 'marketplace.transfer_failed',
-          skill: skill.name,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-
-      return { charge, reason: 'transfer_failed' };
-    }
+      }),
+    };
   }
 }

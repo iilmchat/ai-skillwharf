@@ -111,6 +111,8 @@ services:
       YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
       YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
       YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
+      # Период опроса Transactional Outbox для выплат Revenue Share.
+      BILLING_OUTBOX_POLL_MS: ${BILLING_OUTBOX_POLL_MS:-15000}
       # API ходит к sandbox-worker по внутренней сети compose.
       SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
       # LLM-инференс и LangGraph вынесены в отдельный сервис.
