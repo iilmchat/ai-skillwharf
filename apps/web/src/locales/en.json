@@ -69,6 +69,8 @@
     "mcp_unavailable": "The MCP provider is unavailable. Please try again later.",
     "llm_unavailable": "All LLM providers are unavailable or out of daily budget. Please try again later.",
     "marketplace_unavailable": "The marketplace is temporarily unavailable. Please try again later.",
+    "insufficient_workspace_role": "Insufficient workspace permissions. This action requires the owner or admin role.",
+    "hitl_limit_exceeded": "The HITL auto-approval limit was exceeded. Lower the amount or raise the member's limit.",
     "eval_gate_failed": "This version cannot be made active: no passing Eval run was found. Run the automated quality evaluation on the Prompts tab and try again.",
     "invalid_telegram_token": "Telegram rejected the token. Check that it is correct.",
     "telegram_unavailable": "Telegram is temporarily unavailable. Please try again later.",
@@ -84,12 +86,63 @@
     "primary": "Primary navigation",
     "chat": "Chat",
     "skills": "Skills",
+    "team": "Team",
     "marketplace": "Marketplace",
     "store": "Store",
     "office": "AI office",
     "finance": "Finance",
     "settings": "Settings",
     "admin": "Control plane"
+  },
+  "workspace": {
+    "switcherLabel": "Workspace",
+    "defaultOption": "Default workspace",
+    "create": "New workspace",
+    "createTitle": "New workspace",
+    "createSubtitle": "A workspace isolates members, skills, and HITL limits.",
+    "nameLabel": "Name",
+    "slugLabel": "Slug (optional)",
+    "createAction": "Create",
+    "creating": "Creating…",
+    "created": "Workspace created.",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "operator": "Operator",
+      "viewer": "Viewer"
+    },
+    "team": {
+      "title": "Team and access",
+      "subtitle": "Members of the current workspace, their roles, and HITL auto-approval limits.",
+      "membersTitle": "Members",
+      "noWorkspace": "Workspaces are not available yet.",
+      "loading": "Loading members…",
+      "empty": "This workspace has no members yet.",
+      "saved": "Changes saved.",
+      "added": "Member added.",
+      "unlimited": "Unlimited",
+      "save": "Save",
+      "table": {
+        "member": "Member",
+        "role": "Role",
+        "hitlLimit": "HITL limit, ₽"
+      },
+      "invite": {
+        "title": "Add member",
+        "email": "Email",
+        "role": "Role",
+        "hitlLimit": "HITL limit, ₽",
+        "action": "Add",
+        "adding": "Adding…"
+      }
+    },
+    "errors": {
+      "load": "Could not load workspaces.",
+      "loadMembers": "Could not load members.",
+      "create": "Could not create the workspace.",
+      "add": "Could not add the member.",
+      "update": "Could not update the member."
+    }
   },
   "skills": {
     "title": "Skills",

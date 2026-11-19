@@ -49,6 +49,12 @@ const MarketplacePage = lazy(() =>
   })),
 );
 
+const TeamPage = lazy(() =>
+  import('./pages/TeamPage').then((module) => ({
+    default: module.TeamPage,
+  })),
+);
+
 const StorePage = lazy(() =>
   import('./pages/StorePage').then((module) => ({
     default: module.StorePage,
@@ -134,6 +140,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <MarketplacePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/team"
+            element={
+              <ProtectedRoute>
+                <TeamPage />
               </ProtectedRoute>
             }
           />

@@ -24,6 +24,7 @@ import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TokenUsageWidget } from '../components/TokenUsageWidget';
 import { TopUpModal } from '../components/TopUpModal';
+import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import {
   useChatSession,
   type ChatMessage,
@@ -354,6 +355,9 @@ export function ChatPage() {
           <div className="flex h-16 items-center border-b border-outline-variant px-5">
             <Brand />
           </div>
+          <div className="border-b border-outline-variant px-3 py-2">
+            <WorkspaceSwitcher />
+          </div>
 
           <nav
             aria-label={t('nav.primary')}
@@ -392,6 +396,24 @@ export function ChatPage() {
                 <rect x="14" y="14" width="6" height="6" rx="1" />
               </svg>
               {t('nav.skills')}
+            </NavLink>
+
+            <NavLink to="/app/team" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <circle cx="9" cy="8" r="3" />
+                <path d="M3 20a6 6 0 0 1 12 0" />
+                <path d="M16 5a3 3 0 0 1 0 6M18 14a6 6 0 0 1 3 6" />
+              </svg>
+              {t('nav.team')}
             </NavLink>
 
             <NavLink to="/app/marketplace" className={navItemClasses}>

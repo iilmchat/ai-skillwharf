@@ -30,6 +30,10 @@ export const ERROR_CODES = {
   registrationClosed: 'errors.registration_closed',
   /** Неверный или недействительный инвайт-код (KI-073). */
   invalidInviteCode: 'errors.invalid_invite_code',
+  /** Недостаточно прав в рабочем пространстве (ORG-31.2). */
+  insufficientWorkspaceRole: 'errors.insufficient_workspace_role',
+  /** Лимит автоодобрения HITL превышен (ORG-31.2). */
+  hitlLimitExceeded: 'errors.hitl_limit_exceeded',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

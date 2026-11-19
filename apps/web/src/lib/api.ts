@@ -1,4 +1,5 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
+import { useWorkspaceStore } from '../store/workspace.store'
 import { useRateLimitStore } from './rate-limit'
 
 /**
@@ -24,6 +25,25 @@ export function setAuthToken(token: string | null): void {
 
   api.defaults.headers.common.Authorization = `Bearer ${token}`
 }
+
+/**
+ * Все запросы приложения помечаются активным воркспейсом (Sprint 31).
+ * Значение берётся из стора в момент запроса: смена воркспейса сразу
+ * действует на последующие вызовы без пересоздания axios-инстанса.
+ */
+export function applyWorkspaceHeader(
+  config: InternalAxiosRequestConfig,
+): InternalAxiosRequestConfig {
+  const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+
+  if (workspaceId !== null && workspaceId !== '') {
+    config.headers.set('X-Workspace-Id', workspaceId);
+  }
+
+  return config;
+}
+
+api.interceptors.request.use(applyWorkspaceHeader);
 
 // 429 приходит при брутфорсе логина и при превышении лимитов API:
 // показываем один общий тост независимо от того, какой запрос упал.
