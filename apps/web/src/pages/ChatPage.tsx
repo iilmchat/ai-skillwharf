@@ -433,6 +433,22 @@ export function ChatPage() {
               {t('nav.marketplace')}
             </NavLink>
 
+            <NavLink to="/app/developer" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 4l-4 16" />
+              </svg>
+              {t('nav.developer')}
+            </NavLink>
+
             <NavLink to="/app/store" className={navItemClasses}>
               <svg
                 aria-hidden="true"

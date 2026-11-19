@@ -466,6 +466,37 @@ toast. Клик по карточке открывает окно с описа�
 пишет «Разрешения не указаны» и определяет статус подписи по `verified`, а
 флаг установки хранится в кэше TanStack Query (см. KI-086 в KNOWN_ISSUES).
 
+## Портал разработчиков навыков
+
+Защищённая страница `/app/developer` (Sprint 36, WEB-36.3) доступна по пункту
+«Разработчикам» рядом с маркетплейсом. Контракт и клиент —
+`src/lib/developer-portal.ts`, все ответы валидируются Zod:
+
+- `auditFindingSchema` (`severity` `critical|warning|info`, `code`, `message`),
+  `auditStatusSchema` (`passed|warning|rejected`);
+- `developerSkillItemSchema` (`price` числом или Decimal-строкой → число,
+  `downloadsCount`, `verified`, `auditFindings?`, `payoutAccountId?`);
+- `developerDashboardSchema` (`totalSkills`, `totalDownloads`,
+  `totalRevenueRub`, `pendingPayoutRub`, `skills`) — денежные строки
+  нормализуются в числа, принимается также обёртка `{ dashboard }`.
+  Публикация и обновление счёта возвращают `{ skill }` — клиент разворачивает
+  обёртку.
+
+Клиенты: `fetchDeveloperDashboard()` → `GET /api/v1/developer/skills`,
+`publishDeveloperSkill({ manifestYaml, payoutAccountId? })` → `POST`,
+`updateSkillPayoutAccount(slug, payoutAccountId)` →
+`PATCH /api/v1/developer/skills/:slug/payout`. Ключ кэша — `['developer-portal']`.
+
+Страница показывает 4 KPI-карточки автора (навыки, установки, заработано 85%,
+ожидает выплаты), форму публикации `SKILL.md` с YAML-шаблоном, Markdown-
+инструкцией и опциональным Payout Account ID, а также таблицу опубликованных
+навыков с бейджем аудита (тултип с замечаниями) и инлайн-редактированием счёта
+выплат. При ответе `400 errors.skill_audit_rejected` ошибка
+`DeveloperPortalError` несёт список замечаний — они показываются списком под
+формой. RU/EN-ключи — `nav.developer`, `developerPortal.*` и
+`errors.skill_audit_rejected`. Если API ещё не выкачен (404/501), страница
+показывает локализованное сообщение вместо падения.
+
 ## Control Plane: A/B-тестирование промптов
 
 Вкладка «Промпты» на `/admin` (WEB-28.1) в drawer'е версий шаблона содержит

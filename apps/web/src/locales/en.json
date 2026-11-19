@@ -80,7 +80,8 @@
     "provider_unavailable": "The provider is temporarily unavailable. Please try again later.",
     "provider_rate_limited": "The provider is temporarily rate-limiting requests. Please try again later.",
     "registration_closed": "User registration is currently closed",
-    "invalid_invite_code": "Invalid invite code"
+    "invalid_invite_code": "Invalid invite code",
+    "skill_audit_rejected": "The security audit rejected the skill. Fix the findings below and publish again."
   },
   "nav": {
     "primary": "Primary navigation",
@@ -88,6 +89,7 @@
     "skills": "Skills",
     "team": "Team",
     "marketplace": "Marketplace",
+    "developer": "Developer Portal",
     "store": "Store",
     "office": "AI office",
     "builder": "Agent Builder",
@@ -168,6 +170,65 @@
       "create": "Could not create the agent.",
       "update": "Could not update the agent.",
       "delete": "Could not delete the agent."
+    }
+  },
+  "developerPortal": {
+    "title": "Developer Portal",
+    "subtitle": "Publish skills, pass the automated security audit, and track your Revenue Share 85% earnings.",
+    "backToChat": "Back to chat",
+    "kpi": {
+      "skills": "Published skills",
+      "downloads": "Total installs",
+      "revenue": "Earned (85%)",
+      "pending": "Pending payout"
+    },
+    "publish": {
+      "title": "Publish a skill",
+      "subtitle": "SKILL.md goes through static and sandbox audits before it reaches the marketplace.",
+      "manifestLabel": "SKILL.md manifest (YAML + Markdown)",
+      "manifestHint": "Fill in the frontmatter (name, version, track, pricing model, permissions) and the agent instructions. The audit blocks publishing on critical findings.",
+      "payoutLabel": "Payout Account ID (YooKassa, optional)",
+      "payoutPlaceholder": "yoo-account-id",
+      "submit": "Check and publish",
+      "publishing": "Checking and publishing…",
+      "success": "Skill published.",
+      "findingsTitle": "Security audit findings"
+    },
+    "audit": {
+      "passed": "Passed",
+      "warning": "Warning",
+      "rejected": "Rejected"
+    },
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "info": "Info"
+    },
+    "table": {
+      "title": "Published skills",
+      "loading": "Loading skills…",
+      "retry": "Try again",
+      "empty": "You have no published skills yet.",
+      "setPayout": "Set payout account",
+      "payoutLabel": "Payout account for {{name}}",
+      "save": "Save",
+      "cancel": "Cancel",
+      "columns": {
+        "skill": "Skill",
+        "pricing": "Model & price",
+        "downloads": "Installs",
+        "audit": "Audit",
+        "payout": "Payout account"
+      }
+    },
+    "errors": {
+      "network": "The server is unreachable. Check your connection.",
+      "unavailable": "The Developer Portal API is not available yet.",
+      "forbidden": "You do not have permission to publish skills.",
+      "invalidResponse": "The server returned an invalid portal response.",
+      "publishFailed": "Could not publish the skill.",
+      "payoutUpdateFailed": "Could not save the payout account.",
+      "unknown": "Could not complete the action. Please try again later."
     }
   },
   "workspace": {

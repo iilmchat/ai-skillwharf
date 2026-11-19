@@ -106,6 +106,9 @@ export function SettingsPage() {
               <NavLink to="/app/marketplace" className={navLinkClasses}>
                 {t('nav.marketplace')}
               </NavLink>
+              <NavLink to="/app/developer" className={navLinkClasses}>
+                {t('nav.developer')}
+              </NavLink>
               <NavLink to="/app/store" className={navLinkClasses}>
                 {t('nav.store')}
               </NavLink>

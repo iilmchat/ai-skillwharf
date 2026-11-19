@@ -370,6 +370,7 @@ export function AgentBuilderPage() {
               <NavLink to="/app/team" className={navLinkClasses}>{t('nav.team')}</NavLink>
               <NavLink to="/app/office" className={navLinkClasses}>{t('nav.office')}</NavLink>
               <NavLink to="/app/builder" className={navLinkClasses}>{t('nav.builder')}</NavLink>
+              <NavLink to="/app/developer" className={navLinkClasses}>{t('nav.developer')}</NavLink>
             </nav>
           </div>
           <div className="flex shrink-0 items-center gap-2">

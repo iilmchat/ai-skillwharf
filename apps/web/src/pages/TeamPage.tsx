@@ -264,6 +264,9 @@ export function TeamPage() {
               <NavLink to="/app/marketplace" className={navLinkClasses}>
                 {t('nav.marketplace')}
               </NavLink>
+              <NavLink to="/app/developer" className={navLinkClasses}>
+                {t('nav.developer')}
+              </NavLink>
               <NavLink to="/app/settings" className={navLinkClasses}>
                 {t('nav.settings')}
               </NavLink>

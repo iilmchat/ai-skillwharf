@@ -79,6 +79,12 @@ const AgentBuilderPage = lazy(() =>
   })),
 );
 
+const DeveloperPortalPage = lazy(() =>
+  import('./pages/DeveloperPortalPage').then((module) => ({
+    default: module.DeveloperPortalPage,
+  })),
+);
+
 const AdminPage = lazy(() =>
   import('./pages/AdminPage').then((module) => ({
     default: module.AdminPage,
@@ -187,6 +193,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <AgentBuilderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/developer"
+            element={
+              <ProtectedRoute>
+                <DeveloperPortalPage />
               </ProtectedRoute>
             }
           />
