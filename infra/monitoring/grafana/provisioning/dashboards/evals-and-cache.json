@@ -1,0 +1,135 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Доля пройденных Eval-кейсов по промптам и трекам A–L (EVAL-29.4).",
+      "fieldConfig": {
+        "defaults": { "max": 1, "min": 0, "unit": "percentunit" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "avg by (prompt_id, track) (skillwharf_eval_pass_rate)",
+          "legendFormat": "{{prompt_id}} · {{track}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Eval Pass Rate по промптам и трекам",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Средний балл LLM-as-a-Judge (шкала 0..100) по версиям промпта.",
+      "fieldConfig": {
+        "defaults": { "max": 100, "min": 0, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "avg by (prompt_id, version_id) (skillwharf_eval_avg_score)",
+          "legendFormat": "{{prompt_id}} · {{version_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Средний балл LLM-as-a-Judge",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Доля попаданий семантического кеша LLM: hits / (hits + misses).",
+      "fieldConfig": {
+        "defaults": { "max": 1, "min": 0, "unit": "percentunit" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(skillwharf_semantic_cache_hits_total[$__rate_interval])) / clamp_min(sum(rate(skillwharf_semantic_cache_hits_total[$__rate_interval])) + sum(rate(skillwharf_semantic_cache_misses_total[$__rate_interval])), 1)",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Semantic Cache Hit Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Токены, сэкономленные за счёт попаданий в семантический кеш.",
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(skillwharf_semantic_cache_tokens_saved_total[$__range]))",
+          "legendFormat": "Сэкономлено токенов",
+          "refId": "A"
+        }
+      ],
+      "title": "Токены, сэкономленные кешем",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Передачи эстафеты между субагентами графа Supervisor (защита от зацикливания — MULTI_AGENT_MAX_HANDOFFS).",
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (graph, from_agent, to_agent) (rate(skillwharf_agent_handoffs_total[$__rate_interval]))",
+          "legendFormat": "{{from_agent}} → {{to_agent}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Мультиагентные handoffs",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["skillwharf", "evals", "cache", "multi-agent"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "SkillWharf Evals & Cache",
+  "uid": "skillwharf-evals-cache",
+  "version": 1
+}

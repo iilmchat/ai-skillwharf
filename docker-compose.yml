@@ -64,6 +64,11 @@ services:
       # LLM_BASE_URL/LLM_MODEL/LLM_API_KEY приходят из .env.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Sprint 30: семантический кеш LLM и лимит handoff'ов графа Supervisor.
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-false}
+      SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
+      SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-3600}
+      MULTI_AGENT_MAX_HANDOFFS: ${MULTI_AGENT_MAX_HANDOFFS:-4}
       OZON_CLIENT_ID: ${OZON_CLIENT_ID:-}
       OZON_API_KEY: ${OZON_API_KEY:-}
       WB_API_TOKEN: ${WB_API_TOKEN:-}
@@ -178,6 +183,11 @@ services:
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-skillwharf_memory}
+      # Sprint 30: семантический кеш LLM и лимит handoff'ов графа Supervisor.
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-false}
+      SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
+      SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-3600}
+      MULTI_AGENT_MAX_HANDOFFS: ${MULTI_AGENT_MAX_HANDOFFS:-4}
       # Sentry выключен, пока SENTRY_DSN пуст; PII фильтруется в коде.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}

@@ -10,3 +10,14 @@ providers:
     allowUiUpdates: true
     options:
       path: /var/lib/grafana/dashboards
+  # Sprint 29/30: дашборд Evals & Cache лежит рядом с конфигом провайдера.
+  # Provisioner читает только *.json, поэтому dashboards.yml не конфликтует.
+  - name: SkillWharf Evals
+    orgId: 1
+    folder: SkillWharf
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
