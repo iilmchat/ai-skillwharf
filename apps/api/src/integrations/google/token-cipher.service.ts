@@ -6,6 +6,11 @@ import {
 } from 'node:crypto';
 import { z } from 'zod';
 import { providerNotConfiguredError } from '../../common/api-error.js';
+import {
+  type IKmsEnvelopeProvider,
+  createKmsEnvelopeProvider,
+  readKmsConfig,
+} from '../keys/kms-envelope.provider.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_BYTES = 32;
@@ -82,6 +87,105 @@ export class LocalAesGcmKms implements KeyManagementService {
       decipher.update(payload.ciphertext),
       decipher.final(),
     ]);
+  }
+}
+
+/**
+ * Локальный AES-256-GCM адаптер контракта `IKmsEnvelopeProvider`.
+ * Дефолтный рантайм и деградация для чтения старых `v1:`/`v2:` в облачных KMS.
+ */
+export class LocalAesKmsProvider implements IKmsEnvelopeProvider {
+  readonly providerName = 'local' as const;
+
+  constructor(
+    private readonly current: KeyManagementService | null,
+    private readonly keys: ReadonlyMap<string, KeyManagementService>,
+  ) {}
+
+  async encrypt(plaintext: string): Promise<string> {
+    if (this.current === null) {
+      throw providerNotConfiguredError(
+        'Шифрование токенов не настроено: задайте TOKEN_ENCRYPTION_KEY (base64, 32 байта)',
+      );
+    }
+
+    const payload = this.current.encrypt(Buffer.from(plaintext, 'utf8'));
+
+    return [
+      VERSION_V2,
+      this.current.keyId,
+      payload.iv.toString('base64'),
+      payload.tag.toString('base64'),
+      payload.ciphertext.toString('base64'),
+    ].join(':');
+  }
+
+  async decrypt(envelope: string): Promise<string> {
+    const parts = envelope.split(':');
+    const version = parts[0];
+
+    if (version === VERSION_V1 && parts.length === 4) {
+      const data = decodeEnvelopeParts(parts[1] ?? '', parts[2] ?? '', parts[3] ?? '');
+
+      for (const kms of this.orderedKeys()) {
+        const decrypted = tryDecrypt(kms, data);
+
+        if (decrypted !== null) {
+          return decrypted.toString('utf8');
+        }
+      }
+
+      throw new Error(INVALID_ENVELOPE);
+    }
+
+    if (version === VERSION_V2 && parts.length === 5) {
+      const parsedKeyId = keyIdSchema.safeParse(parts[1]);
+
+      if (!parsedKeyId.success) {
+        throw new Error(INVALID_ENVELOPE);
+      }
+
+      const kms = this.keys.get(parsedKeyId.data);
+
+      if (kms === undefined) {
+        throw new Error(`Неизвестный keyId в зашифрованном токене: ${parsedKeyId.data}`);
+      }
+
+      const data = decodeEnvelopeParts(parts[2] ?? '', parts[3] ?? '', parts[4] ?? '');
+      const decrypted = tryDecrypt(kms, data);
+
+      if (decrypted === null) {
+        throw new Error(INVALID_ENVELOPE);
+      }
+
+      return decrypted.toString('utf8');
+    }
+
+    throw new Error(INVALID_ENVELOPE);
+  }
+
+  needsRotation(envelope: string): boolean {
+    const parts = envelope.split(':');
+
+    return !(
+      parts[0] === VERSION_V2 &&
+      parts.length === 5 &&
+      parts[1] === this.current?.keyId
+    );
+  }
+
+  get keyId(): string {
+    return this.current?.keyId ?? '';
+  }
+
+  private orderedKeys(): readonly KeyManagementService[] {
+    const all = [...this.keys.values()];
+
+    if (this.current === null) {
+      return all;
+    }
+
+    return [this.current, ...all.filter((kms) => kms !== this.current)];
   }
 }
 
@@ -211,6 +315,8 @@ function decodeEnvelopeParts(
 export class TokenCipherService {
   private readonly current: KeyManagementService | null;
   private readonly keys: ReadonlyMap<string, KeyManagementService>;
+  private readonly local: LocalAesKmsProvider;
+  private readonly kms: IKmsEnvelopeProvider;
 
   constructor(@Optional() key?: Buffer, @Optional() options?: TokenCipherOptions) {
     const config = options ?? {};
@@ -234,6 +340,8 @@ export class TokenCipherService {
     }
 
     this.keys = available;
+    this.local = new LocalAesKmsProvider(this.current, available);
+    this.kms = createKmsEnvelopeProvider(readKmsConfig(env), this.local);
   }
 
   isConfigured(): boolean {
@@ -315,6 +423,26 @@ export class TokenCipherService {
       parts.length === 5 &&
       parts[1] === this.current?.keyId
     );
+  }
+
+  /** Имя активного KMS-провайдера (local | vault | yandex-kms). */
+  get providerName(): string {
+    return this.kms.providerName;
+  }
+
+  /** Асинхронная шифровка через выбранного KMS-провайдера. */
+  encryptEnvelope(plaintext: string): Promise<string> {
+    return this.kms.encrypt(plaintext);
+  }
+
+  /** Асинхронная расшифровка (включая старые v1/v2 envelope). */
+  decryptEnvelope(envelope: string): Promise<string> {
+    return this.kms.decrypt(envelope);
+  }
+
+  /** Нужна ли миграция записи на текущего провайдера/ключ. */
+  needsEnvelopeRotation(envelope: string): boolean {
+    return this.kms.needsRotation(envelope);
   }
 
   /** Ключи в порядке попытки расшифровки v1: активный, затем previous. */

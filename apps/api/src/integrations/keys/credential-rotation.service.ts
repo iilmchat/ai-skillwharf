@@ -29,7 +29,7 @@ export class CredentialRotationService {
   ) {}
 
   async rotateAllCredentials(): Promise<CredentialRotationReport> {
-    if (!this.cipher.isConfigured()) {
+    if (this.cipher.providerName === 'local' && !this.cipher.isConfigured()) {
       throw providerNotConfiguredError(
         'Ротация ключей недоступна: задайте TOKEN_ENCRYPTION_KEY (base64, 32 байта)',
       );
@@ -53,7 +53,7 @@ export class CredentialRotationService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const row of providers) {
-        const secret = this.rotateValue(row.secret);
+        const secret = await this.rotateValue(row.secret);
 
         if (secret === null) {
           continue;
@@ -69,9 +69,9 @@ export class CredentialRotationService {
       }
 
       for (const row of google) {
-        const accessToken = this.rotateValue(row.accessToken);
+        const accessToken = await this.rotateValue(row.accessToken);
         const refreshToken =
-          row.refreshToken === null ? null : this.rotateValue(row.refreshToken);
+          row.refreshToken === null ? null : await this.rotateValue(row.refreshToken);
 
         if (accessToken === null && refreshToken === null) {
           continue;
@@ -88,7 +88,7 @@ export class CredentialRotationService {
       }
 
       for (const row of telegram) {
-        const token = this.rotateValue(row.token);
+        const token = await this.rotateValue(row.token);
 
         if (token === null) {
           continue;
@@ -115,12 +115,17 @@ export class CredentialRotationService {
     return report;
   }
 
-  /** null — запись уже на активном ключе; ошибка расшифровки пробрасывается. */
-  private rotateValue(envelope: string): string | null {
-    if (!this.cipher.needsRotation(envelope)) {
+  /**
+   * null — запись уже у активного провайдера/ключа; ошибка расшифровки
+   * пробрасывается. Поддерживает миграцию v1/v2 → kms:vault / kms:yandex.
+   */
+  private async rotateValue(envelope: string): Promise<string | null> {
+    if (!this.cipher.needsEnvelopeRotation(envelope)) {
       return null;
     }
 
-    return this.cipher.encrypt(this.cipher.decrypt(envelope));
+    const plaintext = await this.cipher.decryptEnvelope(envelope);
+
+    return this.cipher.encryptEnvelope(plaintext);
   }
 }

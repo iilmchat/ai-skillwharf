@@ -7,6 +7,10 @@ import {
 import type { BillingOutbox } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  createOutboxLock,
+  type IOutboxLock,
+} from './outbox-lock.js';
 import { YooKassaProvider } from './providers/yookassa.provider.js';
 
 /** Пayload выплаты автору: всё внешнее валидируется Zod. */
@@ -44,12 +48,15 @@ function pollIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
 export class BillingOutboxService implements OnModuleDestroy {
   private readonly logger = new Logger(BillingOutboxService.name);
   private readonly timer: NodeJS.Timeout | null = null;
+  private readonly lock: IOutboxLock;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly yookassa: YooKassaProvider,
     @Optional() env: NodeJS.ProcessEnv = process.env,
+    @Optional() lock?: IOutboxLock,
   ) {
+    this.lock = lock ?? createOutboxLock(env);
     const interval = pollIntervalMs(env);
 
     if (interval > 0) {
@@ -109,6 +116,29 @@ export class BillingOutboxService implements OnModuleDestroy {
    * Ошибка одной задачи не останавливает остальные.
    */
   async processPendingBatch(limit = 20): Promise<{
+    processed: number;
+    sent: number;
+    retried: number;
+    dead: number;
+  }> {
+    // HA-34.2: при нескольких репликах тик без блокировки пропускается —
+    // лишний опрос PostgreSQL и дубли отправок не нужны.
+    const acquired = await this.lock.acquire();
+
+    if (!acquired) {
+      return { processed: 0, sent: 0, retried: 0, dead: 0 };
+    }
+
+    try {
+      return await this.processBatchUnlocked(limit);
+    } finally {
+      await this.lock.release().catch((error: unknown) => {
+        this.logger.warn(`не удалось снять outbox-блокировку: ${String(error)}`);
+      });
+    }
+  }
+
+  private async processBatchUnlocked(limit: number): Promise<{
     processed: number;
     sent: number;
     retried: number;
