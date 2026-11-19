@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { PromptEvalsPanel } from './PromptEvalsPanel';
 import { PromptExperimentsPanel } from './PromptExperimentsPanel';
 import {
   adminQueryKeys,
@@ -243,6 +244,8 @@ function VersionsDrawer({
               ))}
             </ul>
           )}
+
+          <PromptEvalsPanel promptId={prompt.id} versions={versions} />
 
           <PromptExperimentsPanel promptId={prompt.id} versions={versions} />
 

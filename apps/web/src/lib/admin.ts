@@ -170,6 +170,97 @@ export function isPromptExperimentActive(experiment: PromptExperiment): boolean 
   return experiment.status === 'running' || experiment.status === 'active';
 }
 
+/**
+ * Контракт автоматической оценки промптов (Sprint 29, LLM Evals).
+ *
+ * `GET /prompts/:id/evals` отдаёт историю прогонов, `POST .../evals/run`
+ * запускает прогон для версии с необязательным фильтром по треку A–L.
+ */
+export const PROMPT_EVAL_TRACK_IDS = [
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'F',
+  'G',
+  'H',
+  'I',
+  'J',
+  'K',
+  'L',
+] as const;
+
+export type PromptEvalTrackId = (typeof PROMPT_EVAL_TRACK_IDS)[number];
+
+const promptEvalCaseResultBaseSchema = z.object({
+  caseId: z.string().min(1),
+  trackId: z.enum(PROMPT_EVAL_TRACK_IDS),
+  title: z.string().min(1),
+  passed: z.boolean(),
+  score: z.number().min(0).max(100),
+  reasoning: z.string(),
+});
+
+/**
+ * API Sprint 29 хранит вердикт судьи в `verdict: { passed, score, reasoning }`
+ * и не передаёт `title`; клиентская схема приводит его к плоской форме,
+ * которую показывает панель. Плоский формат из задания тоже принимается.
+ */
+export const promptEvalCaseResultSchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const verdict = isRecord(value.verdict) ? value.verdict : undefined;
+
+  return {
+    ...value,
+    title: value.title ?? value.caseId,
+    passed: value.passed ?? verdict?.passed,
+    score: value.score ?? verdict?.score,
+    reasoning: value.reasoning ?? verdict?.reasoning,
+  };
+}, promptEvalCaseResultBaseSchema);
+
+export type PromptEvalCaseResult = z.infer<typeof promptEvalCaseResultSchema>;
+
+export const promptEvalRunSchema = z.object({
+  id: z.string().min(1),
+  promptId: z.string().min(1),
+  versionId: z.string().min(1),
+  trackFilter: z.string().nullable().optional(),
+  totalCases: z.number().int().nonnegative(),
+  passedCases: z.number().int().nonnegative(),
+  // API отдаёт долю 0..1, UI показывает проценты; плоский 0..100 тоже принимаем.
+  passRate: z
+    .number()
+    .min(0)
+    .max(100)
+    .transform((value) => (value <= 1 ? value * 100 : value)),
+  avgScore: z.number().min(0).max(100),
+  status: z.enum(['running', 'passed', 'failed']),
+  results: z.array(promptEvalCaseResultSchema).optional(),
+  createdAt: z.string().min(1),
+});
+
+export type PromptEvalRun = z.infer<typeof promptEvalRunSchema>;
+
+export const promptEvalRunListSchema = z.preprocess(
+  (value) =>
+    isRecord(value)
+      ? (value.items ?? value.runs ?? value.data ?? value)
+      : value,
+  z.array(promptEvalRunSchema),
+);
+
+export const runPromptEvalSchema = z.object({
+  versionId: z.string().min(1),
+  trackId: z.enum(PROMPT_EVAL_TRACK_IDS).optional(),
+});
+
+export type RunPromptEvalInput = z.infer<typeof runPromptEvalSchema>;
+
 export const LLM_PROVIDER_TYPES = [
   'OpenAI',
   'YandexGPT',
@@ -260,6 +351,8 @@ export const adminQueryKeys = {
     ['admin', 'prompts', promptId, 'versions'] as const,
   promptExperiments: (promptId: string) =>
     ['admin', 'prompts', promptId, 'experiments'] as const,
+  promptEvals: (promptId: string) =>
+    ['admin', 'prompts', promptId, 'evals'] as const,
   llmRoutes: ['admin', 'llm-routes'] as const,
   audit: ['admin', 'audit'] as const,
 };
@@ -410,6 +503,31 @@ export async function stopPromptExperiment(
   return promptExperimentStopResponseSchema.parse(data);
 }
 
+/** GET /api/v1/prompts/:id/evals — история прогонов Evals. */
+export async function fetchPromptEvals(
+  promptId: string,
+): Promise<PromptEvalRun[]> {
+  const { data } = await api.get<unknown>(
+    `/prompts/${encodeURIComponent(promptId)}/evals`,
+  );
+
+  return promptEvalRunListSchema.parse(data);
+}
+
+/** POST /api/v1/prompts/:id/evals/run — запуск прогона для версии. */
+export async function runPromptEval(
+  promptId: string,
+  input: RunPromptEvalInput,
+): Promise<PromptEvalRun> {
+  const payload = runPromptEvalSchema.parse(input);
+  const { data } = await api.post<unknown>(
+    `/prompts/${encodeURIComponent(promptId)}/evals/run`,
+    payload,
+  );
+
+  return promptEvalRunSchema.parse(data);
+}
+
 export async function fetchLlmRoutes(): Promise<LlmRoute[]> {
   const { data } = await api.get<unknown>('/admin/llm-routes');
   const items = unwrapList<unknown>(data, [
@@ -485,6 +603,12 @@ export function getAdminErrorMessage(
     }
 
     const data: unknown = error.response.data;
+
+    // ApiErrorBody несёт machine-readable код и человекочитаемый message:
+    // код имеет приоритет, иначе errors.eval_gate_failed останется сырым.
+    if (isRecord(data) && typeof data.code === 'string' && i18n.exists(data.code)) {
+      return i18n.t(data.code);
+    }
 
     if (isMessagePayload(data)) {
       return formatServerMessage(data.message);

@@ -112,6 +112,7 @@ function ExperimentCard({
               type="button"
               disabled={isStopping}
               onClick={() => onPromote(experiment)}
+              title={t('admin.experiments.promoteHint')}
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('admin.experiments.promoteB')}
@@ -206,7 +207,10 @@ export function PromptExperimentsPanel({
   const [variantB, setVariantB] = useState('');
   const [trafficSplitB, setTrafficSplitB] = useState(50);
   const [formError, setFormError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Значения по умолчанию выводим из актуального списка версий во время
   // рендера: effect с setState здесь создавал бы лишний проход рендера.
@@ -231,7 +235,7 @@ export function PromptExperimentsPanel({
     onSuccess: () => {
       setName('');
       setFormError(null);
-      setNotice(t('admin.experiments.created'));
+      setNotice({ tone: 'success', message: t('admin.experiments.created') });
       void queryClient.invalidateQueries({
         queryKey: adminQueryKeys.promptExperiments(promptId),
       });
@@ -254,21 +258,27 @@ export function PromptExperimentsPanel({
       promoteVersionId?: string;
     }) => stopPromptExperiment(expId, promoteVersionId),
     onSuccess: (_result, { promoteVersionId }) => {
-      setNotice(
-        promoteVersionId === undefined
-          ? t('admin.experiments.stopped')
-          : t('admin.experiments.promoted'),
-      );
+      setNotice({
+        tone: 'success',
+        message:
+          promoteVersionId === undefined
+            ? t('admin.experiments.stopped')
+            : t('admin.experiments.promoted'),
+      });
       void queryClient.invalidateQueries({
         queryKey: adminQueryKeys.promptExperiments(promptId),
       });
     },
     onError: (error) => {
-      setNotice(
-        error instanceof ZodError
-          ? t('admin.experiments.errors.invalid')
-          : getAdminErrorMessage(error, 'admin.experiments.errors.stop'),
-      );
+      // errors.eval_gate_failed приходит в ApiErrorBody.code и переводится
+      // getAdminErrorMessage: версию B нельзя повысить без пройденного Eval.
+      setNotice({
+        tone: 'error',
+        message:
+          error instanceof ZodError
+            ? t('admin.experiments.errors.invalid')
+            : getAdminErrorMessage(error, 'admin.experiments.errors.stop'),
+      });
     },
   });
 
@@ -424,8 +434,13 @@ export function PromptExperimentsPanel({
       </form>
 
       {notice !== null && (
-        <p role="status" className="mt-4 text-sm text-success">
-          {notice}
+        <p
+          role="status"
+          className={`mt-4 text-sm ${
+            notice.tone === 'success' ? 'text-success' : 'text-error'
+          }`}
+        >
+          {notice.message}
         </p>
       )}
 

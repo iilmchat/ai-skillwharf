@@ -69,6 +69,7 @@
     "mcp_unavailable": "The MCP provider is unavailable. Please try again later.",
     "llm_unavailable": "All LLM providers are unavailable or out of daily budget. Please try again later.",
     "marketplace_unavailable": "The marketplace is temporarily unavailable. Please try again later.",
+    "eval_gate_failed": "This version cannot be made active: no passing Eval run was found. Run the automated quality evaluation on the Prompts tab and try again.",
     "invalid_telegram_token": "Telegram rejected the token. Check that it is correct.",
     "telegram_unavailable": "Telegram is temporarily unavailable. Please try again later.",
     "google_oauth_unavailable": "Google OAuth is temporarily unavailable. Please try again later.",
@@ -1124,6 +1125,7 @@
       "empty": "No experiments for this template yet.",
       "stop": "Stop",
       "promoteB": "Make variant B active",
+      "promoteHint": "Variant B must pass an automated quality evaluation (LLM Evals) before promotion.",
       "createdAt": "Started {{date}}",
       "status": {
         "active": "Running",
@@ -1147,6 +1149,42 @@
         "stop": "Could not stop the experiment.",
         "needVersions": "An experiment requires at least two prompt versions.",
         "sameVersion": "Choose different versions for variants A and B."
+      }
+    },
+    "evals": {
+      "title": "Automated quality evaluation (LLM Evals)",
+      "subtitle": "Golden-case evaluation by a second judge model before a prompt version is promoted.",
+      "versionLabel": "Prompt version",
+      "selectVersion": "Select a version",
+      "trackLabel": "Track",
+      "allTracks": "All 12 tracks (A–L)",
+      "track": "Track: {{track}}",
+      "run": "Run Eval",
+      "running": "Running Eval…",
+      "started": "Eval run started.",
+      "loading": "Loading Eval runs…",
+      "empty": "No Eval runs for this template yet.",
+      "details": "Case details ({{count}})",
+      "noResults": "Case results have not been saved yet.",
+      "createdAt": "Started {{date}}",
+      "passRate": "Pass rate: {{value}}%",
+      "avgScore": "Average score: {{value}}",
+      "cases": "Cases: {{passed}} / {{total}}",
+      "status": {
+        "passed": "Passed",
+        "failed": "Failed",
+        "running": "Running"
+      },
+      "case": {
+        "passed": "Passed",
+        "failed": "Failed",
+        "score": "Score: {{score}}"
+      },
+      "errors": {
+        "invalid": "Check the Eval version and track.",
+        "needVersion": "Create a prompt version first.",
+        "load": "Could not load Eval runs.",
+        "run": "Could not start the Eval run."
       }
     },
     "router": {
