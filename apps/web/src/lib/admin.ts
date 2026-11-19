@@ -322,6 +322,159 @@ export interface CreateLlmRouteInput {
  */
 export type UpdateLlmRouteInput = CreateLlmRouteInput;
 
+/**
+ * Финансовый клиринг (Sprint 33, WEB-33.3).
+ *
+ * `GET /admin/billing/treasury` — баланс системного кошелька (комиссия 15%),
+ * счётчики Outbox и последние записи; `GET /admin/billing/reconciliation` —
+ * сверка Ledger и кошельков; `POST /admin/billing/outbox/:id/retry` — ручной
+ * перезапуск сбойной выплаты. Все ответы валидируются Zod: Decimal-строка
+ * бэкенда приводится к числу, статусы — к фиксированному enum.
+ */
+const rubAmountSchema = z.union([
+  z.number().finite(),
+  z
+    .string()
+    .trim()
+    .regex(/^-?\d+(?:\.\d+)?$/, 'ожидается число')
+    .transform((value) => Number(value)),
+]);
+
+export const BILLING_OUTBOX_STATUSES = [
+  'pending',
+  'processing',
+  'sent',
+  'failed_dead',
+] as const;
+
+export type BillingOutboxStatus = (typeof BILLING_OUTBOX_STATUSES)[number];
+
+export const billingOutboxItemSchema = z.object({
+  id: z.string().min(1),
+  eventType: z.string().min(1),
+  /**
+   * Backend отдаёт idempotencyKey в модели Outbox, но не включает его в
+   * список `recent`, поэтому поле необязательно для ответа `/treasury`.
+   */
+  idempotencyKey: z.string().min(1).optional(),
+  status: z.enum(BILLING_OUTBOX_STATUSES),
+  attempts: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  lastError: z.string().nullable().optional(),
+  createdAt: z.string().min(1),
+  sentAt: z.string().nullable().optional(),
+  nextRetryAt: z.string().optional(),
+});
+
+export type BillingOutboxItem = z.infer<typeof billingOutboxItemSchema>;
+
+const outboxCountsSchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return {
+    pending: value.pending,
+    sent: value.sent,
+    failed_dead: value.failed_dead ?? value.failedDead ?? value.deadLetter,
+  };
+}, z.object({
+  pending: z.number().int().nonnegative(),
+  sent: z.number().int().nonnegative(),
+  failed_dead: z.number().int().nonnegative(),
+}));
+
+const treasurySummaryBaseSchema = z.object({
+  treasuryBalanceRub: rubAmountSchema,
+  heldBalanceRub: rubAmountSchema.optional(),
+  counts: outboxCountsSchema,
+  recentOutbox: z.array(billingOutboxItemSchema),
+});
+
+/**
+ * Backend Sprint 33 отдаёт `{ balance: { balance, heldBalance }, outbox,
+ * recent }`, задание описывает плоский `{ treasuryBalanceRub, counts,
+ * recentOutbox }`. Обе формы нормализуются к одному типу.
+ */
+export const treasurySummarySchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const balance = isRecord(value.balance) ? value.balance : undefined;
+  const outbox = isRecord(value.outbox) ? value.outbox : undefined;
+
+  if (balance === undefined || outbox === undefined) {
+    return {
+      treasuryBalanceRub: value.treasuryBalanceRub,
+      heldBalanceRub: value.heldBalanceRub,
+      counts: value.counts,
+      recentOutbox: value.recentOutbox,
+    };
+  }
+
+  return {
+    treasuryBalanceRub: balance.balance,
+    heldBalanceRub: balance.heldBalance,
+    counts: outbox,
+    recentOutbox: value.recent ?? value.recentOutbox,
+  };
+}, treasurySummaryBaseSchema);
+
+export type TreasurySummary = z.infer<typeof treasurySummarySchema>;
+
+const reconciliationReportBaseSchema = z.object({
+  balanced: z.boolean(),
+  discrepancyRub: rubAmountSchema,
+  ledgerNetRub: rubAmountSchema.optional(),
+  walletsTotalRub: rubAmountSchema.optional(),
+});
+
+/** Backend называет поля `ledgerRub`/`walletsRub` — принимаем оба варианта. */
+export const reconciliationReportSchema = z.preprocess((value) => {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return {
+    ...value,
+    ledgerNetRub: value.ledgerNetRub ?? value.ledgerRub,
+    walletsTotalRub: value.walletsTotalRub ?? value.walletsRub,
+  };
+}, reconciliationReportBaseSchema);
+
+export type ReconciliationReport = z.infer<typeof reconciliationReportSchema>;
+
+/** Retry может вернуть подтверждение `{ retried: true, id }` или запись. */
+export const retryOutboxAckSchema = z.object({
+  retried: z.literal(true),
+  id: z.string().min(1),
+});
+
+export type RetryOutboxAck = z.infer<typeof retryOutboxAckSchema>;
+
+const retryOutboxItemResponseSchema = z.preprocess((value) => {
+  if (isRecord(value) && isRecord(value.item)) {
+    return value.item;
+  }
+
+  if (isRecord(value) && isRecord(value.outboxItem)) {
+    return value.outboxItem;
+  }
+
+  return value;
+}, billingOutboxItemSchema);
+
+const retryOutboxResponseSchema = z.union([
+  retryOutboxAckSchema,
+  retryOutboxItemResponseSchema,
+]);
+
+export type RetryOutboxResult =
+  | BillingOutboxItem
+  | RetryOutboxAck
+  | null;
+
 export interface AuditEntry {
   id: string;
   action: string;
@@ -355,6 +508,8 @@ export const adminQueryKeys = {
     ['admin', 'prompts', promptId, 'evals'] as const,
   llmRoutes: ['admin', 'llm-routes'] as const,
   audit: ['admin', 'audit'] as const,
+  treasury: ['admin', 'billing', 'treasury'] as const,
+  reconciliation: ['admin', 'billing', 'reconciliation'] as const,
 };
 
 interface MessagePayload {
@@ -577,6 +732,34 @@ export async function importSkillArchive(file: File): Promise<ImportedSkill> {
   );
 
   return data;
+}
+
+/** GET /api/v1/admin/billing/treasury — кошелёк платформы и очередь Outbox. */
+export async function fetchTreasurySummary(): Promise<TreasurySummary> {
+  const { data } = await api.get<unknown>('/admin/billing/treasury');
+
+  return treasurySummarySchema.parse(data);
+}
+
+/** POST /api/v1/admin/billing/outbox/:id/retry — ручной перезапуск выплаты. */
+export async function retryOutboxItem(id: string): Promise<RetryOutboxResult> {
+  const { data } = await api.post<unknown>(
+    `/admin/billing/outbox/${encodeURIComponent(id)}/retry`,
+  );
+
+  // 204 No Content — допустимый ответ: UI обновит список сам.
+  if (data === undefined || data === null || data === '') {
+    return null;
+  }
+
+  return retryOutboxResponseSchema.parse(data);
+}
+
+/** GET /api/v1/admin/billing/reconciliation — сверка Ledger и кошельков. */
+export async function fetchBillingReconciliation(): Promise<ReconciliationReport> {
+  const { data } = await api.get<unknown>('/admin/billing/reconciliation');
+
+  return reconciliationReportSchema.parse(data);
 }
 
 export function getAdminErrorMessage(

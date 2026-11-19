@@ -1127,6 +1127,7 @@
       "prompts": "Промпты",
       "router": "LLM Роутер",
       "skills": "Навыки",
+      "billing": "Финансы",
       "audit": "Аудит"
     },
     "prompts": {
@@ -1320,6 +1321,58 @@
       "noFile": "Выберите ZIP-архив.",
       "importError": "Не удалось импортировать навык."
     },
+    "billing": {
+      "title": "Финансы и Клиринг",
+      "subtitle": "Комиссия платформы, сверка Ledger и очередь выплат авторам (Sprint 33).",
+      "loading": "Загружаем данные клиринга…",
+      "treasury": {
+        "title": "Кошелёк платформы (Platform Treasury)",
+        "subtitle": "Накопленная комиссия 15% с выплат авторам.",
+        "balanceHint": "Средства доступны для распределения и сверки.",
+        "balance": "Баланс: {{amount}} ₽"
+      },
+      "reconciliation": {
+        "title": "Сверка Ledger (Reconciliation)",
+        "subtitle": "Сравнение проводок Ledger с балансами кошельков.",
+        "refresh": "Обновить сверку",
+        "refreshing": "Обновляем…",
+        "updated": "Сверка обновлена.",
+        "balanced": "Сходится (0 ₽ расхождений)",
+        "discrepancy": "Расхождение: {{amount}} ₽",
+        "ledgerNet": "Ledger: {{amount}} ₽",
+        "walletsTotal": "Кошельки: {{amount}} ₽"
+      },
+      "counts": {
+        "pending": "Ожидают: {{count}}",
+        "sent": "Отправлено: {{count}}",
+        "failed_dead": "Dead Letter: {{count}}"
+      },
+      "status": {
+        "pending": "Ожидает",
+        "processing": "В обработке",
+        "sent": "Отправлено",
+        "failed_dead": "Не отправлено (Dead Letter)"
+      },
+      "outbox": {
+        "title": "Очередь выплат авторам (Billing Outbox)",
+        "subtitle": "Последние записи transactional outbox; сбойные выплаты можно запустить заново.",
+        "empty": "Очередь пуста — последних выплат пока нет.",
+        "attempts": "Попыток: {{attempts}} / {{maxAttempts}}",
+        "retry": "Повторить",
+        "retrying": "Повторяем…",
+        "retryHint": "Повтор доступен для записей Dead Letter.",
+        "retrySuccess": "Выплата поставлена в очередь повторной отправки.",
+        "columns": {
+          "eventType": "Событие",
+          "idempotencyKey": "Idempotency Key",
+          "status": "Статус",
+          "attempts": "Попытки",
+          "createdAt": "Создано",
+          "lastError": "Последняя ошибка",
+          "actions": "Действия"
+        }
+      }
+    },
     "audit": {
       "title": "Аудит",
       "subtitle": "Последние действия администраторов и системы.",
@@ -1347,6 +1400,9 @@
       "createRoute": "Не удалось добавить правило.",
       "updateRoute": "Не удалось сохранить изменения правила.",
       "audit": "Не удалось загрузить журнал аудита.",
+      "treasury": "Не удалось загрузить баланс платформы и очередь выплат.",
+      "reconciliation": "Не удалось загрузить отчёт сверки.",
+      "retryOutbox": "Не удалось перезапустить выплату. Попробуйте ещё раз.",
       "forbiddenTitle": "Доступ запрещён",
       "forbiddenBody": "Для этого раздела нужна роль администратора или владельца."
     }

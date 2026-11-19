@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuditTab } from '../components/admin/AuditTab';
+import { BillingClearingTab } from '../components/admin/BillingClearingTab';
 import { LlmRouterTab } from '../components/admin/LlmRouterTab';
 import { PromptsTab } from '../components/admin/PromptsTab';
 import { SkillsTab } from '../components/admin/SkillsTab';
@@ -11,11 +12,14 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuthStore } from '../store/auth.store';
 
-const TAB_IDS = ['prompts', 'router', 'skills', 'audit'] as const;
+const TAB_IDS = ['prompts', 'router', 'skills', 'billing', 'audit'] as const;
 type AdminTab = (typeof TAB_IDS)[number];
 
 function parseTab(value: string | null): AdminTab {
-  return value === 'router' || value === 'skills' || value === 'audit'
+  return value === 'router' ||
+    value === 'skills' ||
+    value === 'billing' ||
+    value === 'audit'
     ? value
     : 'prompts';
 }
@@ -235,6 +239,7 @@ export function AdminPage() {
             {activeTab === 'prompts' && <PromptsTab />}
             {activeTab === 'router' && <LlmRouterTab />}
             {activeTab === 'skills' && <SkillsTab />}
+            {activeTab === 'billing' && <BillingClearingTab />}
             {activeTab === 'audit' && <AuditTab />}
           </section>
         </div>

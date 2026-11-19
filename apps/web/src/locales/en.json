@@ -1127,6 +1127,7 @@
       "prompts": "Prompts",
       "router": "LLM Router",
       "skills": "Skills",
+      "billing": "Billing",
       "audit": "Audit"
     },
     "prompts": {
@@ -1320,6 +1321,58 @@
       "noFile": "Choose a ZIP archive.",
       "importError": "Could not import the skill."
     },
+    "billing": {
+      "title": "Billing & Clearing",
+      "subtitle": "Platform commission, Ledger reconciliation, and the author payout queue (Sprint 33).",
+      "loading": "Loading clearing data…",
+      "treasury": {
+        "title": "Platform Treasury",
+        "subtitle": "Accumulated 15% commission from author payouts.",
+        "balanceHint": "Funds available for distribution and reconciliation.",
+        "balance": "Balance: {{amount}} ₽"
+      },
+      "reconciliation": {
+        "title": "Ledger Reconciliation",
+        "subtitle": "Comparing Ledger entries with wallet balances.",
+        "refresh": "Refresh reconciliation",
+        "refreshing": "Refreshing…",
+        "updated": "Reconciliation refreshed.",
+        "balanced": "Balanced (0 ₽ discrepancy)",
+        "discrepancy": "Discrepancy: {{amount}} ₽",
+        "ledgerNet": "Ledger: {{amount}} ₽",
+        "walletsTotal": "Wallets: {{amount}} ₽"
+      },
+      "counts": {
+        "pending": "Pending: {{count}}",
+        "sent": "Sent: {{count}}",
+        "failed_dead": "Dead Letter: {{count}}"
+      },
+      "status": {
+        "pending": "Pending",
+        "processing": "Processing",
+        "sent": "Sent",
+        "failed_dead": "Failed (Dead Letter)"
+      },
+      "outbox": {
+        "title": "Author Payout Queue (Billing Outbox)",
+        "subtitle": "Recent transactional outbox entries; failed payouts can be retried manually.",
+        "empty": "The queue is empty — there are no recent payouts.",
+        "attempts": "Attempts: {{attempts}} / {{maxAttempts}}",
+        "retry": "Retry",
+        "retrying": "Retrying…",
+        "retryHint": "Retry is available for Dead Letter entries.",
+        "retrySuccess": "The payout was queued for another delivery attempt.",
+        "columns": {
+          "eventType": "Event",
+          "idempotencyKey": "Idempotency Key",
+          "status": "Status",
+          "attempts": "Attempts",
+          "createdAt": "Created",
+          "lastError": "Last error",
+          "actions": "Actions"
+        }
+      }
+    },
     "audit": {
       "title": "Audit",
       "subtitle": "The latest administrator and system actions.",
@@ -1347,6 +1400,9 @@
       "createRoute": "Could not add the rule.",
       "updateRoute": "Could not save the rule changes.",
       "audit": "Could not load the audit log.",
+      "treasury": "Could not load the platform balance and the payout queue.",
+      "reconciliation": "Could not load the reconciliation report.",
+      "retryOutbox": "Could not restart the payout. Please try again.",
       "forbiddenTitle": "Access denied",
       "forbiddenBody": "This section requires the administrator or owner role."
     }

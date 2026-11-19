@@ -472,6 +472,40 @@ toast. Клик по карточке открывает окно с описа�
 Если API Evals ещё не выкачен (404/501), панель показывает понятное
 локализованное сообщение вместо падения.
 
+## Control Plane: финансы и клиринг
+
+Вкладка «Финансы» / `Billing` на `/admin?tab=billing` (WEB-33.3) показывает
+состояние финансового клиринга Sprint 33 (KI-087). Контракт и клиент живут в
+`src/lib/admin.ts`, все ответы валидируются Zod:
+
+- `treasurySummarySchema`: `treasuryBalanceRub` (число или Decimal-строка),
+  `counts` (`pending`/`sent`/`failed_dead`) и `recentOutbox` — массив
+  `billingOutboxItemSchema` (`id`, `eventType`, `idempotencyKey?`, `status`,
+  `attempts`/`maxAttempts`, `lastError`, `createdAt`, `sentAt`). Схема
+  нормализует фактический ответ бэкенда `{ balance: { balance, heldBalance },
+  outbox: { pending, sent, failedDead }, recent: [...] }` к этому виду;
+  `idempotencyKey` необязателен, потому что backend не включает его в список
+  `recent`.
+- `reconciliationReportSchema`: `balanced`, `discrepancyRub`, необязательные
+  `ledgerNetRub` и `walletsTotalRub` (Decimal-строки приводятся к числам);
+  принимаются также имена бэкенда `ledgerRub`/`walletsRub`.
+- Клиенты: `fetchTreasurySummary()` (`GET /api/v1/admin/billing/treasury`),
+  `fetchBillingReconciliation()` (`GET /api/v1/admin/billing/reconciliation`),
+  `retryOutboxItem(id)` (`POST /api/v1/admin/billing/outbox/:id/retry`;
+  пустое тело 204 допустимо, подтверждение `{ retried: true, id }` и
+  обновлённая запись разбираются Zod).
+
+Вкладка (`src/components/admin/BillingClearingTab.tsx`) содержит три блока:
+карточку «Кошелёк платформы» с накопленной комиссией 15% и счётчиками Outbox,
+карточку «Сверка Ledger» с зелёным бейджем «Сходится (0 ₽ расхождений)» или
+предупреждением о расхождении и кнопкой «Обновить сверку», и таблицу «Очередь
+выплат авторам» со статусом, числом попыток, текстом последней ошибки и
+кнопкой «Повторить» для записей `failed_dead`. RU/EN-ключи —
+`admin.billing.*`, `admin.tabs.billing`, `admin.errors.treasury/reconciliation/retryOutbox`.
+
+Если API клиринга ещё не выкачен (404/501), вкладка показывает локализованное
+сообщение «API управления пока недоступен» вместо падения.
+
 Все страницы (`LoginPage`, `ChatPage`, `SkillsPage`, `MarketplacePage`,
 `FinancePage`) загружаются лениво через `React.lazy` + `Suspense`, поэтому
 основной чанк не превышает 500 КБ.
