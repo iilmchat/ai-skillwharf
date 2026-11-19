@@ -90,7 +90,7 @@
 | KI-084 | Integrations | Средняя | Открыто | `ozon-mcp-server`/`wb-mcp-server` — сторонние пакеты без исходников в `infra/mcp/`; Gateway шлёт per-request заголовки, но серверы по-прежнему читают env контейнера |
 | KI-085 | Security | Средняя | Открыто | Per-request заголовки доверяются внутренней compose-сети; нет OAuth, ротации/отзыва токенов и аудита источника кредов |
 | KI-086 | Frontend/Marketplace | Низкая | Исправлено | Ответ каталога отдаёт `permissions` из SKILL.md, объект `signature` (`verified`/`status`/`publicKeyId`) и `installed` из `InstalledSkill`; с Sprint 31 установки изолированы по `userId`/`workspaceId` (ORG-31.2) |
-| KI-087 | Billing/Marketplace | Средняя | Открыто | Revenue Share: перевод ЮKassa выполняется после коммита BAL и не атомарен с ним; комиссия платформы — информационная проводка на кошельке покупателя, отдельного platform-кошелька нет |
+| KI-087 | Billing/Marketplace | Средняя | Исправлено | Transactional Outbox (`BillingOutbox`) создаётся в транзакции сплита, доставляется с retry/backoff и dead-letter; 15% зачисляются на реальный кошелёк Platform Treasury, отчёт сверки доступен в админ API |
 | KI-088 | Backend/DI | Высокая | Исправлено | `MetricsService` падал при старте NestJS: `UnknownDependenciesException` для примитива `env` в конструкторе; добавлен DI-токен `METRICS_ENV`, `@Optional()` и интеграционный DI-тест |
 
 ## Детали
@@ -2144,9 +2144,24 @@ append-only Ledger в одной транзакции (debit покупател�
 `revenue-share:<idempotencyKey>`. Для ручного контроля использовать историю
 Ledger (`type=author_revenue_share`/`platform_fee`) и логи ЮKassa.
 
-**План:** Отдельный platform-кошелёк (или accounting-счёт) с реальным credit
-комиссии, outbox-таблица для отложенных переводов с retry и согласование
-статусов переводов с Journal API ЮKassa.
+**Исправлено (Sprint 33, OUTBOX-33.1/33.2):**
+
+- `BillingOutbox` создаётся внутри `$transaction` сплита: перевод автору больше
+  не зависит от доступности ЮKassa в момент списания. Задача имеет
+  детерминированный `idempotencyKey` (`revenue-share:<key>`), поэтому
+  повторная доставка не создаёт второй перевод.
+- `BillingOutboxService.processPendingBatch` доставляет задачи с atomic-claim
+  (`pending → processing`), exponential backoff `2^attempts × 30s` и
+  `failed_dead` после `maxAttempts`; ручной ретрай — `retryDeadLetter`. Тик
+  отключается `BILLING_OUTBOX_POLL_MS=0`.
+- Комиссия 15% зачисляется на реальный кошелёк системного пользователя
+  `treasury@system.skillwharf.local` (`type=platform_fee`, баланс увеличивается).
+- Админ API: `GET /admin/billing/treasury`, `POST /admin/billing/outbox/:id/retry`,
+  `GET /admin/billing/reconciliation` (credit − debit vs balance + heldBalance,
+  `balanced`/`discrepancyRub`).
+
+**Остаток:** сверка с Journal API ЮKassa (OUTBOX-33.3) не реализована —
+отчёт `reconciliation` сравнивает только внутренние BAL/Ledger данные.
 
 ### KI-088 — Падение старта api из-за DI-зависимости MetricsService
 

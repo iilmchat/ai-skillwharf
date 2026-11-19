@@ -121,13 +121,19 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 33 — Transactional Outbox & Platform Treasury
 
-* [ ] **[OUTBOX-33.1]** Паттерн Transactional Outbox (`BillingOutbox` + BullMQ)
-  для гарантированной доставки выплат Revenue Share 85/15 в ЮKassa — закрытие
+* [x] **[OUTBOX-33.1]** Паттерн Transactional Outbox (`BillingOutbox`) для
+  гарантированной доставки выплат Revenue Share 85/15 в ЮKassa — закрытие
   **KI-087** (перевод больше не теряется при недоступности провайдера).
-* [ ] **[OUTBOX-33.2]** Системный кошелёк платформы (platform treasury) с
+* [x] **[OUTBOX-33.2]** Системный кошелёк платформы (platform treasury) с
   реальным credit комиссии `platform_fee` вместо информационной проводки.
 * [ ] **[OUTBOX-33.3]** Периодическая сверка биллинга: Ledger ↔
   Journal ЮKassa, отчёт по расхождениям и алерт при рассинхроне.
+* [x] **[WEB-33.3]** UI Control Plane: вкладка «Финансы и Клиринг» на
+  `/admin?tab=billing` — кошелёк платформы (комиссия 15%), карточка сверки
+  Ledger с бейджем «Сходится (0 ₽ расхождений)» и кнопкой обновления, таблица
+  Billing Outbox со счётчиками, статусами, попытками, ошибками и кнопкой
+  «Повторить» для `failed_dead`; Zod-клиент `/admin/billing/*`, RU/EN,
+  unit-тесты (без коммита, изменения в рабочем дереве).
 
 ### Sprint 34 — Cloud KMS / HashiCorp Vault & High Availability
 
@@ -174,3 +180,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | 2026-11-19 | Sprint 30 (30.1–30.3) | OpenCode / UI / Infra | Выполнено | Граф LangGraph с узлом `supervisor`, `agent_handoff` и лимитом `MULTI_AGENT_MAX_HANDOFFS`; `SemanticCacheService` (Redis + косинус, изоляция по userId/promptVersionId/model, bypass инструментов, `cacheHit:true` без списания в Ledger), метрики hits/misses; лента handoff'ов и подсветка ролей в AI-Офисе, бейдж «Из кеша · 0 ₽» в чате; дашборд Grafana `evals-and-cache.json` и env для кеша/лимита передач; RU/EN и 13 unit-тестов | GRAPH-30.2 (сквозной trace_id в Tempo) и алерты Evals — остаток |
 | 2026-11-19 | Sprint 31 (31.1–31.4, KI-088) | OpenCode / UI | Выполнено | Модели `Organization`/`Workspace`/`WorkspaceMember` + миграция, автосоздание дефолтной структуры, REST `/workspaces` и управление участниками, `WorkspaceContextGuard` (`X-Workspace-Id`), RBAC/ABAC-гейты для платных инструментов и HITL-лимита, per-user/per-workspace `InstalledSkill`; `WorkspaceSwitcher`, страница `/app/team`, заголовок `X-Workspace-Id` и инвалидация кэшей; хотфикс DI `METRICS_ENV` и тест сборки `MetricsModule`; RU/EN и ~30 unit-тестов | KI-086 закрыт полностью; KI-088 исправлен |
 | 2026-11-19 | Sprint 32 (32.1–32.3) | OpenCode / UI / Infra | Выполнено | MCP-сервер `1c-mcp` (OData, per-request креды, 4 инструмента, тесты); API 1С (`POST/DELETE /integrations/1c` с проверкой `$metadata`, `onec_*`, стартовый навык H/J/K/L) и Event-Driven webhook-триггеры (`WebhookTrigger`, CRUD `/triggers`, constant-time секрет, лимит 32 КБ); карточка 1С и секция «Вебхук-триггеры» в `/app/settings`, RU/EN и unit-тесты | — |
+| 2026-11-19 | Sprint 33 (33.1–33.3) | OpenCode / UI | Выполнено | `BillingOutbox` + миграция, outbox в транзакции сплита, `BillingOutboxService` с backoff/dead-letter и тиком (`BILLING_OUTBOX_POLL_MS`), Platform Treasury с реальным `platform_fee`, админ API `/admin/billing/{treasury,reconciliation,outbox/:id/retry}`; вкладка «Финансы и Клиринг» на `/admin?tab=billing` с карточкой кошелька, сверкой и таблицей Outbox; RU/EN и 30 unit-тестов | KI-087 закрыт; OUTBOX-33.3 (сверка с Journal) — остаток |

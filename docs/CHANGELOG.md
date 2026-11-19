@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+### Sprint 33: Transactional Outbox, Platform Treasury и клиринг в Admin
+
+**Бэкенд и композиция (OUTBOX-33.1 / OUTBOX-33.2, KI-087).**
+
+- Модель `BillingOutbox` + миграция: выплата автору 85% попадает в БД **в той же
+  транзакции**, что и списание покупателя и сплит Ledger; ключ идемпотентности
+  `revenue-share:<idempotencyKey>` исключает дубли переводов (KI-087).
+- `BillingOutboxService`: atomic-claim задач, отправка через
+  `YooKassaProvider.createTransfer`, exponential backoff `2^attempts × 30s`,
+  `failed_dead` после 5 попыток, `retryDeadLetter` и периодический тик с
+  `unref()` (`BILLING_OUTBOX_POLL_MS=15000`, `0` — отключить).
+- Platform Treasury: системный пользователь `treasury@system.skillwharf.local`
+  создаётся лениво, комиссия 15% реально увеличивает его `Wallet.balance`
+  проводкой `platform_fee` (вместо информационной записи на кошельке покупателя).
+- Админ API (роли admin/owner): `GET /admin/billing/treasury`,
+  `POST /admin/billing/outbox/:id/retry`, `GET /admin/billing/reconciliation`
+  с флагом `balanced` и `discrepancyRub`.
+- Тесты: outbox + treasury в одной транзакции, backoff и dead-letter, ручной
+  ретрай, reconciliation, без payout-аккаунта outbox не создаётся.
+  `pnpm test` — 1608 тестов.
+
+**Web UI: вкладка «Финансы и Клиринг» (WEB-33.3).**
+
+- `src/lib/admin.ts`: Zod-контракты финансового клиринга —
+  `billingOutboxItemSchema` (статусы `pending|processing|sent|failed_dead`,
+  `attempts`/`maxAttempts`, `lastError`, `createdAt`, `sentAt`),
+  `treasurySummarySchema` (`treasuryBalanceRub` как число или Decimal-строка,
+  `counts` и `recentOutbox`), `reconciliationReportSchema` (`balanced`,
+  `discrepancyRub`, необязательные `ledgerNetRub`/`walletsTotalRub`).
+  Decimal-строки приводятся к числам; счётчик `failed_dead` принимает алиас
+  `failedDead`. Клиенты `fetchTreasurySummary`, `fetchBillingReconciliation`
+  и `retryOutboxItem` (с разбором обновлённой записи или пустого ответа 204)
+  для эндпоинтов `/admin/billing/*`. Новые ключи в `adminQueryKeys`.
+- `src/components/admin/BillingClearingTab.tsx` (новый): вкладка «Финансы»
+  на `/admin?tab=billing` — карточка «Кошелёк платформы (Platform Treasury)»
+  с балансом комиссии 15% и счётчиками Outbox, карточка «Сверка Ledger»
+  со статусом «Сходится (0 ₽ расхождений)» или предупреждением о расхождении
+  и кнопкой «Обновить сверку», таблица «Очередь выплат авторам» со статусами,
+  числом попыток, последней ошибкой и кнопкой «Повторить» для `failed_dead`.
+  Состояния загрузки/ошибки/пустоты и локализованные сообщения.
+- `src/pages/AdminPage.tsx`: новая вкладка `billing` в `TAB_IDS`, `parseTab`,
+  таб-листе и рендере панели (поддержка стрелок Home/End сохраняется).
+- RU/EN-ключи `admin.tabs.billing`, `admin.billing.*` и
+  `admin.errors.treasury/reconciliation/retryOutbox`.
+- Unit-тесты `src/lib/admin-billing.test.ts` (18 тестов): схемы, клиенты,
+  coercion Decimal-строк, пустой ответ retry и кодирование id.
+
+Переменная `BILLING_OUTBOX_POLL_MS` проброшена в сервис `api` в
+`docker-compose.yml`. UI устойчив к отсутствию эндпоинтов (404/501) и
+показывает локализованное сообщение. Внешняя сверка с Journal ЮKassa
+(`OUTBOX-33.3`) остаётся отдельной задачей.
+
 ### Sprint 32: 1С OData, Event-Driven триггеры и настройки в UI
 
 **Бэкенд: провайдер 1С и вебхук-триггеры (CONNECT-32.1/32.2).**
