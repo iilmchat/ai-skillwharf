@@ -79,13 +79,18 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 31 — Organizations, Workspaces & Granular RBAC
 
-* [ ] **[ORG-31.1]** Иерархия `Organization -> Workspace -> Members`: модели,
-  миграции и API управления membership с приглашениями.
-* [ ] **[ORG-31.2]** Детальная матрица прав: RBAC на ресурсы + ABAC на лимиты
+* [x] **[ORG-31.1]** Иерархия `Organization -> Workspace -> Members`: модели,
+  миграции и API управления membership с приглашениями (бэкенд — см. журнал).
+* [x] **[ORG-31.2]** Детальная матрица прав: RBAC на ресурсы + ABAC на лимиты
   HITL (кто может одобрять, лимиты сумм и дневные бюджеты).
-* [ ] **[ORG-31.3]** Per-user привязка установленных навыков
-  (`InstalledSkill.userId`) — закрытие остатка **KI-086** (флаг «Установлено»
-  в витрине становится персональным).
+* [x] **[ORG-31.3]** Per-user/per-workspace привязка установленных навыков
+  (`InstalledSkill.userId`/`workspaceId`) — полное закрытие **KI-086**.
+* [x] **[WEB-31.4]** UI воркспейсов: переключатель активного воркспейса с
+  ролью в шапке/сайдбаре, заголовок `X-Workspace-Id` во всех запросах и
+  инвалидация кэшей при смене; страница «Команда и доступ» с таблицей
+  участников, ролями `owner/admin/operator/viewer`, лимитом HITL и формами
+  добавления/обновления (UI-часть **ORG-31.1/ORG-31.2**; без коммита, изменения
+  в рабочем дереве).
 
 ### Sprint 32 — Native 1C:Enterprise / 1C:Fresh & Event-Driven Webhooks
 
@@ -157,3 +162,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-19 | Sprint 29 (29.1–29.4, 29.5) | OpenCode / UI / Infra | Выполнено | 12 золотых датасетов A–L (36 кейсов), `scripts/run-evals.mjs` с прогоном через `POST /prompts/:id/evals/run` и CI-валидацией; `PromptEvalRun` + `PromptEvalsService` (детерминированные метрики tool_calls/HITL + LLM-судья с Zod, mock-режим), `EVALS_MIN_PASS_RATE`; гейт промоушена `errors.eval_gate_failed`; панель LLM Evals в `/admin`; дашборд Grafana `evals-and-cache.json` + env для Semantic Cache и MULTI_AGENT_MAX_HANDOFFS | Алерты на деградации — отдельная задача |
 | 2026-11-19 | Sprint 30 (30.1–30.3) | OpenCode / UI / Infra | Выполнено | Граф LangGraph с узлом `supervisor`, `agent_handoff` и лимитом `MULTI_AGENT_MAX_HANDOFFS`; `SemanticCacheService` (Redis + косинус, изоляция по userId/promptVersionId/model, bypass инструментов, `cacheHit:true` без списания в Ledger), метрики hits/misses; лента handoff'ов и подсветка ролей в AI-Офисе, бейдж «Из кеша · 0 ₽» в чате; дашборд Grafana `evals-and-cache.json` и env для кеша/лимита передач; RU/EN и 13 unit-тестов | GRAPH-30.2 (сквозной trace_id в Tempo) и алерты Evals — остаток |
+| 2026-11-19 | Sprint 31 (31.1–31.4, KI-088) | OpenCode / UI | Выполнено | Модели `Organization`/`Workspace`/`WorkspaceMember` + миграция, автосоздание дефолтной структуры, REST `/workspaces` и управление участниками, `WorkspaceContextGuard` (`X-Workspace-Id`), RBAC/ABAC-гейты для платных инструментов и HITL-лимита, per-user/per-workspace `InstalledSkill`; `WorkspaceSwitcher`, страница `/app/team`, заголовок `X-Workspace-Id` и инвалидация кэшей; хотфикс DI `METRICS_ENV` и тест сборки `MetricsModule`; RU/EN и ~30 unit-тестов | KI-086 закрыт полностью; KI-088 исправлен |

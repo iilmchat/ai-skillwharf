@@ -89,8 +89,9 @@
 | KI-083 | Integrations | Низкая | Открыто | Live-проверки Битрикс24/МойСклада есть в `test-integrations.sh`, но не запускаются в CI без секретов и проверяют только read-only profile/organization |
 | KI-084 | Integrations | Средняя | Открыто | `ozon-mcp-server`/`wb-mcp-server` — сторонние пакеты без исходников в `infra/mcp/`; Gateway шлёт per-request заголовки, но серверы по-прежнему читают env контейнера |
 | KI-085 | Security | Средняя | Открыто | Per-request заголовки доверяются внутренней compose-сети; нет OAuth, ротации/отзыва токенов и аудита источника кредов |
-| KI-086 | Frontend/Marketplace | Низкая | Исправлено | Ответ каталога отдаёт `permissions` из SKILL.md, объект `signature` (`verified`/`status`/`publicKeyId`) и `installed` из `InstalledSkill`; контракт совпадает с Zod-схемой витрины |
+| KI-086 | Frontend/Marketplace | Низкая | Исправлено | Ответ каталога отдаёт `permissions` из SKILL.md, объект `signature` (`verified`/`status`/`publicKeyId`) и `installed` из `InstalledSkill`; с Sprint 31 установки изолированы по `userId`/`workspaceId` (ORG-31.2) |
 | KI-087 | Billing/Marketplace | Средняя | Открыто | Revenue Share: перевод ЮKassa выполняется после коммита BAL и не атомарен с ним; комиссия платформы — информационная проводка на кошельке покупателя, отдельного platform-кошелька нет |
+| KI-088 | Backend/DI | Высокая | Исправлено | `MetricsService` падал при старте NestJS: `UnknownDependenciesException` для примитива `env` в конструкторе; добавлен DI-токен `METRICS_ENV`, `@Optional()` и интеграционный DI-тест |
 
 ## Детали
 
@@ -2119,11 +2120,12 @@ append-only логе и проверку прав на вызов конкрет
   переживает перезагрузку страницы — UI больше не хранит флаг локально.
   `userId` из JWT передаётся в `listSkills(query, userId)`.
 
-**Остаточное ограничение:** в текущей схеме `InstalledSkill` глобальный — у
-неё нет колонки `userId`, поэтому фильтр `where: { userId, marketplaceSlug:
-{ in: slugs } }` пока не может быть применён без миграции. Флаг `installed`
-отражает факт установки навыка в инстансе, а не per-user. Per-user установки
-потребуют отдельной задачи и миграции; контракт ответа при этом не изменится.
+**Полное закрытие (Sprint 31, ORG-31.2):** `InstalledSkill` получил nullable
+`userId` и `workspaceId` (миграция, составной уникальный ключ
+`(name, userId, workspaceId)`). `MarketplaceService.install` пишет оба поля,
+а `listSkills(query, userId, workspaceId)` фильтрует установки строго по
+текущему пользователю/воркспейсу. Без `userId` сохраняется прежнее глобальное
+поведение для легаси-клиентов и тестов. Контракт ответа витрины не изменился.
 
 ### KI-087 — Revenue Share: перевод ЮKassa не атомарен с BAL
 
@@ -2145,3 +2147,25 @@ Ledger (`type=author_revenue_share`/`platform_fee`) и логи ЮKassa.
 **План:** Отдельный platform-кошелёк (или accounting-счёт) с реальным credit
 комиссии, outbox-таблица для отложенных переводов с retry и согласование
 статусов переводов с Journal API ЮKassa.
+
+### KI-088 — Падение старта api из-за DI-зависимости MetricsService
+
+**Влияние:** Smoke-запуск Docker-контейнера `api` в GitHub Actions падал при
+создании NestJS-приложения: `UnknownDependenciesException: Nest can't resolve
+dependencies of the MetricsService (?)`. Причина — конструктор
+`constructor(env: NodeJS.ProcessEnv = process.env)`: TypeScript генерирует
+`design:paramtypes = [Object]`, и Nest пытался внедрить примитив как сервис,
+хотя в `MetricsModule` такого провайдера не было.
+
+**Исправлено (хотфикс Sprint 31):**
+
+- Введён явный DI-токен `METRICS_ENV` и провайдер `useValue: process.env` в
+  `MetricsModule`; конструктор использует `@Optional() @Inject(METRICS_ENV)`.
+  Значение по умолчанию `process.env` сохранено — прямые unit-вызовы
+  `new MetricsService()` работают как раньше.
+- Аналогично помечен `@Optional()` примитивный `env` в
+  `SkillSignatureService` — следующий кандидат на ту же ошибку старта.
+- Добавлены интеграционные DI-тесты `Test.createTestingModule({ imports:
+  [MetricsModule] }).compile()` + `moduleRef.get(MetricsService)` и проверка
+  переопределения токена: ошибки такого класса теперь ловятся в `pnpm test`
+  до CI.

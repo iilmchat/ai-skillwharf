@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+### Sprint 31: мульти-тенантность, команды и хотфикс DI (KI-086/088)
+
+**Хотфикс KI-088 (DI-контейнер).**
+
+- `MetricsService`: конструктор принимал `env: NodeJS.ProcessEnv = process.env`
+  без DI-декораторов — Nest resolver видел `design:paramtypes = [Object]` и
+  падал с `UnknownDependenciesException` при старте контейнера. Добавлены токен
+  `METRICS_ENV`, провайдер `useValue: process.env` в `MetricsModule` и
+  `@Optional() @Inject(METRICS_ENV)` в конструкторе.
+- `SkillSignatureService`: тот же примитивный `env` помечен `@Optional()` как
+  профилактика следующей DI-ошибки старта.
+- Тест `Test.createTestingModule({ imports: [MetricsModule] }).compile()` +
+  `moduleRef.get(MetricsService)` и переопределение `METRICS_ENV` — теперь
+  DI-проблемы ловятся в `pnpm test`, а не в CI smoke-запуске.
+
+**Бэкенд (ORG-31.1 / ORG-31.2 / ORG-31.3).**
+
+- Модели `Organization`, `Workspace`, `WorkspaceMember` + миграция; `InstalledSkill`
+  получил nullable `userId`/`workspaceId` и составной уникальный ключ
+  `(name, userId, workspaceId)` (полное закрытие KI-086).
+- `AuthService.register` создаёт дефолтные organization/workspace с ролью
+  `owner`; для существующих пользователей структура инициализируется лениво
+  при первом запросе к `/workspaces`.
+- `WorkspacesController` (`/api/v1/workspaces`): список воркспейсов с ролью и
+  лимитом HITL, создание воркспейса, управление участниками по email
+  (роли `admin`/`operator`/`viewer` и `hitlApprovalLimitRub`).
+- `WorkspaceContextGuard` читает `X-Workspace-Id`, проверяет членство и
+  откатывается на дефолтный воркспейс. `viewer` не может запускать платные
+  инструменты и одобрять HITL (`403 errors.insufficient_workspace_role`);
+  превышение суммы одобрения — `403 errors.hitl_limit_exceeded`.
+- `MarketplaceService` пишет `userId`/`workspaceId` в `InstalledSkill` и
+  вычисляет `installed` строго для текущего пользователя/воркспейса.
+- Тесты: автосоздание дефолтной структуры, управление участниками, запреты
+  для viewer, ABAC-лимит, изоляция `installed` между пользователями.
+  `pnpm test` — 1533 теста.
+
+**Web UI (WEB-31.4).**
+
+- `src/lib/workspaces.ts`: Zod-схемы `workspaceSchema`, `workspaceMemberSchema`,
+  роли `owner/admin/operator/viewer`, лимит HITL в форматах число/строка/`null`;
+  клиенты `fetchWorkspaces`, `createWorkspace`, `fetchWorkspaceMembers`,
+  `addWorkspaceMember`, `updateWorkspaceMember`, ключ i18n для ошибок
+  `errors.insufficient_workspace_role` и `errors.hitl_limit_exceeded`.
+- `api.ts` добавляет `X-Workspace-Id` из активного воркспейса во все запросы;
+  `store/workspace.store.ts` сохраняет выбор в localStorage. При смене
+  воркспейса инвалидируются кэши чатов, навыков, маркетплейса и интеграций.
+- `WorkspaceSwitcher` в сайдбаре и на странице команды: компактный селектор с
+  названием и ролью, создание воркспейса через `<dialog>`.
+- Новая защищённая страница `/app/team` с таблицей участников, ролями,
+  лимитом автоодобрения HITL и формой добавления (owner/admin); пункт
+  «Команда» / `Team` добавлен в навигацию. RU/EN-ключи и unit-тесты.
+
 ### Sprint 30: Multi-Agent Supervisor, Semantic Cache и дашборд Evals/Cache
 
 **GRAPH-30.1 / CACHE-30.1 / CACHE-30.2 (бэкенд и worker).**
