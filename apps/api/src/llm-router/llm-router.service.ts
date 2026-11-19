@@ -30,6 +30,9 @@ export interface LlmRouteSelection {
   taskType: string;
   /** Дневной лимит затрат на маршрут в рублях; `null` — без лимита. */
   dailyCostLimit: number | null;
+  /** Per-model тарифы ₽/1000 токенов (API-28.2). */
+  inputCostPer1k?: number;
+  outputCostPer1k?: number;
 }
 
 /** Маршрут с алиасом `model` для Control Plane UI. */
@@ -343,6 +346,12 @@ function toSelection(route: LlmRoute): LlmRouteSelection {
     apiKeyEnvVar: route.apiKeyEnvVar,
     taskType: route.taskType,
     dailyCostLimit: toNumber(route.dailyCostLimit),
+    ...(route.inputCostPer1k === null
+      ? {}
+      : { inputCostPer1k: toNumber(route.inputCostPer1k) ?? undefined }),
+    ...(route.outputCostPer1k === null
+      ? {}
+      : { outputCostPer1k: toNumber(route.outputCostPer1k) ?? undefined }),
   };
 }
 

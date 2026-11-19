@@ -16,6 +16,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CreatePromptVersionDto } from './dto/create-prompt-version.dto.js';
+import type { ExperimentView } from './prompt-experiment.schemas.js';
 import { PromptsService, type PromptTemplateView } from './prompts.service.js';
 
 interface AuthenticatedRequest extends Request {
@@ -52,5 +53,47 @@ export class PromptsController {
     }
 
     return this.promptsService.createVersion(id, dto.content, userId);
+  }
+
+  /** Список A/B-экспериментов шаблона с усреднёнными метриками. */
+  @Get(':id/experiments')
+  experiments(@Param('id') id: string): Promise<ExperimentView[]> {
+    return this.promptsService.listExperiments(id);
+  }
+
+  /** Запуск A/B-эксперимента (только один running на шаблон). */
+  @Post(':id/experiments')
+  @HttpCode(HttpStatus.CREATED)
+  startExperiment(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<ExperimentView> {
+    return this.promptsService.startExperiment(id, body, this.userId(request));
+  }
+
+  /** Остановка эксперимента с опциональным промоушеном победителя. */
+  @Post('experiments/:expId/stop')
+  @HttpCode(HttpStatus.OK)
+  stopExperiment(
+    @Req() request: AuthenticatedRequest,
+    @Param('expId') expId: string,
+    @Body() body: unknown,
+  ): Promise<ExperimentView> {
+    return this.promptsService.stopExperiment(
+      expId,
+      body ?? {},
+      this.userId(request),
+    );
+  }
+
+  private userId(request: AuthenticatedRequest): string {
+    const id = request.user?.userId;
+
+    if (!id) {
+      throw new UnauthorizedException('Пользователь не аутентифицирован');
+    }
+
+    return id;
   }
 }

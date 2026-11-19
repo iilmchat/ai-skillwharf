@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EmbeddingsService } from './embeddings.service.js';
+import { PgVectorMemoryStore, VECTOR_MEMORY_STORE } from './vector-store.js';
+import type { IVectorMemoryStore } from './vector-store.js';
 
 /** Сколько похожих фрагментов памяти добавляем в промпт. */
 export const MEMORY_TOP_K = 3;
@@ -8,11 +10,21 @@ export const MEMORY_TOP_K = 3;
 /** Максимальная длина одного фрагмента памяти (защита от раздувания промпта). */
 export const MEMORY_CHUNK_MAX_CHARS = 2_000;
 
-/** Фрагмент памяти в ответе read-API (`createdAt` — ISO 8601). */
+/** Фрагмент памяти в ответе read-API (даты — ISO 8601). */
 export interface MemoryItem {
   id: string;
   content: string;
   createdAt: string;
+  /** Источник: chat | document | ...; null для старых записей. */
+  source: string | null;
+  /** Тип: fact | preference | summary. */
+  kind: string;
+  updatedAt: string;
+}
+
+export interface RememberOptions {
+  readonly source?: string;
+  readonly kind?: string;
 }
 
 /** Параметры страницы read-API памяти (уже провалидированы Zod). */
@@ -38,17 +50,26 @@ export interface MemoryList {
 export class MemoryService {
   private readonly logger = new Logger(MemoryService.name);
 
+  private readonly store: IVectorMemoryStore;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly embeddings: EmbeddingsService,
-  ) {}
+    @Optional() @Inject(VECTOR_MEMORY_STORE) store?: IVectorMemoryStore,
+  ) {
+    this.store = store ?? new PgVectorMemoryStore(prisma);
+  }
 
   /**
    * Сохраняет сообщение как фрагмент памяти. Без настроенного API
    * эмбеддингов или при ошибке БД просто пропускает запись: память не
    * должна ломать основной диалог.
    */
-  async remember(userId: string, content: string): Promise<void> {
+  async remember(
+    userId: string,
+    content: string,
+    options: RememberOptions = {},
+  ): Promise<void> {
     const trimmed = content.trim();
 
     if (trimmed === '' || !this.embeddings.isConfigured()) {
@@ -66,16 +87,20 @@ export class MemoryService {
         data: {
           userId,
           content: trimmed.slice(0, MEMORY_CHUNK_MAX_CHARS),
+          ...(options.source === undefined ? {} : { source: options.source }),
+          ...(options.kind === undefined ? {} : { kind: options.kind }),
         },
         select: { id: true },
       });
 
-      // `embedding` — Unsupported в Prisma, поэтому пишем его raw-запросом.
-      await this.prisma.$executeRaw`
-        UPDATE "MemoryChunk"
-        SET "embedding" = ${toVectorLiteral(embedding)}::vector
-        WHERE "id" = ${chunk.id}
-      `;
+      await this.store.upsert({
+        id: chunk.id,
+        userId,
+        content: trimmed.slice(0, MEMORY_CHUNK_MAX_CHARS),
+        embedding,
+        source: options.source ?? null,
+        kind: options.kind ?? 'fact',
+      });
     } catch (error) {
       this.logger.warn(
         `Не удалось сохранить фрагмент памяти: ${describe(error)}`,
@@ -101,15 +126,7 @@ export class MemoryService {
     const safeLimit = Math.max(1, Math.min(limit, 10));
 
     try {
-      const rows = await this.prisma.$queryRaw<{ content: string }[]>`
-        SELECT "content"
-        FROM "MemoryChunk"
-        WHERE "userId" = ${userId} AND "embedding" IS NOT NULL
-        ORDER BY "embedding" <=> ${toVectorLiteral(embedding)}::vector
-        LIMIT ${safeLimit}
-      `;
-
-      return rows.map((row) => row.content);
+      return [...(await this.store.search(userId, embedding, safeLimit))];
     } catch (error) {
       this.logger.warn(`Не удалось найти фрагменты памяти: ${describe(error)}`);
 
@@ -132,9 +149,7 @@ export class MemoryService {
    * Возвращает количество удалённых фрагментов.
    */
   async clear(userId: string): Promise<number> {
-    const { count } = await this.prisma.memoryChunk.deleteMany({
-      where: { userId },
-    });
+    const count = await this.store.deleteAll(userId);
 
     this.logger.log(`Удалено ${count} фрагментов памяти user=${userId}`);
 
@@ -154,7 +169,14 @@ export class MemoryService {
         orderBy: { createdAt: 'desc' },
         skip: query.offset,
         take: query.limit,
-        select: { id: true, content: true, createdAt: true },
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+          source: true,
+          kind: true,
+          updatedAt: true,
+        },
       }),
       this.prisma.memoryChunk.count({ where }),
     ]);
@@ -164,6 +186,9 @@ export class MemoryService {
         id: row.id,
         content: row.content,
         createdAt: row.createdAt.toISOString(),
+        source: row.source,
+        kind: row.kind,
+        updatedAt: row.updatedAt.toISOString(),
       })),
       total,
     };

@@ -4,6 +4,8 @@ import {
   Counter,
   Registry,
 } from '@prometheus-io/client';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 
 /**
  * Метрики Prometheus. Реестр собственный, чтобы в тестах и в приложении не
@@ -42,9 +44,20 @@ export class MetricsService {
     registers: [this.registry],
   });
 
-  constructor() {
+  private readonly hashTenantId: boolean;
+
+  constructor(env: NodeJS.ProcessEnv = process.env) {
     // process_*, nodejs_* — стандартные метрики клиента Prometheus.
     collectDefaultMetrics({ register: this.registry });
+
+    const production = z.literal('production').safeParse(env.NODE_ENV).success;
+    const flag = z.enum(['true', 'false']).catch(
+      production ? 'true' : 'false',
+    );
+
+    this.hashTenantId =
+      flag.parse((env.METRICS_HASH_TENANT_ID ?? '').trim().toLowerCase()) ===
+      'true';
   }
 
   observeHttpRequest(method: string, route: string, status: number): void {
@@ -89,13 +102,27 @@ export class MetricsService {
     if (cost > 0) {
       this.llmCostTotal.inc(
         {
-          tenant_id: tenantId || 'anonymous',
+          tenant_id: this.labelTenantId(tenantId),
           model: model || 'unknown',
           agent_id: agentId || 'unknown',
         },
         cost,
       );
     }
+  }
+
+  /**
+   * Защита от взрыва кардинальности (KI-040): в production tenant_id —
+   * короткий хеш, а не raw userId. Явный флаг может включить/выключить это.
+   */
+  private labelTenantId(tenantId: string): string {
+    if (tenantId === '') {
+      return 'anonymous';
+    }
+
+    return this.hashTenantId
+      ? `t_${createHash('sha256').update(tenantId).digest('hex').slice(0, 12)}`
+      : tenantId;
   }
 
   async render(): Promise<{ contentType: string; body: string }> {

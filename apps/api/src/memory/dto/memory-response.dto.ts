@@ -15,6 +15,10 @@ export const MemoryItemSchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
   createdAt: IsoDateTimeSchema,
+  /** Метаданные KI-024: nullable/optional для совместимости со старыми записями. */
+  source: z.string().nullable().optional(),
+  kind: z.string().optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
 });
 
 /** Ответ `GET /api/v1/chat/memory`: страница фрагментов и общее количество. */

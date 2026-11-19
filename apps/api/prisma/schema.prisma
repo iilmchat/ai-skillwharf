@@ -87,7 +87,12 @@ model MemoryChunk {
   userId    String
   content   String
   embedding Unsupported("vector(1536)")?
-  createdAt DateTime                     @default(now())
+  /// Источник фрагмента: chat | document | ... (KI-024).
+  source    String?
+  /// Тип фрагмента: fact | preference | summary (KI-024).
+  kind      String   @default("fact")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
 }
@@ -188,6 +193,7 @@ model PromptTemplate {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
   versions    PromptVersion[]
+  experiments PromptExperiment[]
 }
 
 /// Версия содержимого промпта. Активной считается последняя версия.
@@ -201,6 +207,27 @@ model PromptVersion {
 
   @@unique([templateId, version])
   @@index([templateId, createdAt])
+}
+
+/// A/B-эксперимент над версиями системного промпта (WEB-28.1 / KI-009).
+/// Трафик делится детерминированно по хешу conversationId.
+model PromptExperiment {
+  id                String    @id @default(uuid())
+  promptId          String
+  name              String
+  variantAVersionId String
+  variantBVersionId String
+  /// Доля трафика, направляемая в вариант B (0..100).
+  trafficSplitB     Int
+  status            String    @default("running")
+  winnerVersionId   String?
+  /// Агрегаты: запросы, средняя latency (мс), средняя стоимость (₽) по A/B.
+  metricsJson       Json?
+  createdAt         DateTime  @default(now())
+  stoppedAt         DateTime?
+  prompt            PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([promptId, status])
 }
 
 /// Правило выбора LLM-провайдера. Меньший priority выбирается первым.
@@ -218,6 +245,9 @@ model LlmRoute {
   taskType     String   @default("chat")
   /// Дневной лимит затрат на маршрут (₽). NULL — без лимита.
   dailyCostLimit Decimal? @db.Decimal(18, 2)
+  /// Per-model тарифы (₽ за 1000 токенов). NULL — fallback на env/JSON.
+  inputCostPer1k  Decimal? @db.Decimal(18, 6)
+  outputCostPer1k Decimal? @db.Decimal(18, 6)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

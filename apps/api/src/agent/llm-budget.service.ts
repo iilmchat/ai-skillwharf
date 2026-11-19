@@ -9,11 +9,16 @@ import { ERROR_KEYS } from '../i18n/error-keys.js';
 import { MetricsService } from '../metrics/metrics.service.js';
 import { recordGenAiUsageSpan } from '../observability/tracing.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  calculateModelCost,
+  LLM_COST_PER_1K_TOKENS,
+  resolveModelPricing,
+} from '../llm-router/model-pricing.js';
 import type { LlmRouteSelection, TokenUsage } from './contracts.js';
 import { DailyTokenLimitException } from './llm-budget.errors.js';
 
-/** Стоимость 1000 токенов LLM в рублях. */
-export const LLM_COST_PER_1K_TOKENS = 0.01;
+/** Стоимость 1000 токенов LLM в рублях (legacy-fallback). */
+export { LLM_COST_PER_1K_TOKENS };
 
 /** Минимальная стоимость вызова LLM: списание. */
 export const MIN_LLM_BALANCE = 0.01;
@@ -43,21 +48,31 @@ export interface SettleLlmUsageInput {
   skillId?: string;
 }
 
-/** Стоимость вызова LLM по числу токенов. */
+/**
+ * Стоимость вызова LLM. Без model/route ведёт себя как раньше (единый тариф);
+ * с ними — считает input/output раздельно по per-model тарифам (API-28.2).
+ */
 export function calculateLlmCost(
   promptTokens: number,
   completionTokens: number,
+  model?: string,
+  route?: LlmRouteSelection | null,
 ): number {
-  const total =
-    Math.max(0, promptTokens || 0) + Math.max(0, completionTokens || 0);
+  const pricing = resolveModelPricing(model ?? '', {
+    ...(route?.inputCostPer1k === undefined
+      ? {}
+      : { inputCostPer1k: route.inputCostPer1k }),
+    ...(route?.outputCostPer1k === undefined
+      ? {}
+      : { outputCostPer1k: route.outputCostPer1k }),
+  });
 
-  if (total === 0) {
-    return 0;
-  }
-
-  const raw = (total / 1000) * LLM_COST_PER_1K_TOKENS;
-
-  return Math.max(MIN_LLM_BALANCE, Math.ceil(raw * 100) / 100);
+  return calculateModelCost(
+    promptTokens,
+    completionTokens,
+    pricing,
+    MIN_LLM_BALANCE,
+  );
 }
 
 export function resolveReservedOutputTokens(
@@ -119,8 +134,13 @@ export class LlmBudgetService {
   async settle(input: SettleLlmUsageInput): Promise<void> {
     const promptTokens = input.usage.input_tokens;
     const completionTokens = input.usage.output_tokens;
-    const cost = calculateLlmCost(promptTokens, completionTokens);
     const model = input.route?.modelName?.trim() || process.env.LLM_MODEL || 'unknown';
+    const cost = calculateLlmCost(
+      promptTokens,
+      completionTokens,
+      model,
+      input.route,
+    );
     const provider = input.route?.providerType || 'openai';
     const agentId = input.agentId?.trim() || 'unknown';
     const routeName = input.route?.name ?? 'env';

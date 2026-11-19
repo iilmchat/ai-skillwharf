@@ -15,6 +15,9 @@ export const llmRouteSelectionSchema = z.object({
   apiKeyEnvVar: z.string().nullable(),
   taskType: z.string(),
   dailyCostLimit: z.number().nullable(),
+  /** Per-model тарифы ₽/1000 токенов (API-28.2); опциональны для совместимости. */
+  inputCostPer1k: z.number().nonnegative().optional(),
+  outputCostPer1k: z.number().nonnegative().optional(),
 });
 
 export type LlmRouteSelection = z.infer<typeof llmRouteSelectionSchema>;

@@ -556,7 +556,7 @@ export class ChatService {
     // Ошибки внутри MemoryService не прерывают диалог.
     const memoryContext = await this.memoryService.buildContext(userId, content);
 
-    return this.buildContext(userId, messages, memoryContext);
+    return this.buildContext(userId, messages, memoryContext, conversationId);
   }
 
   /** Контекст запуска/resume графа без записи сообщения пользователя. */
@@ -564,18 +564,18 @@ export class ChatService {
     userId: string,
     conversationId: string,
   ): Promise<Omit<PreparedMessage, 'messages'>> {
-    void conversationId;
-
     // Memory-контекст уже лежит в состоянии графа (checkpoint), поэтому при
     // resume его повторно не подбираем: важен только вопрос, а он был учтён
-    // при запуске.
-    return this.buildContext(userId, [], '');
+    // при запуске. Вариант A/B-промпта должен оставаться тем же — общий
+    // conversationId обеспечивает детерминированный выбор (WEB-28.1).
+    return this.buildContext(userId, [], '', conversationId);
   }
 
   private async buildContext(
     userId: string,
     messages: HistoryMessage[],
     memoryContext: string,
+    conversationId?: string,
   ): Promise<PreparedMessage> {
     const skills = (await this.skillsService.getEnabledSkills()).map(
       (skill): SkillSnapshot => ({
@@ -591,7 +591,10 @@ export class ChatService {
     });
     const userRole = normalizeUserRole(user?.role);
     const systemPrompt = withMemoryContext(
-      await this.promptsService.getActiveSystemPrompt(),
+      await this.promptsService.getActiveSystemPrompt(
+        undefined,
+        conversationId,
+      ),
       memoryContext,
     );
 

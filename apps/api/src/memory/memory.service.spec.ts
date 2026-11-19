@@ -174,11 +174,15 @@ describe('MemoryService.list', () => {
   it('отдаёт страницу памяти пользователя от новых к старым', async () => {
     const { service, prisma } = createService();
     const createdAt = new Date('2026-11-13T10:00:00.000Z');
+    const updatedAt = new Date('2026-11-14T10:00:00.000Z');
     prisma.memoryChunk.findMany.mockResolvedValue([
       {
         id: 'chunk-1',
         content: 'Клиент предпочитает самовывоз',
         createdAt,
+        source: 'chat',
+        kind: 'preference',
+        updatedAt,
       },
     ]);
     prisma.memoryChunk.count.mockResolvedValue(7);
@@ -191,6 +195,9 @@ describe('MemoryService.list', () => {
           id: 'chunk-1',
           content: 'Клиент предпочитает самовывоз',
           createdAt: '2026-11-13T10:00:00.000Z',
+          source: 'chat',
+          kind: 'preference',
+          updatedAt: '2026-11-14T10:00:00.000Z',
         },
       ],
       total: 7,
@@ -201,7 +208,14 @@ describe('MemoryService.list', () => {
       orderBy: { createdAt: 'desc' },
       skip: 10,
       take: 5,
-      select: { id: true, content: true, createdAt: true },
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        source: true,
+        kind: true,
+        updatedAt: true,
+      },
     });
     expect(prisma.memoryChunk.count).toHaveBeenCalledWith({
       where: { userId: USER_ID },
@@ -219,7 +233,14 @@ describe('MemoryService.list', () => {
   it('сериализует createdAt в ISO 8601', async () => {
     const { service, prisma } = createService();
     prisma.memoryChunk.findMany.mockResolvedValue([
-      { id: 'chunk-1', content: 'скидка 10%', createdAt: new Date(0) },
+      {
+        id: 'chunk-1',
+        content: 'скидка 10%',
+        createdAt: new Date(0),
+        source: null,
+        kind: 'fact',
+        updatedAt: new Date(0),
+      },
     ]);
     prisma.memoryChunk.count.mockResolvedValue(1);
 

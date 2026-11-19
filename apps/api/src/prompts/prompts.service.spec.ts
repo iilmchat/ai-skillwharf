@@ -17,6 +17,9 @@ interface PrismaMock {
     create: MockFn;
     findMany: MockFn;
   };
+  promptExperiment: {
+    findFirst: MockFn;
+  };
 }
 
 interface AuditMock {
@@ -40,6 +43,9 @@ describe('PromptsService', () => {
         create: vi.fn(),
         findMany: vi.fn(),
       },
+      promptExperiment: {
+        findFirst: vi.fn(async () => null),
+      },
     };
     audit = { record: vi.fn() };
 
@@ -51,6 +57,7 @@ describe('PromptsService', () => {
 
   it('возвращает активную версию системного промпта', async () => {
     prisma.promptTemplate.findFirst.mockResolvedValue({
+      id: 'template-1',
       versions: [{ content: 'Активный промпт' }],
     });
 
