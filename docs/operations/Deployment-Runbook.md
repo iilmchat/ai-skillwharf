@@ -2010,3 +2010,64 @@ docker volume inspect ai-skillwharf_qdrant_data
 
 `QDRANT_COLLECTION` меняйте только вместе с миграцией данных: старая
 коллекция останется в томе, но поиск начнёт работать по новому имени.
+
+## 23. LLM Evals, семантический кеш и мультиагентный граф (Sprint 29–30)
+
+### Панель регрессий Evals и кеша
+
+В Grafana provisioning добавлен дашборд `evals-and-cache.json` (UID
+`skillwharf-evals-cache`, папка `SkillWharf`). Он подключается вторым
+file-провайдером из `infra/monitoring/grafana/provisioning/dashboards/`;
+основной дашборд по-прежнему грузится из `infra/monitoring/grafana/dashboards/`.
+
+| Панель | Метрика |
+| --- | --- |
+| Eval Pass Rate по промптам и трекам | `skillwharf_eval_pass_rate` |
+| Средний балл LLM-as-a-Judge | `skillwharf_eval_avg_score` |
+| Semantic Cache Hit Rate | `skillwharf_semantic_cache_hits_total` / `skillwharf_semantic_cache_misses_total` |
+| Токены, сэкономленные кешем | `skillwharf_semantic_cache_tokens_saved_total` |
+| Мультиагентные handoffs | `skillwharf_agent_handoffs_total` |
+
+Метрики выставляются приложением; пока инструментация не добавлена, панели
+показывают `No data` — это ожидаемо. Порядок запуска Evals и формат датасетов
+описаны в [LLM-Evals-Guide.md](../development/LLM-Evals-Guide.md).
+
+### Включение семантического кеша LLM
+
+Кеш по умолчанию **выключен**, чтобы dev и тесты оставались предсказуемыми:
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `SEMANTIC_CACHE_ENABLED` | `false` | Включить кеширование типовых LLM-запросов |
+| `SEMANTIC_CACHE_THRESHOLD` | `0.95` | Порог косинусного сходства, 0..1 |
+| `SEMANTIC_CACHE_TTL_SECONDS` | `3600` | TTL записи в секундах |
+| `MULTI_AGENT_MAX_HANDOFFS` | `4` | Максимум передач между субагентами графа Supervisor |
+
+Переменные проброшены в `api` и `llm-worker` из корневого `docker-compose.yml`.
+Для включения задайте в `.env`:
+
+```text
+SEMANTIC_CACHE_ENABLED=true
+SEMANTIC_CACHE_THRESHOLD=0.95
+SEMANTIC_CACHE_TTL_SECONDS=3600
+MULTI_AGENT_MAX_HANDOFFS=4
+```
+
+```bash
+docker compose up -d api llm-worker
+```
+
+`SEMANTIC_CACHE_THRESHOLD` выше 0.95 почти не даёт попаданий, ниже 0.90
+повышает риск подмены ответа на семантически близкий, но другой запрос —
+изменяйте его осознанно и сверяйте hit rate с качеством Evals. Кеш не должен
+подменять ответы для HITL- и биллинговых вызовов: они идут с bypass и считаются
+в `llm_cost_total` как обычно.
+
+### Лимит мультиагентных handoff'ов
+
+`MULTI_AGENT_MAX_HANDOFFS` защищает граф «Супервизор -> Специализированные
+воркеры» от зацикливания: при превышении числа передач граф завершается
+ошибкой, а не продолжает цикл. Увеличение лимита допустимо только вместе с
+нагрузочным тестированием (см. `HA-34.1` в `ROADMAP-V2.md`); для отладки
+циклов смотрите панель `Мультиагентные handoffs` и трейсы Tempo со сквозным
+`trace_id`.

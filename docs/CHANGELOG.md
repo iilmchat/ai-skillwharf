@@ -4,6 +4,59 @@
 
 ## [Unreleased]
 
+### Sprint 30: Multi-Agent Supervisor, Semantic Cache и дашборд Evals/Cache
+
+**GRAPH-30.1 / CACHE-30.1 / CACHE-30.2 (бэкенд и worker).**
+
+- `GRAPH-30.1`: контракты `orchestrationMode` (`single` по умолчанию),
+  `agentRoles` и `traceId`; новый узел `supervisor` в графе llm-worker
+  детерминированно выбирает профильную роль (`researcher`/`drafter`/
+  `reviewer`/`analyst`/`operator`), публикует `agent_handoff` с единым
+  `traceId` и ограничивает число передач `MULTI_AGENT_MAX_HANDOFFS` (default 4).
+  API включает supervisor-режим при двух и более ролевых навыках.
+- `CACHE-30.1/30.2`: `SemanticCacheService` в `apps/api/src/llm/` — Redis с TTL
+  `SEMANTIC_CACHE_TTL_SECONDS`, косинусное сходство эмбеддингов с порогом
+  `SEMANTIC_CACHE_THRESHOLD` (default 0.95). Ключ строго изолирован по
+  `userId`/`promptVersionId`/`model`; запросы с инструментами не кешируются.
+  Попадание отдаёт `cacheHit:true` без вызова LLM и без списания в BAL/Ledger.
+  Метрики `skillwharf_semantic_cache_hits_total` / `_misses_total`.
+- Тесты: 5 тестов supervisor-графа (включая лимит передач и traceId), 5 тестов
+  кеша (изоляция, порог 0.95, bypass инструментов), 3 теста ChatService
+  (cacheHit без списания). `pnpm test` — 1510 тестов.
+
+**WEB-30.3 (Web UI).**
+
+- `src/lib/office-events.ts`: Zod-схема `officeHandoffSchema` и поддержка
+  `office_event` с типом `agent_handoff` (`fromRole`, `toRole`, `reason`), включая
+  payload без явного `type`. Обычный `office_event` по-прежнему валидируется
+  Zod и не меняет поведение.
+- `store/office.store.ts` хранит до 8 последних передач с `conversationId` и
+  временем получения; `OfficePage` показывает компактную ленту и подсвечивает
+  карточки ролей `fromRole`/`toRole` (бейджи «Передаёт» / «Принимает»).
+- `src/lib/message-metadata.ts`: `assistantMessageMetadataSchema` с
+  необязательным `cacheHit`. Метаданные читаются из ack и `stream_end`,
+  присоединяются к сообщению ассистента; при `cacheHit: true` в ленте чата
+  показывается бейдж «Из кеша · 0 ₽» / «Cached · 0 ₽» с tooltip про
+  семантический кеш без расхода токенов.
+- RU/EN-ключи и unit-тесты парсинга handoff, стора и `cacheHit`.
+
+**Инфраструктура и наблюдаемость (EVAL-29.4).**
+
+- `infra/monitoring/grafana/provisioning/dashboards/evals-and-cache.json`: новый
+  дашборд `SkillWharf Evals & Cache` (UID `skillwharf-evals-cache`) с панелями
+  Eval Pass Rate (`skillwharf_eval_pass_rate`), среднего балла LLM-as-a-Judge
+  (`skillwharf_eval_avg_score`), Hit Rate и сэкономленных токенов
+  семантического кеша (`skillwharf_semantic_cache_*_total`,
+  `skillwharf_semantic_cache_tokens_saved_total`) и мультиагентных handoff'ов
+  (`skillwharf_agent_handoffs_total`). Подключён вторым file-провайдером в
+  `dashboards.yml`.
+- `.env.example` и `docker-compose.yml`: добавлены `SEMANTIC_CACHE_ENABLED`
+  (по умолчанию `false`), `SEMANTIC_CACHE_THRESHOLD` (`0.95`),
+  `SEMANTIC_CACHE_TTL_SECONDS` (`3600`) и `MULTI_AGENT_MAX_HANDOFFS` (`4`) —
+  проброшены в `api` и `llm-worker`.
+- Runbook дополнен разделом 23 про включение кеша, порог сходства и защиту
+  графа Supervisor от зацикливания. `EVAL-29.4` отмечена `[x]` в `ROADMAP-V2.md`.
+
 ### Sprint 29: Golden Datasets, LLM-as-a-Judge и Evals в Control Plane
 
 **EVAL-29.1 (датасеты и CLI).**

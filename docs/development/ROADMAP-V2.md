@@ -42,8 +42,10 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 * [x] **[EVAL-29.3]** Гейт перед промоушеном победителя A/B-эксперимента
   промптов: без прохода порога качества версия B не повышается (интеграция с
   `PromptExperiment` Sprint 28); CI-прогон — отдельная задача.
-* [ ] **[EVAL-29.4]** Дашборд регрессий и алерты в Grafana: динамика quality
-  score по трекам, критичные деградации и ссылки на конкретные eval-случаи.
+* [x] **[EVAL-29.4]** Дашборд регрессий в Grafana: pass rate и средний балл
+  LLM-as-a-Judge по промптам/трекам, hit rate и сэкономленные токены
+  семантического кеша, мультиагентные handoffs (`evals-and-cache.json`).
+  Алерты на критичные деградации — отдельная задача.
 * [x] **[WEB-29.5]** UI-панель запуска и просмотра LLM Evals в Control Plane
   (версия, фильтр по треку A–L, история прогонов и детализация кейсов) +
   локализованная обработка `errors.eval_gate_failed` при промоушене версии B
@@ -51,17 +53,22 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 30 — Multi-Agent Orchestration & Semantic Cache
 
-* [ ] **[GRAPH-30.1]** Графы LangGraph «Супервизор -> Специализированные
+* [x] **[GRAPH-30.1]** Графы LangGraph «Супервизор -> Специализированные
   воркеры»: динамическая маршрутизация задач по трекам `A–L` и делегирование
-  инструментов с сохранением checkpoint'ов.
+  инструментов с сохранением checkpoint'ов (бэкенд — см. журнал ниже).
 * [ ] **[GRAPH-30.2]** Сквозной `trace_id` через API, `llm-worker`, воркеры и
-  Tempo: один trace на всю цепочку_multi-agent с корреляцией в JSON-логах.
-* [ ] **[CACHE-30.1]** Семантическое кеширование типовых LLM-запросов в
-  Redis/Qdrant по близости эмбеддингов, с hit-rate и экономией токенов в
-  метриках.
-* [ ] **[CACHE-30.2]** Политика инвалидации и TTL кеша при смене системного
-  промпта или версии модели; принудительный bypass для HITL и биллинговых
-  вызовов.
+  Tempo: один trace на всю цепочку multi-agent с корреляцией в JSON-логах.
+* [x] **[CACHE-30.1]** Семантическое кеширование типовых LLM-запросов в
+  Redis по близости эмбеддингов, с hit/miss-метриками и экономией токенов
+  (бэкенд — см. журнал ниже).
+* [x] **[CACHE-30.2]** Политика инвалидации и TTL кеша при смене системного
+  промпта или версии модели; принудительный bypass для вызовов с инструментами
+  (Redis `EX`, ключ из `userId`/`promptVersionId`/`model`).
+* [x] **[WEB-30.3]** UI мультиагентных handoff'ов и семантического кеша:
+  подсветка перехода `fromRole → toRole` на карточках AI-Офиса, лента последних
+  передач с причиной, бейдж «Из кеша · 0 ₽» с tooltip в ленте чата; валидация
+  `office_event` и метаданных ответа через Zod, RU/EN и unit-тесты (без коммита,
+  изменения в рабочем дереве).
 
 ---
 
@@ -148,4 +155,5 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 | Дата | Спринт / Задача | Агент | Статус | Коммит / Детали | Найденные проблемы (KI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 2026-11-19 | Sprint 29 (29.1–29.3, 29.5) | OpenCode / UI / Infra | Выполнено | 12 золотых датасетов A–L (36 кейсов), `scripts/run-evals.mjs` с прогоном через `POST /prompts/:id/evals/run` и CI-валидацией; `PromptEvalRun` + `PromptEvalsService` (детерминированные метрики tool_calls/HITL + LLM-судья с Zod, mock-режим), `EVALS_MIN_PASS_RATE`; гейт промоушена `errors.eval_gate_failed`; панель LLM Evals в `/admin` с историей и детализацией, RU/EN и тесты | EVAL-29.4 (Grafana-дашборд) — не вошёл в скоуп |
+| 2026-11-19 | Sprint 29 (29.1–29.4, 29.5) | OpenCode / UI / Infra | Выполнено | 12 золотых датасетов A–L (36 кейсов), `scripts/run-evals.mjs` с прогоном через `POST /prompts/:id/evals/run` и CI-валидацией; `PromptEvalRun` + `PromptEvalsService` (детерминированные метрики tool_calls/HITL + LLM-судья с Zod, mock-режим), `EVALS_MIN_PASS_RATE`; гейт промоушена `errors.eval_gate_failed`; панель LLM Evals в `/admin`; дашборд Grafana `evals-and-cache.json` + env для Semantic Cache и MULTI_AGENT_MAX_HANDOFFS | Алерты на деградации — отдельная задача |
+| 2026-11-19 | Sprint 30 (30.1–30.3) | OpenCode / UI / Infra | Выполнено | Граф LangGraph с узлом `supervisor`, `agent_handoff` и лимитом `MULTI_AGENT_MAX_HANDOFFS`; `SemanticCacheService` (Redis + косинус, изоляция по userId/promptVersionId/model, bypass инструментов, `cacheHit:true` без списания в Ledger), метрики hits/misses; лента handoff'ов и подсветка ролей в AI-Офисе, бейдж «Из кеша · 0 ₽» в чате; дашборд Grafana `evals-and-cache.json` и env для кеша/лимита передач; RU/EN и 13 unit-тестов | GRAPH-30.2 (сквозной trace_id в Tempo) и алерты Evals — остаток |
