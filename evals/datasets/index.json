@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "release": "v1.1.0-evals",
+  "description": "Golden Datasets для 12 бизнес-треков SkillWharf (A–L).",
+  "sourceGuide": "docs/ecosystem/USE-CASES-GUIDE.md",
+  "tracks": [
+    { "trackId": "A", "file": "track-a.json", "title": "AI-Офис для пункта выдачи заказов" },
+    { "trackId": "B", "file": "track-b.json", "title": "AI-Офис для команды разработки" },
+    { "trackId": "C", "file": "track-c.json", "title": "AI-Офис для интернет-магазина и маркетплейсов" },
+    { "trackId": "D", "file": "track-d.json", "title": "AI-Офис для маркетингового агентства" },
+    { "trackId": "E", "file": "track-e.json", "title": "AI-Офис для образовательной платформы" },
+    { "trackId": "F", "file": "track-f.json", "title": "Мультиагентный контент-конвейер" },
+    { "trackId": "G", "file": "track-g.json", "title": "ИИ-рекрутер для массового подбора" },
+    { "trackId": "H", "file": "track-h.json", "title": "Управление жизненным циклом договоров" },
+    { "trackId": "I", "file": "track-i.json", "title": "Интеллектуальная обработка документов и сканов" },
+    { "trackId": "J", "file": "track-j.json", "title": "Финансовый аналитик для маркетплейсов" },
+    { "trackId": "K", "file": "track-k.json", "title": "AI-Офис для оптовой торговли и дистрибуции" },
+    { "trackId": "L", "file": "track-l.json", "title": "AI-Офис для производства и сборки" }
+  ],
+  "requiredRubricKeys": ["required", "forbidden"],
+  "defaultMinPassRate": 0.85
+}

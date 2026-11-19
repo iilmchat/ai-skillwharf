@@ -25,6 +25,9 @@ jobs:
       - name: Lint Markdown
         run: pnpm exec markdownlint-cli2 "*.md" "docs/**/*.md"
 
+      - name: Validate Golden Datasets (12 tracks A–L)
+        run: pnpm evals:validate
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
