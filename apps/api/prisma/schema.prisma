@@ -240,6 +240,10 @@ model MarketplaceSkill {
   price            Decimal  @default(0) @db.Decimal(18, 2)
   downloadsCount   Int      @default(0)
   status           String   @default("draft")
+  /// Статический аудит безопасности: passed | warning | rejected.
+  auditStatus      String   @default("passed")
+  /// Находки аудита: [{ severity, code, message }].
+  auditFindingsJson Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

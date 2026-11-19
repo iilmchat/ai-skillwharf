@@ -55,6 +55,8 @@ export const ERROR_KEYS = {
   llmUnavailable: 'errors.llm_unavailable',
   /** Подпись SKILL.md не прошла проверку Ed25519 (API-27.1). */
   invalidSkillSignature: 'errors.invalid_skill_signature',
+  /** Статический аудит навыка заблокировал публикацию (DEVPORTAL-36.2). */
+  skillAuditRejected: 'errors.skill_audit_rejected',
   /** Навык каталога не найден или не опубликован (API-27.2). */
   marketplaceSkillNotFound: 'errors.marketplace_skill_not_found',
   /** Промоушен версии заблокирован: нет зелёного Eval-прогона (EVAL-29.3). */

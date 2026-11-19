@@ -7,11 +7,19 @@ import { HttpException } from '@nestjs/common';
  * Формат используется HTTP-контроллерами и WebSocket-шлюзом: клиент
  * показывает перевод по `code`, поэтому текст ошибки не является контрактом.
  */
+/** Находка статического аудита в теле ошибки (DEVPORTAL-36.2). */
+export interface ApiErrorFinding {
+  readonly severity: 'critical' | 'warning' | 'info';
+  readonly code: string;
+  readonly message: string;
+}
+
 export interface ApiErrorBody {
   statusCode: number;
   error: string;
   code: string;
   message: string;
+  readonly findings?: readonly ApiErrorFinding[];
 }
 
 /** HTTP-исключение, которое отдаёт клиенту тело в едином формате. */
@@ -204,6 +212,19 @@ export function invalidSkillSignatureError(message: string): ApiException {
     error: 'Bad Request',
     code: 'errors.invalid_skill_signature',
     message,
+  });
+}
+
+/** Статический аудит SKILL.md не прошёл: 400 с деталями находок. */
+export function skillAuditRejectedError(
+  findings: readonly ApiErrorFinding[],
+): ApiException {
+  return new ApiException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'errors.skill_audit_rejected',
+    message: 'Публикация заблокирована статическим аудитом безопасности',
+    findings,
   });
 }
 
