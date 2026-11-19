@@ -6,6 +6,7 @@ import {
   SKILL_PERMISSION_WARNING,
   SkillsService,
 } from './skills.service.js';
+import { SkillSignatureService } from './skill-signature.service.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -96,7 +97,11 @@ describe('SkillsService', () => {
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [SkillsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        SkillsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: SkillSignatureService, useValue: new SkillSignatureService({}) },
+      ],
     }).compile();
 
     service = moduleRef.get(SkillsService);

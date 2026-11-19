@@ -13,6 +13,7 @@ import { IntegrationsModule } from './integrations/integrations.module.js';
 import { FinanceModule } from './finance/finance.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { LlmRouterModule } from './llm-router/llm-router.module.js';
+import { MarketplaceModule } from './marketplace/marketplace.module.js';
 import { MetricsModule } from './metrics/metrics.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { PromptsModule } from './prompts/prompts.module.js';
@@ -32,6 +33,7 @@ import { SkillsModule } from './skills/skills.module.js';
     ChatModule,
     SkillsModule,
     RegistryModule,
+    MarketplaceModule,
     PromptsModule,
     LlmRouterModule,
     AuditModule,

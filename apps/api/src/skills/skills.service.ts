@@ -6,12 +6,13 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma, type InstalledSkill } from '@prisma/client';
-import { SkillManifestSchema, type SkillManifest } from '@skillwharf/shared';
+import type { SkillManifest } from '@skillwharf/shared';
 import AdmZip from 'adm-zip';
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { parse } from 'yaml';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { parseSkillFile, type ParsedSkillFile } from './skill-file.js';
+import { SkillSignatureService } from './skill-signature.service.js';
 
 export interface SkillValidationResult {
   valid: boolean;
@@ -44,9 +45,6 @@ type ManifestParseResult =
   | { success: true; manifest: SkillManifest; raw: Record<string, unknown> }
   | { success: false; errors: string[] };
 
-/** YAML frontmatter: блок между первыми строками `---`. */
-const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-
 /** Каталог стартовых навыков в корне репозитория. */
 const STARTER_SKILLS_DIRNAME = 'starter-skills';
 
@@ -57,7 +55,10 @@ const MAX_PARENT_LOOKUP_DEPTH = 5;
 export class SkillsService implements OnModuleInit {
   private readonly logger = new Logger(SkillsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly signatures: SkillSignatureService,
+  ) {}
 
   /** При старте API подхватывает навыки «из коробки». */
   async onModuleInit(): Promise<void> {
@@ -99,6 +100,7 @@ export class SkillsService implements OnModuleInit {
       });
     }
 
+    this.signatures.assertInstallable(fileContent);
     const vetting = this.vetManifest(result.raw);
     const installed = await this.persistSkillManifest(result.manifest, true);
 
@@ -148,6 +150,7 @@ export class SkillsService implements OnModuleInit {
       });
     }
 
+    this.signatures.assertInstallable(fileContent);
     const vetting = this.vetManifest(result.raw);
 
     if (vetting.danger !== undefined) {
@@ -300,51 +303,21 @@ export class SkillsService implements OnModuleInit {
   }
 
   private parseManifest(fileContent: string): ManifestParseResult {
-    const content = fileContent.replace(/^\uFEFF/, '');
-    const frontmatter = FRONTMATTER_PATTERN.exec(content);
-
-    if (!frontmatter || frontmatter[1] === undefined) {
-      return {
-        success: false,
-        errors: [
-          'YAML frontmatter не найден: файл должен начинаться с блока --- ... ---',
-        ],
-      };
-    }
-
-    let parsed: unknown;
-
-    try {
-      parsed = parse(frontmatter[1]);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-
-      return {
-        success: false,
-        errors: [`Не удалось распарсить YAML frontmatter: ${reason}`],
-      };
-    }
-
-    const result = SkillManifestSchema.safeParse(parsed);
+    const result = parseSkillFile(fileContent);
 
     if (result.success) {
+      const parsed: ParsedSkillFile = result.value;
+
       return {
         success: true,
-        manifest: result.data,
+        manifest: parsed.manifest,
         // Zod отбрасывает неописанные поля (`code`), а skill-vetter
         // проверяет сырой манифест — поэтому храним его отдельно.
-        raw: parsed as Record<string, unknown>,
+        raw: parsed.raw,
       };
     }
 
-    return {
-      success: false,
-      errors: result.error.issues.map((issue) => {
-        const path = issue.path.length > 0 ? issue.path.join('.') : 'manifest';
-
-        return `${path}: ${issue.message}`;
-      }),
-    };
+    return result;
   }
 }
 

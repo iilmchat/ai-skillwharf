@@ -7,6 +7,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
+import { RevenueShareService } from '../billing/revenue-share.service.js';
 import { insufficientFundsError } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
 import type { EgressPolicy } from '../sandbox/egress.js';
@@ -73,6 +74,25 @@ function rethrowPaymentRequired(error: unknown): never {
   }
 
   throw error;
+}
+
+/** Имя навыка, предоставляющего инструмент (для Pay-per-Outcome сплита). */
+function resolveSkillNameForTool(
+  skills: readonly AgentSkillSnapshot[],
+  toolName: string,
+): string | undefined {
+  for (const skill of skills) {
+    const parsed = SkillManifestSchema.safeParse(skill.manifest);
+
+    if (
+      parsed.success &&
+      parsed.data.dependencies?.tools?.includes(toolName) === true
+    ) {
+      return parsed.data.name;
+    }
+  }
+
+  return undefined;
 }
 
 /** Цена Pay-per-Call/Freemium инструмента из манифеста навыка. */
@@ -187,7 +207,33 @@ export class AgentRuntimeService {
     private readonly agentGateway: AgentGatewayService,
     private readonly pendingApprovals: PendingApprovalService,
     @Optional() private readonly jobs?: BackgroundJobsService,
+    // Необязательный DI: старые тестовые harness-ы не предоставляют сервис.
+    @Optional() private readonly revenueShare?: RevenueShareService,
   ) {}
+
+  /** Best-effort сплит 85/15 после успешного списания (API-27.2). */
+  private async applyRevenueShare(
+    userId: string,
+    skillName: string | undefined,
+    entryId: string,
+  ): Promise<void> {
+    if (this.revenueShare === undefined || skillName === undefined) {
+      return;
+    }
+
+    try {
+      await this.revenueShare.splitCapturedCharge({
+        userId,
+        skillName,
+        entryId,
+        idempotencyKey: `revenue-share:${entryId}`,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Revenue Share: не удалось разделить платеж ${entryId}: ${String(error)}`,
+      );
+    }
+  }
 
   async executeTools(
     request: ToolExecutionRequest,
@@ -298,10 +344,20 @@ export class AgentRuntimeService {
 
         if (payPerCallHoldId !== undefined) {
           await this.billingService.captureHold(payPerCallHoldId);
+          await this.applyRevenueShare(
+            request.userId,
+            pricing?.skillName ?? resolveSkillNameForTool(request.skills, call.name),
+            payPerCallHoldId,
+          );
         }
 
         if (holdEntryId !== undefined) {
           await this.billingService.captureHold(holdEntryId);
+          await this.applyRevenueShare(
+            request.userId,
+            resolveSkillNameForTool(request.skills, call.name),
+            holdEntryId,
+          );
         }
 
         if (TAINT_SOURCE_TOOLS.has(call.name)) {

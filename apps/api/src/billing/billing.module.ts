@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module.js';
 import { BILLING_PROVIDER } from './billing.constants.js';
 import { BillingController } from './billing.controller.js';
 import { BillingService } from './billing.service.js';
+import { RevenueShareService } from './revenue-share.service.js';
 import { FreemiumResetService } from './freemium-reset.service.js';
 import { MockYooKassaProvider } from './providers/mock-yookassa.provider.js';
 import { YooKassaProvider } from './providers/yookassa.provider.js';
@@ -12,6 +13,7 @@ import { YooKassaProvider } from './providers/yookassa.provider.js';
   controllers: [BillingController],
   providers: [
     BillingService,
+    RevenueShareService,
     // Месячный сброс Freemium-лимитов: таймер внутри процесса, unref-нутый.
     FreemiumResetService,
     MockYooKassaProvider,
@@ -27,6 +29,7 @@ import { YooKassaProvider } from './providers/yookassa.provider.js';
   ],
   exports: [
     BillingService,
+    RevenueShareService,
     MockYooKassaProvider,
     YooKassaProvider,
     BILLING_PROVIDER,

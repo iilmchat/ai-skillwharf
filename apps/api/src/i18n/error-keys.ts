@@ -53,6 +53,10 @@ export const ERROR_KEYS = {
    * дневной бюджет (LLM Router v2).
    */
   llmUnavailable: 'errors.llm_unavailable',
+  /** Подпись SKILL.md не прошла проверку Ed25519 (API-27.1). */
+  invalidSkillSignature: 'errors.invalid_skill_signature',
+  /** Навык каталога не найден или не опубликован (API-27.2). */
+  marketplaceSkillNotFound: 'errors.marketplace_skill_not_found',
 } as const;
 
 export type ErrorKey = (typeof ERROR_KEYS)[keyof typeof ERROR_KEYS];

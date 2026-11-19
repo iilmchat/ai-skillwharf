@@ -61,6 +61,16 @@ export const skillPricingSchema = z.object({
 /** Хеш Markdown Body (sha256) для защиты от подмены. */
 export const skillChecksumSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
+/** Подпись Ed25519 манифеста: `ed25519:<base64>`. */
+export const skillSignatureSchema = z
+  .string()
+  .regex(/^ed25519:[A-Za-z0-9+/]+={0,2}$/, 'ожидается ed25519:<base64>');
+
+/** Идентификатор публичного ключа издателя. */
+export const skillPublicKeyIdSchema = z
+  .string()
+  .regex(/^[a-z0-9-]{1,64}$/, 'ожидается [a-z0-9-]{1,64}');
+
 /**
  * FQDN без схемы, порта, пути и wildcard.
  *
@@ -109,6 +119,10 @@ export const skillManifestSchema = z.object({
    */
   requiresApproval: z.boolean().optional(),
   checksum: skillChecksumSchema.optional(),
+  /** Ed25519-подпись канонического манифеста + тела SKILL.md (API-27.1). */
+  signature: skillSignatureSchema.optional(),
+  /** keyId публичного ключа, которым проверяется `signature`. */
+  publicKeyId: skillPublicKeyIdSchema.optional(),
   /**
    * URL MCP-сервера навыка-коннектора (`mcp_endpoint` в SKILL.md).
    * Источник истины для подключения: Gateway не хардкодит адреса серверов.
@@ -131,6 +145,8 @@ export type SkillDependencies = z.infer<typeof skillDependenciesSchema>;
 export type SkillPermission = z.infer<typeof skillPermissionSchema>;
 export type SkillPricing = z.infer<typeof skillPricingSchema>;
 export type SkillChecksum = z.infer<typeof skillChecksumSchema>;
+export type SkillSignature = z.infer<typeof skillSignatureSchema>;
+export type SkillPublicKeyId = z.infer<typeof skillPublicKeyIdSchema>;
 export type EgressAllowlist = z.infer<typeof egressAllowlistSchema>;
 export type McpEndpoint = z.infer<typeof mcpEndpointSchema>;
 

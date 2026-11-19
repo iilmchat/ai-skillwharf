@@ -8,6 +8,7 @@ import {
 import type { IBillingProvider, TransactionResult } from '@skillwharf/shared';
 import axios, { isAxiosError, type AxiosInstance } from 'axios';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 
 /** Базовый URL API ЮKassa. */
 export const YOOKASSA_API_BASE_URL = 'https://api.yookassa.ru/v3';
@@ -267,6 +268,74 @@ export class YooKassaProvider implements IBillingProvider {
       throw new ServiceUnavailableException(
         'Не удалось проверить платёж в ЮKassa',
       );
+    }
+  }
+
+  /**
+   * Revenue Share 85/15 (API-27.2): перевод автору навыка через
+   * `POST /v3/transfers`. Idempotence-Key привязан к списанию, поэтому
+   * повторный вызов не создаст второй перевод.
+   */
+  async createTransfer(
+    payoutAccountId: string,
+    amount: number,
+    idempotencyKey: string,
+    description: string,
+  ): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Платёжный провайдер ЮKassa не настроен',
+      );
+    }
+
+    const account = z
+      .string()
+      .min(1)
+      .max(256)
+      .safeParse(payoutAccountId.trim());
+    const value = z.number().positive().finite().safeParse(amount);
+    const key = z.string().min(1).safeParse(idempotencyKey);
+
+    if (!account.success || !value.success || !key.success) {
+      throw new BadRequestException('Некорректные параметры перевода');
+    }
+
+    const body = {
+      amount: { value: value.data.toFixed(2), currency: 'RUB' },
+      destination: { type: 'yoo_wallet', account_id: account.data },
+      description: description.slice(0, 128),
+    };
+
+    try {
+      const { data } = await this.http.post<{ id: string }>(
+        '/transfers',
+        body,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotence-Key': key.data,
+          },
+          auth: { username: this.shopId, password: this.secretKey },
+        },
+      );
+
+      this.logger.log(
+        `ЮKassa: перевод ${data.id} автору ${account.data} на ${body.amount.value} ₽`,
+      );
+
+      return data.id;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ServiceUnavailableException ||
+        isAxiosError(error) === false
+      ) {
+        throw error;
+      }
+
+      const status = error.response?.status ?? 0;
+      this.logger.error(`ЮKassa: перевод не удался (HTTP ${status})`);
+      throw new ServiceUnavailableException('Не удалось выполнить перевод в ЮKassa');
     }
   }
 

@@ -167,6 +167,26 @@ export function outboundBlockedError(message: string): ApiException {
   });
 }
 
+/** Подпись SKILL.md невалидна или неподписанный навык запрещён политикой. */
+export function invalidSkillSignatureError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'errors.invalid_skill_signature',
+    message,
+  });
+}
+
+/** Навык публичного каталога не найден или не опубликован. */
+export function marketplaceSkillNotFoundError(message: string): ApiException {
+  return new ApiException({
+    statusCode: 404,
+    error: 'Not Found',
+    code: 'errors.marketplace_skill_not_found',
+    message,
+  });
+}
+
 /** Загруженный документ больше лимита multipart (15 МБ). */
 export function documentTooLargeError(message: string): ApiException {
   return new ApiException({

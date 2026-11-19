@@ -38,6 +38,27 @@ export interface EscrowOperationResult extends WalletBalance {
   type: 'PENDING' | 'debit' | 'credit';
 }
 
+/** Результат расщеплённого списания Revenue Share 85/15. */
+export interface RevenueShareChargeResult extends LedgerOperationResult {
+  /** Полная сумма, списанная с покупателя. */
+  readonly total: string;
+  /** 85% автору навыка. */
+  readonly authorAmount: string;
+  /** 15% комиссия платформы. */
+  readonly platformAmount: string;
+  readonly authorEntryId: string;
+  readonly platformEntryId: string;
+}
+
+/** Параметры расщеплённого списания (API-27.2). */
+export interface RevenueShareChargeInput {
+  readonly userId: string;
+  readonly authorId: string;
+  readonly skillName: string;
+  readonly price: number;
+  readonly idempotencyKey: string;
+}
+
 /** Запись истории операций для отдачи в API. */
 export interface LedgerHistoryEntry {
   id: string;
@@ -598,6 +619,223 @@ export class BillingService {
     }
   }
 
+  /**
+   * Pay-per-Call / Pay-per-Outcome навыка из каталога (API-27.2).
+   *
+   * В одной транзакции: списываем полную цену с покупателя (debit),
+   * зачисляем 85% автору (`author_revenue_share`) и пишем 15% комиссии
+   * платформы (`platform_fee`). Суммы считаются в копейках, поэтому их
+   * сумма всегда точно равна цене. `idempotencyKey` защищает от повтора.
+   */
+  async chargeForMarketplaceSkill(
+    input: RevenueShareChargeInput,
+  ): Promise<RevenueShareChargeResult> {
+    const { userId, authorId, skillName, price, idempotencyKey } = input;
+
+    this.assertPositiveAmount(price);
+    this.assertIdempotencyKey(idempotencyKey);
+
+    if (authorId === userId) {
+      throw new BadRequestException(
+        'Автор не может покупать собственный навык через Revenue Share',
+      );
+    }
+
+    const existing = await this.findExistingEntry(idempotencyKey);
+
+    if (existing) {
+      return this.replayRevenueShare(existing, userId, idempotencyKey);
+    }
+
+    const { author, platform } = splitRevenueShare(price);
+    const totalDecimal = new Prisma.Decimal(price);
+    const authorDecimal = new Prisma.Decimal(author);
+    const platformDecimal = new Prisma.Decimal(platform);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updateResult = await tx.wallet.updateMany({
+          where: { userId, balance: { gte: totalDecimal } },
+          data: { balance: { decrement: totalDecimal } },
+        });
+
+        if (updateResult.count === 0) {
+          throw new BadRequestException(ERROR_KEYS.insufficientFunds);
+        }
+
+        const buyerWallet = await tx.wallet.findUniqueOrThrow({
+          where: { userId },
+        });
+        const debit = await tx.ledgerEntry.create({
+          data: {
+            walletId: buyerWallet.id,
+            amount: totalDecimal,
+            balanceAfter: buyerWallet.balance,
+            type: 'debit',
+            description: `Вызов навыка ${skillName} из каталога`,
+            idempotencyKey,
+          },
+        });
+
+        const authorWallet = await tx.wallet.upsert({
+          where: { userId: authorId },
+          create: { userId: authorId, balance: authorDecimal },
+          update: { balance: { increment: authorDecimal } },
+        });
+        const authorEntry = await tx.ledgerEntry.create({
+          data: {
+            walletId: authorWallet.id,
+            amount: authorDecimal,
+            balanceAfter: authorWallet.balance,
+            type: 'author_revenue_share',
+            description: `Revenue Share 85% за навык ${skillName}`,
+            idempotencyKey: `${idempotencyKey}:author`,
+          },
+        });
+
+        // Платформенный кошелёк отдельной моделью не представлен: комиссия
+        // фиксируется проводкой на кошельке покупателя с нулевым изменением
+        // баланса (информационная запись в append-only Ledger).
+        const platformEntry = await tx.ledgerEntry.create({
+          data: {
+            walletId: buyerWallet.id,
+            amount: platformDecimal,
+            balanceAfter: buyerWallet.balance,
+            type: 'platform_fee',
+            description: `Комиссия платформы 15% за навык ${skillName}`,
+            idempotencyKey: `${idempotencyKey}:platform`,
+          },
+        });
+
+        return {
+          balance: formatBalance(buyerWallet.balance),
+          entryId: debit.id,
+          total: totalDecimal.toFixed(2),
+          authorAmount: authorDecimal.toFixed(2),
+          platformAmount: platformDecimal.toFixed(2),
+          authorEntryId: authorEntry.id,
+          platformEntryId: platformEntry.id,
+        };
+      });
+    } catch (error) {
+      const raced = await this.replayAfterUniqueViolation(
+        error,
+        idempotencyKey,
+        userId,
+      );
+
+      if (raced) {
+        const existingEntry = await this.findExistingEntry(idempotencyKey);
+
+        if (existingEntry !== null) {
+          return this.replayRevenueShare(existingEntry, userId, idempotencyKey);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Дописывает авторский credit и комиссию платформы к уже списанному
+   * (captureHold) платежу. Используется Pay-per-Call/Pay-per-Outcome в
+   * AgentRuntimeService: покупатель уже списан, здесь создаются две проводки.
+   */
+  async recordRevenueShare(input: {
+    readonly payerUserId: string;
+    readonly authorId: string;
+    readonly skillName: string;
+    readonly amount: number;
+    readonly idempotencyKey: string;
+  }): Promise<{ authorEntryId: string; platformEntryId: string }> {
+    this.assertPositiveAmount(input.amount);
+    this.assertIdempotencyKey(input.idempotencyKey);
+
+    if (input.authorId === input.payerUserId) {
+      throw new BadRequestException(
+        'Автор не может покупать собственный навык через Revenue Share',
+      );
+    }
+
+    const { author, platform } = splitRevenueShare(input.amount);
+    const authorDecimal = new Prisma.Decimal(author);
+    const platformDecimal = new Prisma.Decimal(platform);
+
+    return this.prisma.$transaction(async (tx) => {
+      const payerWallet = await tx.wallet.findUniqueOrThrow({
+        where: { userId: input.payerUserId },
+      });
+      const authorWallet = await tx.wallet.upsert({
+        where: { userId: input.authorId },
+        create: { userId: input.authorId, balance: authorDecimal },
+        update: { balance: { increment: authorDecimal } },
+      });
+      const authorEntry = await tx.ledgerEntry.create({
+        data: {
+          walletId: authorWallet.id,
+          amount: authorDecimal,
+          balanceAfter: authorWallet.balance,
+          type: 'author_revenue_share',
+          description: `Revenue Share 85% за навык ${input.skillName}`,
+          idempotencyKey: `${input.idempotencyKey}:author`,
+        },
+      });
+      const platformEntry = await tx.ledgerEntry.create({
+        data: {
+          walletId: payerWallet.id,
+          amount: platformDecimal,
+          balanceAfter: payerWallet.balance,
+          type: 'platform_fee',
+          description: `Комиссия платформы 15% за навык ${input.skillName}`,
+          idempotencyKey: `${input.idempotencyKey}:platform`,
+        },
+      });
+
+      return {
+        authorEntryId: authorEntry.id,
+        platformEntryId: platformEntry.id,
+      };
+    });
+  }
+
+  private async replayRevenueShare(
+    entry: ExistingLedgerEntry,
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<RevenueShareChargeResult> {
+    if (entry.wallet.userId !== userId) {
+      throw new ConflictException(
+        'idempotencyKey уже использован другим пользователем',
+      );
+    }
+
+    const [author, platform] = await Promise.all([
+      this.prisma.ledgerEntry.findUnique({
+        where: { idempotencyKey: `${idempotencyKey}:author` },
+        select: { id: true, amount: true },
+      }),
+      this.prisma.ledgerEntry.findUnique({
+        where: { idempotencyKey: `${idempotencyKey}:platform` },
+        select: { id: true, amount: true },
+      }),
+    ]);
+
+    if (author === null || platform === null) {
+      throw new ConflictException('Неполная запись Revenue Share');
+    }
+
+    return {
+      balance: formatBalance(entry.wallet.balance),
+      entryId: entry.id,
+      total: formatBalance(entry.amount),
+      authorAmount: formatBalance(author.amount),
+      platformAmount: formatBalance(platform.amount),
+      authorEntryId: author.id,
+      platformEntryId: platform.id,
+      replayed: true,
+    };
+  }
+
   private assertPositiveAmount(amount: number): void {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException(
@@ -707,6 +945,29 @@ export class BillingService {
 
     return entry ? this.replayEscrow(entry, userId) : null;
   }
+}
+
+/**
+ * Точный сплит 85/15 в копейках: `Math.round(price * 0.85 * 100) / 100`
+ * автору, остаток — платформе. Сумма всегда равна исходной цене без потери
+ * копеек (например, 0.03 → 0.03 / 0.00, 5.55 → 4.72 / 0.83).
+ */
+export function splitRevenueShare(price: number): {
+  readonly author: number;
+  readonly platform: number;
+} {
+  if (!Number.isFinite(price) || price < 0) {
+    throw new BadRequestException('Цена навыка должна быть неотрицательной');
+  }
+
+  const totalKopecks = Math.round(price * 100);
+  const authorKopecks = Math.round(price * 0.85 * 100);
+  const platformKopecks = totalKopecks - authorKopecks;
+
+  return {
+    author: authorKopecks / 100,
+    platform: platformKopecks / 100,
+  };
 }
 
 function formatBalance(balance: Prisma.Decimal): string {

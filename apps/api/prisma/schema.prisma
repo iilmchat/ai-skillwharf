@@ -129,7 +129,42 @@ model InstalledSkill {
   author      String
   manifest    Json
   isEnabled   Boolean  @default(true)
+  /// slug навыка в публичном каталоге (API-27.2), если установлен оттуда.
+  marketplaceSlug String?
   installedAt DateTime @default(now())
+
+  @@index([marketplaceSlug])
+}
+
+/// Публичный каталог навыков (API-27.2, ADR 0002).
+/// `manifestYaml` — исходный SKILL.md; подпись проверяется по доверенным
+/// ключам при публикации и при установке.
+model MarketplaceSkill {
+  id               String   @id @default(uuid())
+  slug             String   @unique
+  name             String
+  version          String
+  description      String
+  /// Треки A..L из матрицы монетизации.
+  trackIds         String[]
+  /// Владелец записи в каталоге (автор навыка).
+  authorId         String
+  authorName       String
+  /// Счёт ЮKassa для сплита Revenue Share (не секрет).
+  payoutAccountId  String?
+  manifestYaml     String
+  signature        String?
+  publicKeyId      String?
+  verified         Boolean  @default(false)
+  pricingModel     String
+  price            Decimal  @default(0) @db.Decimal(18, 2)
+  downloadsCount   Int      @default(0)
+  status           String   @default("draft")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([authorId])
 }
 
 /// Счётчик бесплатных вызовов навыка (Freemium).
