@@ -172,6 +172,12 @@ services:
       # OTel включается только при заданном endpoint (см. Runbook).
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-skillwharf-api}
+      # Векторная память: по умолчанию pgvector в postgres; Qdrant включается
+      # вместе с профилем qdrant (см. Runbook, раздел про масштабирование RAG).
+      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-pgvector}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-skillwharf_memory}
       # Sentry выключен, пока SENTRY_DSN пуст; PII фильтруется в коде.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
@@ -289,6 +295,25 @@ services:
       - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
+
+  # Qdrant: выделенная векторная БД для роста базы эмбеддингов (ADR 0002,
+  # INFRA-28.3). Профиль qdrant: по умолчанию стек остаётся на pgvector и
+  # не тянет образ Qdrant. Порты 6333/6334 не публикуются на хост — API
+  # ходит внутри compose-сети; для отладки см. docker-compose.staging.yml.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    profiles: ["qdrant"]
+    restart: unless-stopped
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # OTel Collector: API отправляет OTLP-спаны на otel-collector:4318,
   # коллектор печатает их в stdout. Профиль monitoring, без внешних SaaS.
@@ -458,3 +483,4 @@ volumes:
   prometheus_data:
   grafana_data:
   tempo_data:
+  qdrant_data:

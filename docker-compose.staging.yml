@@ -8,6 +8,7 @@
 #
 #   --profile production  Caddy на 80/443 (DOMAIN, ACME_EMAIL, MONITORING_*)
 #   --profile monitoring  OTel + Prometheus + Grafana (MONITORING_*, GRAFANA_*)
+#   --profile qdrant      выделенная векторная БД Qdrant (только 127.0.0.1:6333)
 #   --profile with-llm    локальная Ollama (только 127.0.0.1:11435)
 #
 # Правила, которые здесь зафиксированы:
@@ -25,6 +26,13 @@
 #   STAGING_POSTGRES_PORT=5436
 #   STAGING_OLLAMA_PORT=11436
 services:
+  # Qdrant: только localhost для отладки/импорта коллекций. На production
+  # порт не публикуется — API ходит через внутреннюю compose-сеть.
+  qdrant:
+    restart: always
+    ports:
+      - "127.0.0.1:6333:6333"
+
   postgres:
     restart: always
     ports:
