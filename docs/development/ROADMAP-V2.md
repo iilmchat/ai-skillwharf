@@ -30,16 +30,24 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 29 — Automated LLM Evals & Regression Datasets
 
-* [ ] **[EVAL-29.1]** Золотые датасеты (Golden Datasets) для всех 12 треков
+* [x] **[EVAL-29.1]** Золотые датасеты (Golden Datasets) для всех 12 треков
   `A–L`: репрезентативные задачи, эталонные ответы и метрики качества
   (correctness, tool selection, HITL-поведение) с версионированием в git.
-* [ ] **[EVAL-29.2]** LLM-as-a-Judge: оценка ответов агентов второй моделью по
-  калиброванным рубрикам, с хранением вердикта и обоснования в БД.
-* [ ] **[EVAL-29.3]** Автоматический прогон Evals в CI и перед промоушеном
-  победителя A/B-эксперимента промптов: без прохода порога качества версия B
-  не повышается (интеграция с `PromptExperiment` Sprint 28).
+  Созданы `evals/datasets/track-a.json` … `track-l.json` (36 кейсов) и реестр
+  `index.json`; валидатор `scripts/run-evals.mjs` и npm-скрипт
+  `pnpm evals:validate` добавлены в CI. Методика — `docs/development/LLM-Evals-Guide.md`.
+* [x] **[EVAL-29.2]** LLM-as-a-Judge: оценка ответов агентов второй моделью по
+  калиброванным рубрикам, с хранением вердикта и обоснования в БД (бэкенд —
+  см. журнал ниже).
+* [x] **[EVAL-29.3]** Гейт перед промоушеном победителя A/B-эксперимента
+  промптов: без прохода порога качества версия B не повышается (интеграция с
+  `PromptExperiment` Sprint 28); CI-прогон — отдельная задача.
 * [ ] **[EVAL-29.4]** Дашборд регрессий и алерты в Grafana: динамика quality
   score по трекам, критичные деградации и ссылки на конкретные eval-случаи.
+* [x] **[WEB-29.5]** UI-панель запуска и просмотра LLM Evals в Control Plane
+  (версия, фильтр по треку A–L, история прогонов и детализация кейсов) +
+  локализованная обработка `errors.eval_gate_failed` при промоушене версии B
+  (UI-часть **EVAL-29.3**; без коммита, изменения в рабочем дереве).
 
 ### Sprint 30 — Multi-Agent Orchestration & Semantic Cache
 
@@ -140,3 +148,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 | Дата | Спринт / Задача | Агент | Статус | Коммит / Детали | Найденные проблемы (KI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-19 | Sprint 29 (29.1–29.3, 29.5) | OpenCode / UI / Infra | Выполнено | 12 золотых датасетов A–L (36 кейсов), `scripts/run-evals.mjs` с прогоном через `POST /prompts/:id/evals/run` и CI-валидацией; `PromptEvalRun` + `PromptEvalsService` (детерминированные метрики tool_calls/HITL + LLM-судья с Zod, mock-режим), `EVALS_MIN_PASS_RATE`; гейт промоушена `errors.eval_gate_failed`; панель LLM Evals в `/admin` с историей и детализацией, RU/EN и тесты | EVAL-29.4 (Grafana-дашборд) — не вошёл в скоуп |

@@ -40,6 +40,7 @@
 ## 💻 Разработка (`development/`)
 
 - [Правила разработки](development/RULES.md)
+- [LLM Evals: golden datasets и методика оценки](development/LLM-Evals-Guide.md)
 - [Текущий Roadmap](development/ROADMAP.md)
 - [Дорожная карта Post-GA: v1.1.0 — v2.0.0](development/ROADMAP-V2.md)
 - [План перехода в Production (Post-MVP)](development/POST-MVP-TODO.md)

@@ -4,6 +4,60 @@
 
 ## [Unreleased]
 
+### Sprint 29: Golden Datasets, LLM-as-a-Judge и Evals в Control Plane
+
+**EVAL-29.1 (датасеты и CLI).**
+
+- `evals/datasets/`: добавлены 12 золотых датасетов `track-a.json` …
+  `track-l.json` с 36 реалистичными кейсами (по 3 на трек `A–L`) в едином
+  контракте (`id`, `trackId`, `title`, `input`, `expectedTools`,
+  `requiresHitl`, `rubric.required`/`rubric.forbidden`) и реестр `index.json`.
+- `scripts/run-evals.mjs`: CLI валидации структуры датасетов и прогона через
+  `POST /api/v1/prompts/:id/evals/run` (promptId в path, `versionId` в теле;
+  рубрика приводится к плоскому массиву как в `datasetRubricSchema`), разбор
+  ответа `EvalRunView` (`caseId`, `verdict.passed`/`reasoning`), сводная таблица
+  Pass/Fail по трекам; exit code 1 при pass rate ниже `EVALS_MIN_PASS_RATE`
+  (по умолчанию 0.85). Добавлены npm-скрипт `pnpm evals:validate` и шаг
+  валидации в CI. Гайд — `docs/development/LLM-Evals-Guide.md`.
+
+**EVAL-29.2 / EVAL-29.3 (бэкенд и гейт промоушена).**
+
+- Модель `PromptEvalRun` + миграция (`promptId`, `versionId`, `trackFilter`,
+  `totalCases`/`passedCases`, `passRate`, `avgScore`, `status`, `resultsJson`,
+  `completedAt`) и история прогонов через `GET /api/v1/prompts/:id/evals`.
+- `prompt-eval.schemas.ts`: Zod-схемы `evalCaseSchema`, `judgeVerdictSchema`
+  (score 0..100, passed, reasoning), датасетов `evals/datasets/track-*.json`
+  с приведением рубрики `required`/`forbidden` к массиву, валидация тела
+  `POST /api/v1/prompts/:id/evals/run`.
+- `PromptEvalsService`: детерминированная проверка `tool_calls` и `requiresHitl`
+  по трассировке кейса + LLM-судья (`LlmJudgeClient` через `LlmRouterService`,
+  строгий системный промпт и JSON-парсинг ответа) с детерминированным
+  mock-судьёй для dev/тестов. Статус `passed` при `passRate >=
+  EVALS_MIN_PASS_RATE` (default 0.85), иначе `failed`.
+- Гейт промоушена (EVAL-29.3): `stopPromptExperiment` при
+  `EVALS_GATE_PROMOTION=true` или явном `requirePassingEval` отклоняет
+  промоушен без успешного Eval-прогона версии — `400 errors.eval_gate_failed`.
+- Тесты: 5 тестов Zod-схем и датасетов, 5 тестов расчёта passRate и статусов
+  (включая mock-судью и кастомный порог), 4 теста гейта промоушена.
+  `pnpm test` — 1483 теста.
+
+**WEB-29.5 (панель в Control Plane).**
+
+- Добавлена панель «Автооценка качества (LLM Evals)» в drawer версий шаблона
+  на `/admin`: выбор версии и опционального трека A–L, кнопка «Запустить Eval»
+  с индикатором, история прогонов со статусом, процентом прохождения,
+  средним баллом (`avgScore / 100`) и раскрываемой детализацией кейсов с
+  обоснованием судьи для проваленных случаев.
+- `src/lib/admin.ts`: Zod-схемы `promptEvalCaseResultSchema`,
+  `promptEvalRunSchema`, списка прогонов и формы запуска; клиенты
+  `fetchPromptEvals` (`GET /prompts/:id/evals`) и `runPromptEval`
+  (`POST /prompts/:id/evals/run`), ключ кэша `promptEvals`.
+- При повышении версии B в A/B-эксперименте ошибка `errors.eval_gate_failed`
+  теперь читается из machine-readable поля `code` ответа API и показывается
+  локализованным сообщением об ошибке (а не зелёным уведомлением); добавлен
+  подсказочный текст про обязательный Eval перед промоушеном.
+- RU/EN-ключи и unit-тесты контракта, клиента и перевода ошибки гейта.
+
 ### Планирование: дорожная карта Post-GA
 
 - Добавлен `docs/development/ROADMAP-V2.md`: 4 стратегических этапа
