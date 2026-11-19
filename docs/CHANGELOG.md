@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Планирование: дорожная карта Post-GA
+
+- Добавлен `docs/development/ROADMAP-V2.md`: 4 стратегических этапа
+  (`v1.1.0` — `v2.0.0`) и 8 спринтов (29–36) с уникальными ID задач и
+  чекбоксами для агентов. План покрывает LLM Evals и LLM-as-a-Judge,
+  многоагентную оркестрацию LangGraph и семантический кеш, Organizations/
+  Workspace и granular RBAC, MCP-коннектор 1С и event-driven webhooks,
+  Transactional Outbox с платформенным кошельком (остаток KI-087), KMS/Vault
+  (остаток KI-053) и HA-нагрузочное тестирование, No-Code конструктор и
+  Developer Portal с аудитом навыков. Базой служит релиз `v1.0.0-ga`.
+  Ссылка добавлена в `docs/README.md`.
+
 ### Маркетинг: питч-дек под релиз v1.0.0-ga
 
 - `docs/marketing/pitch/create_pitch.py`: короткий питч переработан с трёх

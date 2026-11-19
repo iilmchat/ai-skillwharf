@@ -41,6 +41,7 @@
 
 - [Правила разработки](development/RULES.md)
 - [Текущий Roadmap](development/ROADMAP.md)
+- [Дорожная карта Post-GA: v1.1.0 — v2.0.0](development/ROADMAP-V2.md)
 - [План перехода в Production (Post-MVP)](development/POST-MVP-TODO.md)
 - [Промпт для AI-агентов](development/PROMPT_CURRENT.md)
 
