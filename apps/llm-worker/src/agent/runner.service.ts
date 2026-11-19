@@ -31,6 +31,7 @@ import {
   type ChatState,
 } from './graph.js';
 import { DEFAULT_OFFICE_AGENT_ID } from './office.js';
+import { freshTraceId } from './supervisor.js';
 import { RemoteCheckpointSaver } from './remote-checkpoint.saver.js';
 import { createRemoteTools } from './tools.factory.js';
 
@@ -55,10 +56,14 @@ export class AgentRunnerService {
   async *run(request: RunGraphRequest): AsyncGenerator<GraphEvent> {
     try {
       const graph = this.buildGraph(request);
+      const traceId = freshTraceId(request.traceId);
 
       yield* this.consume(
         await graph.stream(
           {
+            traceId,
+            orchestrationMode: request.orchestrationMode ?? 'single',
+            agentRoles: request.agentRoles ?? [],
             conversationId: request.conversationId,
             userId: request.userId,
             messages: toLangChainMessages(request.messages),
@@ -162,6 +167,7 @@ export class AgentRunnerService {
         conversationId: context.conversationId,
         reply,
         pendingApproval: true,
+        ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
       };
 
       return;
@@ -172,6 +178,7 @@ export class AgentRunnerService {
       conversationId: context.conversationId,
       reply,
       pendingApproval: false,
+      ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
     };
   }
 

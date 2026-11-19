@@ -3,8 +3,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type { InstalledSkill } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
@@ -37,6 +39,7 @@ import {
 } from './office-events.js';
 import { AgentToolsService } from '../agent/agent-tools.service.js';
 import type {
+  AgentRole,
   ApprovalRule,
   GraphEvent,
   OutcomePrice,
@@ -44,6 +47,7 @@ import type {
   RunGraphRequest,
 } from '../agent/contracts.js';
 import { LlmWorkerClient } from '../agent/llm-worker.client.js';
+import { SemanticCacheService } from '../llm/semantic-cache.service.js';
 
 /** Сколько последних сообщений уходит в LLM. */
 export const CHAT_HISTORY_LIMIT = 10;
@@ -69,6 +73,8 @@ export interface ChatReply {
   conversationId: string;
   reply: string;
   pendingApproval?: boolean;
+  /** Ответ взят из семантического кеша — LLM не вызывалась (CACHE-30.2). */
+  cacheHit?: boolean;
 }
 
 interface HistoryMessage {
@@ -92,6 +98,32 @@ interface PreparedMessage {
 interface StreamResult {
   reply: string;
   pendingApproval: boolean;
+}
+
+/** Роли, выводимые из имён подключённых навыков (GRAPH-30.1). */
+const ROLE_SKILL_HINTS: ReadonlyArray<readonly [AgentRole, readonly string[]]> = [
+  ['researcher', ['research', 'search', 'tavily', 'поиск']],
+  ['drafter', ['draft', 'article', 'docx', 'content', 'статья']],
+  ['reviewer', ['review', 'audit', 'check', 'провер']],
+  ['analyst', ['analy', 'finance', 'report', 'аналит']],
+  ['operator', ['erp', 'order', 'demand', 'moysklad', 'bitrix']],
+];
+
+export function orchestrationFromSkills(
+  skills: readonly SkillSnapshot[],
+): { orchestrationMode: 'single' | 'supervisor'; agentRoles?: AgentRole[] } {
+  const roles: AgentRole[] = [];
+  const names = skills.map((skill) => skill.name.toLowerCase());
+
+  for (const [role, hints] of ROLE_SKILL_HINTS) {
+    if (names.some((name) => hints.some((hint) => name.includes(hint)))) {
+      roles.push(role);
+    }
+  }
+
+  return roles.length >= 2
+    ? { orchestrationMode: 'supervisor', agentRoles: roles }
+    : { orchestrationMode: 'single' };
 }
 
 /** Роли, которые понимает policy engine; неизвестная роль — «user». */
@@ -266,6 +298,7 @@ export class ChatService {
     private readonly checkpoints: CheckpointStoreService,
     private readonly pendingApprovalService: PendingApprovalService,
     private readonly toolsService: AgentToolsService,
+    @Optional() private readonly semanticCache?: SemanticCacheService,
   ) {}
 
   /**
@@ -362,6 +395,29 @@ export class ChatService {
     return { deleted: await this.memoryService.clear(userId) };
   }
 
+  /** Ключ семантического кеша строго изолирован по userId/промпту/модели. */
+  private cacheQuery(
+    userId: string,
+    content: string,
+    prepared: PreparedMessage,
+    routes: LlmRouteSelection[],
+  ) {
+    if (this.semanticCache === undefined) {
+      return null;
+    }
+
+    return {
+      userId,
+      promptVersionId: createHash('sha256')
+        .update(prepared.systemPrompt)
+        .digest('hex')
+        .slice(0, 16),
+      model: routes[0]?.modelName ?? 'unknown',
+      query: content,
+      toolsEnabled: prepared.tools.length > 0,
+    };
+  }
+
   async handleMessage(
     userId: string,
     conversationId: string,
@@ -376,6 +432,18 @@ export class ChatService {
     );
 
     const routes = await this.llmRouterService.selectRoutes('chat');
+    const cacheQuery = this.cacheQuery(userId, content, prepared, routes);
+
+    if (cacheQuery !== null) {
+      const cached = await this.semanticCache!.lookup(cacheQuery);
+
+      if (cached.hit) {
+        await this.persistReply(conversationId, cached.reply);
+        await this.rememberExchange(userId, content, cached.reply);
+
+        return { conversationId, reply: cached.reply, cacheHit: true };
+      }
+    }
 
     try {
       const result = await this.consumeWorkerStream(
@@ -389,6 +457,9 @@ export class ChatService {
         return { conversationId, reply: '', pendingApproval: true };
       }
 
+      if (cacheQuery !== null) {
+        await this.semanticCache!.store(cacheQuery, result.reply);
+      }
       await this.persistReply(conversationId, result.reply);
       await this.rememberExchange(userId, content, result.reply);
 
@@ -422,6 +493,19 @@ export class ChatService {
     );
 
     const routes = await this.llmRouterService.selectRoutes('chat');
+    const cacheQuery = this.cacheQuery(userId, content, prepared, routes);
+
+    if (cacheQuery !== null) {
+      const cached = await this.semanticCache!.lookup(cacheQuery);
+
+      if (cached.hit) {
+        onDelta(cached.reply);
+        await this.persistReply(conversationId, cached.reply);
+        await this.rememberExchange(userId, content, cached.reply);
+
+        return { conversationId, reply: cached.reply, cacheHit: true };
+      }
+    }
 
     try {
       const result = await this.consumeWorkerStream(
@@ -437,6 +521,9 @@ export class ChatService {
         return { conversationId, reply: result.reply, pendingApproval: true };
       }
 
+      if (cacheQuery !== null) {
+        await this.semanticCache!.store(cacheQuery, result.reply);
+      }
       await this.persistReply(conversationId, result.reply);
       await this.rememberExchange(userId, content, result.reply);
 
@@ -478,6 +565,8 @@ export class ChatService {
       ...(prepared.skills.length === 0
         ? {}
         : { skillId: prepared.skills.map((skill) => skill.id).join(',') }),
+      ...orchestrationFromSkills(prepared.skills),
+      traceId: randomUUID(),
     };
   }
 

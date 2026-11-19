@@ -5,6 +5,19 @@ export const userRoleSchema = z.enum(['guest', 'user', 'admin', 'owner']);
 
 export type UserRole = z.infer<typeof userRoleSchema>;
 
+/** Профильные роли субагентов мультиагентного графа (GRAPH-30.1). */
+export const agentRoleSchema = z.enum([
+  'researcher',
+  'drafter',
+  'reviewer',
+  'analyst',
+  'operator',
+]);
+export type AgentRole = z.infer<typeof agentRoleSchema>;
+
+export const orchestrationModeSchema = z.enum(['single', 'supervisor']);
+export type OrchestrationMode = z.infer<typeof orchestrationModeSchema>;
+
 /** Маршрут LLM, выбранный API-роутером. */
 export const llmRouteSelectionSchema = z.object({
   id: z.string(),
@@ -96,6 +109,12 @@ export const graphContextSchema = z.object({
   tools: z.array(toolDescriptorSchema),
   agentId: z.string().optional(),
   skillId: z.string().optional(),
+  /** По умолчанию 'single' — поведение до Sprint 30 без изменений. */
+  orchestrationMode: orchestrationModeSchema.optional(),
+  /** Явный список ролей; без него режим supervisor определяется API. */
+  agentRoles: z.array(agentRoleSchema).max(5).optional(),
+  /** Сквозной ID трассировки сквозь все шаги графа. */
+  traceId: z.string().min(1).optional(),
 });
 
 export type GraphContext = z.infer<typeof graphContextSchema>;
@@ -127,6 +146,20 @@ export const officeEventSchema = z.object({
   reason: z.enum(['approval', 'payment']).optional(),
 });
 
+/** Событие передачи задачи между профильными субагентами. */
+export const agentHandoffEventSchema = z
+  .object({
+    type: z.literal('agent_handoff'),
+    conversationId: z.string(),
+    traceId: z.string(),
+    fromRole: z.union([z.enum(['supervisor']), agentRoleSchema]),
+    toRole: agentRoleSchema,
+    reason: z.string(),
+  })
+  .strict();
+
+export type AgentHandoffEvent = z.infer<typeof agentHandoffEventSchema>;
+
 export const approvalEventSchema = z.object({
   type: z.literal('approval'),
   conversationId: z.string(),
@@ -141,6 +174,7 @@ export const doneEventSchema = z.object({
   conversationId: z.string(),
   reply: z.string(),
   pendingApproval: z.boolean(),
+  traceId: z.string().optional(),
 });
 
 export const errorEventSchema = z.object({
@@ -153,6 +187,7 @@ export const errorEventSchema = z.object({
 export const graphEventSchema = z.discriminatedUnion('type', [
   deltaEventSchema,
   officeEventSchema,
+  agentHandoffEventSchema,
   approvalEventSchema,
   doneEventSchema,
   errorEventSchema,

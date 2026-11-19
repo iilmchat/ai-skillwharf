@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { BillingModule } from '../billing/billing.module.js';
 import { AgentModule } from '../agent/agent.module.js';
+import { LlmModule } from '../llm/llm.module.js';
 import { LlmRouterModule } from '../llm-router/llm-router.module.js';
 import { MemoryModule } from '../memory/memory.module.js';
 import { PromptsModule } from '../prompts/prompts.module.js';
@@ -16,6 +17,7 @@ import { ChatPersistenceModule } from './persistence/persistence.module.js';
   imports: [
     AuthModule,
     AgentModule,
+    LlmModule,
     LlmRouterModule,
     SecurityModule,
     BillingModule,

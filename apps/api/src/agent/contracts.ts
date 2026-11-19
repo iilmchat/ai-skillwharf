@@ -5,6 +5,15 @@ export const userRoleSchema = z.enum(['guest', 'user', 'admin', 'owner']);
 
 export type UserRole = z.infer<typeof userRoleSchema>;
 
+export const agentRoleSchema = z.enum([
+  'researcher',
+  'drafter',
+  'reviewer',
+  'analyst',
+  'operator',
+]);
+export type AgentRole = z.infer<typeof agentRoleSchema>;
+
 /** Маршрут LLM, выбранный API-роутером. */
 export const llmRouteSelectionSchema = z.object({
   id: z.string(),
@@ -97,6 +106,9 @@ export const graphContextSchema = z.object({
   tools: z.array(toolDescriptorSchema),
   agentId: z.string().optional(),
   skillId: z.string().optional(),
+  orchestrationMode: z.enum(['single', 'supervisor']).optional(),
+  agentRoles: z.array(agentRoleSchema).max(5).optional(),
+  traceId: z.string().min(1).optional(),
 });
 
 export type GraphContext = z.infer<typeof graphContextSchema>;
@@ -128,6 +140,30 @@ export const officeEventSchema = z.object({
   reason: z.enum(['approval', 'payment']).optional(),
 });
 
+/** Передача задачи между субагентами (GRAPH-30.1). */
+export const agentHandoffEventSchema = z
+  .object({
+    type: z.literal('agent_handoff'),
+    conversationId: z.string(),
+    traceId: z.string(),
+    fromRole: z.union([z.literal('supervisor'), z.enum([
+      'researcher',
+      'drafter',
+      'reviewer',
+      'analyst',
+      'operator',
+    ])]),
+    toRole: z.enum([
+      'researcher',
+      'drafter',
+      'reviewer',
+      'analyst',
+      'operator',
+    ]),
+    reason: z.string(),
+  })
+  .strict();
+
 export const approvalEventSchema = z.object({
   type: z.literal('approval'),
   conversationId: z.string(),
@@ -142,6 +178,7 @@ export const doneEventSchema = z.object({
   conversationId: z.string(),
   reply: z.string(),
   pendingApproval: z.boolean(),
+  traceId: z.string().optional(),
 });
 
 export const errorEventSchema = z.object({
@@ -154,6 +191,7 @@ export const errorEventSchema = z.object({
 export const graphEventSchema = z.discriminatedUnion('type', [
   deltaEventSchema,
   officeEventSchema,
+  agentHandoffEventSchema,
   approvalEventSchema,
   doneEventSchema,
   errorEventSchema,

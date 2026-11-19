@@ -18,7 +18,9 @@ import {
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import { z } from 'zod';
 import type {
+  AgentRole,
   ApprovalRule,
+  OrchestrationMode,
   OutcomePrice,
   SkillSnapshot,
   ToolSkillContext,
@@ -36,6 +38,11 @@ import type {
   LlmInferenceService,
 } from '../llm/inference.service.js';
 import { messageContentToText } from '../llm/inference.service.js';
+import {
+  handoffEvent,
+  maxHandoffsFromEnv,
+  selectNextRole,
+} from './supervisor.js';
 
 /** Сколько последних раундов инструментов допускается. */
 export const MAX_TOOL_ROUNDS = 5;
@@ -78,7 +85,10 @@ export interface ChatStreamDelta {
   text: string;
 }
 
-export type ChatStreamEvent = ChatStreamDelta | ChatOfficeEvent;
+export type ChatStreamEvent =
+  | ChatStreamDelta
+  | ChatOfficeEvent
+  | import('../contracts.js').AgentHandoffEvent;
 
 const ChatStateAnnotation = Annotation.Root({
   conversationId: Annotation<string>({
@@ -140,6 +150,26 @@ const ChatStateAnnotation = Annotation.Root({
     default: () => DEFAULT_OFFICE_AGENT_ID,
   }),
   skillId: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
+  }),
+  orchestrationMode: Annotation<OrchestrationMode>({
+    reducer: (_previous, next) => next,
+    default: () => 'single',
+  }),
+  agentRoles: Annotation<AgentRole[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  handoffCount: Annotation<number>({
+    reducer: (_previous, next) => next,
+    default: () => 0,
+  }),
+  currentRole: Annotation<AgentRole | null>({
+    reducer: (_previous, next) => next,
+    default: () => null,
+  }),
+  traceId: Annotation<string>({
     reducer: (_previous, next) => next,
     default: () => '',
   }),
@@ -226,6 +256,35 @@ interface BuildGraphOptions {
  */
 export function buildChatGraph(options: BuildGraphOptions) {
   return new StateGraph(ChatStateAnnotation)
+    .addNode('supervisor', async (state: ChatState, config) => {
+      const emit = getWriter(config);
+      const roles = state.agentRoles.length > 0
+        ? state.agentRoles
+        : (['researcher', 'drafter', 'reviewer', 'analyst', 'operator'] as AgentRole[]);
+      const previous = state.currentRole;
+      const next = selectNextRole(roles, lastMessage(state.messages));
+      const count = state.handoffCount + 1;
+
+      emit?.(
+        handoffEvent({
+          conversationId: state.conversationId,
+          traceId: state.traceId,
+          fromRole: previous ?? 'supervisor',
+          toRole: next,
+          reason: previous === null ? 'начало работы' : `передача после шага ${previous}`,
+        }),
+      );
+
+      const limited = count >= maxHandoffsFromEnv();
+
+      return {
+        handoffCount: count,
+        currentRole: next,
+        ...(limited
+          ? { reply: 'Достигнут лимит передач между агентами. Уточните задачу.' }
+          : {}),
+      };
+    })
     .addNode('llm', async (state: ChatState, config) => {
       const emit = getWriter(config);
       let text = '';
@@ -392,14 +451,34 @@ export function buildChatGraph(options: BuildGraphOptions) {
         taintedSecrets: execution.taintedSecrets,
       };
     })
-    .addEdge(START, 'llm')
+    .addConditionalEdges(
+      START,
+      (state: ChatState) =>
+        state.orchestrationMode === 'supervisor' ? 'supervisor' : 'llm',
+      ['supervisor', 'llm'],
+    )
+    .addConditionalEdges(
+      'supervisor',
+      (state: ChatState) =>
+        state.handoffCount >= maxHandoffsFromEnv() ? END : 'llm',
+      ['llm', END],
+    )
     .addConditionalEdges('llm', (state: ChatState) => {
-      if (toolCallsOf(lastMessage(state.messages)).length === 0) {
-        return END;
+      if (toolCallsOf(lastMessage(state.messages)).length > 0) {
+        return toolRounds(state.messages) > MAX_TOOL_ROUNDS ? END : 'tools';
       }
 
-      return toolRounds(state.messages) > MAX_TOOL_ROUNDS ? END : 'tools';
-    })
+      // В supervisor-режиме после ответа роли передаём задачу следующей,
+      // пока не исчерпан лимит передач.
+      if (
+        state.orchestrationMode === 'supervisor' &&
+        state.handoffCount < maxHandoffsFromEnv()
+      ) {
+        return 'supervisor';
+      }
+
+      return END;
+    }, ['tools', 'supervisor', END])
     .addEdge('tools', 'llm')
     .compile({ checkpointer: options.checkpointer });
 }
@@ -419,6 +498,9 @@ export interface RunGraphInput {
   toolSkills: Record<string, ToolSkillContext[]>;
   agentId: string;
   skillId?: string;
+  orchestrationMode?: OrchestrationMode;
+  agentRoles?: AgentRole[];
+  traceId?: string;
 }
 
 /** Конфиг checkpoint-треда: один диалог — один thread. */

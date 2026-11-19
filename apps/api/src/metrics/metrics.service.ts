@@ -44,6 +44,20 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly semanticCacheHits = new Counter({
+    name: 'skillwharf_semantic_cache_hits_total',
+    help: 'Semantic LLM cache hits',
+    labelNames: ['model'] as const,
+    registers: [this.registry],
+  });
+
+  private readonly semanticCacheMisses = new Counter({
+    name: 'skillwharf_semantic_cache_misses_total',
+    help: 'Semantic LLM cache misses',
+    labelNames: ['model'] as const,
+    registers: [this.registry],
+  });
+
   private readonly hashTenantId: boolean;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
@@ -108,6 +122,17 @@ export class MetricsService {
         },
         cost,
       );
+    }
+  }
+
+  /** Учёт попаданий/промахов семантического кеша LLM (CACHE-30.2). */
+  countSemanticCacheResult(model: string, hit: boolean): void {
+    const labels = { model: model || 'unknown' };
+
+    if (hit) {
+      this.semanticCacheHits.inc(labels);
+    } else {
+      this.semanticCacheMisses.inc(labels);
     }
   }
 
