@@ -4,6 +4,49 @@
 
 ## [Unreleased]
 
+### Sprint 35: CustomAgentRole и Visual No-Code Agent Builder
+
+**Бэкенд и Worker: модель, CRUD и подхват ролей (BUILDER-35.0).**
+
+- Модель `CustomAgentRole` + миграция: `roleKey` уникален в паре с
+  `workspaceId`, хранит `systemPrompt`, `skillSlugs`, `hitlPolicy`,
+  `dailyBudgetRub` и `isActive`.
+- `CustomAgentRolesController` / `CustomAgentRolesService`:
+  `GET|POST /api/v1/workspaces/:workspaceId/agents`,
+  `PATCH|DELETE /api/v1/workspaces/:workspaceId/agents/:agentId`. Чтение — всем
+  участникам, изменение — `owner`/`admin` (403
+  `errors.insufficient_workspace_role`). Все входные/выходные данные — Zod.
+- `ChatService` подхватывает активные роли дефолтного воркспейса: их `roleKey`
+  добавляются в `agentRoles` графа, а инструкции, навыки, HITL и бюджет —
+  в системный промпт сессии. Контракт `agentRoleSchema` расширен кастомными
+  kebab-slug (API и llm-worker), handoff-события принимают такие роли.
+- Тесты: CRUD и RBAC (viewer/operator → 403), валидация `roleKey`/бюджета,
+  подхват ролей в `ChatService` — 8 + 1 новых тест.
+
+**Web UI: страница `/app/builder` (BUILDER-35.1, BUILDER-35.3).**
+
+- `src/lib/agent-builder.ts` (новый): Zod-контракт кастомных агентов —
+  `hitlPolicySchema` (`never|high_risk|always`), `customAgentRoleSchema`
+  (бюджет приводится из Decimal-строки к числу), строгая форма
+  `createCustomAgentSchema` с автогенерацией `roleKey` из названия
+  (`generateRoleKey`, транслитерация кириллицы → kebab-case) и отдельный
+  PATCH-контракт. Клиенты `fetchWorkspaceAgents`, `createWorkspaceAgent`,
+  `updateWorkspaceAgent`, `deleteWorkspaceAgent` для
+  `/api/v1/workspaces/:id/agents`, ключ кэша `['workspace-agents', id]`.
+- `src/pages/AgentBuilderPage.tsx` (новый): защищённая страница `/app/builder`
+  с двухколоночным интерфейсом — слева форма (название стола, описание,
+  чекбоксы установленных навыков, системный промпт с пресетами «Менеджер
+  продаж»/«Аналитик склада»/«Контролёр документов», регламент HITL и дневной
+  бюджет), справа живое превью карточки AI-Офиса и список агентов воркспейса
+  с переключателем активности и удалением. Роль `viewer` не может менять
+  агентов; 404/ошибки показываются локализованно.
+- `src/App.tsx`: ленивый маршрут `/app/builder` под `ProtectedRoute`.
+- Навигация: пункт «Конструктор» / `Agent Builder` (`nav.builder`) в сайдбаре
+  чата и в шапках страниц приложения.
+- RU/EN-ключи `nav.builder` и `builder.*`; unit-тесты
+  `src/lib/agent-builder.test.ts` (18 тестов): схемы, транслитерация
+  `roleKey`, парсинг бюджета и клиентские вызовы.
+
 ### Sprint 34: внешний KMS и горизонтальное масштабирование
 
 **KMS-провайдеры: HashiCorp Vault Transit и Yandex Cloud KMS (KMS-34.1/34.2, KI-053).**

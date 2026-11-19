@@ -164,12 +164,20 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 35 — Visual No-Code Agent & Skill Builder
 
-* [ ] **[BUILDER-35.1]** Визуальный конструктор ролей в UI: переименование и
-  настройка «столов» AI-Офиса под конкретного заказчика.
+* [x] **[BUILDER-35.1]** Визуальный конструктор ролей в UI: переименование и
+  настройка «столов» AI-Офиса под конкретного заказчика. Страница
+  `/app/builder` с формой и живым превью карточки стола (без коммита,
+  изменения в рабочем дереве).
 * [ ] **[BUILDER-35.2]** Сборка агента из навыков Marketplace в 1 клик
   (drag-and-drop), с предпросмотром инструментов и разрешений.
-* [ ] **[BUILDER-35.3]** Настройка регламента HITL и дневного бюджета агента
-  прямо в конструкторе, с валидацией и сохранением в конфигурацию workspace.
+* [x] **[BUILDER-35.3]** Настройка регламента HITL и дневного бюджета агента
+  прямо в конструкторе, с валидацией и сохранением в конфигурацию workspace
+  (радиокнопки HITL, поле бюджета, Zod-клиент `/workspaces/:id/agents`;
+  без коммита, изменения в рабочем дереве).
+* [x] **[BUILDER-35.0]** Бэкенд конструктора (`CustomAgentRole`): модель и
+  миграция, REST CRUD с RBAC воркспейса и Zod-валидацией, подхват активных
+  ролей в `ChatService` (`agentRoles` + инструкции/навыки в контекст сессии).
+  Бэкенд для BUILDER-35.1/35.2/35.3 готов; UI-часть — отдельные задачи выше.
 
 ### Sprint 36 — Developer Portal & Automated Security Audit
 
@@ -193,3 +201,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | 2026-11-19 | Sprint 32 (32.1–32.3) | OpenCode / UI / Infra | Выполнено | MCP-сервер `1c-mcp` (OData, per-request креды, 4 инструмента, тесты); API 1С (`POST/DELETE /integrations/1c` с проверкой `$metadata`, `onec_*`, стартовый навык H/J/K/L) и Event-Driven webhook-триггеры (`WebhookTrigger`, CRUD `/triggers`, constant-time секрет, лимит 32 КБ); карточка 1С и секция «Вебхук-триггеры» в `/app/settings`, RU/EN и unit-тесты | — |
 | 2026-11-19 | Sprint 33 (33.1–33.3) | OpenCode / UI | Выполнено | `BillingOutbox` + миграция, outbox в транзакции сплита, `BillingOutboxService` с backoff/dead-letter и тиком (`BILLING_OUTBOX_POLL_MS`), Platform Treasury с реальным `platform_fee`, админ API `/admin/billing/{treasury,reconciliation,outbox/:id/retry}`; вкладка «Финансы и Клиринг» на `/admin?tab=billing` с карточкой кошелька, сверкой и таблицей Outbox; RU/EN и 30 unit-тестов | KI-087 закрыт; OUTBOX-33.3 (сверка с Journal) — остаток |
 | 2026-11-19 | Sprint 34 (34.1–34.2) | OpenCode / Infra | Выполнено | Адаптеры `IKmsEnvelopeProvider`: `LocalAesKmsProvider`, `VaultTransitKmsProvider` и `YandexCloudKmsProvider` с конвертами `kms:*` и миграцией `v1/v2` через `keys:rotate`; распределённая Redis-блокировка `BillingOutboxService` (3 реплики → 1 перевод); `docker-compose.ha.yml` (3/3/2 реплики, Redis rate-limit, distributed lock), KMS-env и CLI `pnpm loadtest:ha` с p50/p95/p99; Runbook разделы 24–25 | KI-053 закрыт полностью |
+| 2026-11-19 | Sprint 35 (35.0, 35.1, 35.3) | OpenCode / UI | Выполнено | Модель `CustomAgentRole` + миграция, CRUD `/workspaces/:id/agents` с RBAC, подхват активных ролей в `ChatService`/граф llm-worker; страница `/app/builder` с Zod-клиентом, автогенерацией `roleKey`, пресетами, HITL/бюджетом, живым превью AI-Офиса и списком агентов; защищённый маршрут, навигация, RU/EN и unit-тесты | BUILDER-35.2 (drag-and-drop из Marketplace) — остаток |
