@@ -16,6 +16,10 @@ import {
   googleAuthorizationUrlSchema,
   integrationsSchema,
   moyskladApiTokenSchema,
+  oneCCredentialsSchema,
+  oneCOdataUrlSchema,
+  oneCPasswordSchema,
+  oneCUsernameSchema,
   PROVIDER_AUTH_REQUIRED_CODE,
   telegramBotTokenSchema,
   type IntegrationsState,
@@ -65,6 +69,7 @@ const ACTIVE_STATE: IntegrationsState = {
   midjourney: { status: 'disconnected' },
   bitrix24: { status: 'disconnected' },
   moysklad: { status: 'disconnected' },
+  onec: { status: 'disconnected' },
 };
 
 describe('integrationsSchema', () => {
@@ -83,6 +88,7 @@ describe('integrationsSchema', () => {
       midjourney: { status: 'disconnected' },
       bitrix24: { status: 'disconnected' },
       moysklad: { status: 'disconnected' },
+      onec: { status: 'disconnected' },
     });
   });
 
@@ -217,6 +223,79 @@ describe('moyskladApiTokenSchema', () => {
   });
 });
 
+describe('1С: OData URL (Sprint 32)', () => {
+  it('принимает абсолютные http:// и https:// адреса и обрезает пробелы', () => {
+    expect(oneCOdataUrlSchema.parse('https://company.ru')).toBe(
+      'https://company.ru',
+    );
+    expect(oneCOdataUrlSchema.parse('  http://1c.local/odata  ')).toBe(
+      'http://1c.local/odata',
+    );
+  });
+
+  it('отклоняет относительные пути, чужие схемы и пустоту', () => {
+    expect(oneCOdataUrlSchema.safeParse('company.ru/odata').success).toBe(false);
+    expect(oneCOdataUrlSchema.safeParse('javascript:alert(1)').success).toBe(
+      false,
+    );
+    expect(oneCOdataUrlSchema.safeParse('ftp://company.ru').success).toBe(false);
+    expect(
+      oneCOdataUrlSchema.safeParse('https://user:pass@company.ru').success,
+    ).toBe(false);
+    expect(oneCOdataUrlSchema.safeParse('   ').success).toBe(false);
+  });
+});
+
+describe('1С: логин и пароль (Sprint 32)', () => {
+  it('требует непустые значения и убирает пробелы по краям', () => {
+    expect(oneCUsernameSchema.parse(' buf  ')).toBe('buf');
+    expect(oneCPasswordSchema.parse('  secret  ')).toBe('secret');
+    expect(oneCUsernameSchema.safeParse('   ').success).toBe(false);
+    expect(oneCPasswordSchema.safeParse('').success).toBe(false);
+  });
+
+  it('валидирует всё тело подключения одной схемой', () => {
+    const credentials = {
+      odataUrl: 'https://company.ru',
+      username: 'buf',
+      password: 'secret',
+    };
+
+    expect(oneCCredentialsSchema.parse(credentials)).toEqual(credentials);
+    expect(
+      oneCCredentialsSchema.safeParse({ ...credentials, odataUrl: 'nope' })
+        .success,
+    ).toBe(false);
+    expect(
+      oneCCredentialsSchema.safeParse({ ...credentials, password: '' }).success,
+    ).toBe(false);
+  });
+
+  it('считает 1С отключённой, если API о ней не знает', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'active' },
+      google: { status: 'disconnected' },
+    });
+
+    expect(state.onec).toEqual({ status: 'disconnected' });
+    expect(
+      integrationsSchema.parse({
+        telegram: { status: 'disconnected' },
+        google: { status: 'disconnected' },
+        onec: {
+          status: 'active',
+          odataUrl: 'https://company.ru',
+          source: 'user',
+        },
+      }).onec,
+    ).toEqual({
+      status: 'active',
+      odataUrl: 'https://company.ru',
+      source: 'user',
+    });
+  });
+});
+
 describe('integration API', () => {
   beforeEach(() => {
     getMock.mockReset();
@@ -338,6 +417,23 @@ describe('integration API', () => {
     });
     expect(deleteMock).toHaveBeenCalledWith('/integrations/moysklad');
   });
+
+  it('подключает 1С по OData URL, логину и паролю и отключает её', async () => {
+    await connectKeyIntegration({
+      provider: '1c',
+      odataUrl: 'https://company.ru',
+      username: 'buf',
+      password: 'secret',
+    });
+    await disconnectKeyIntegration('1c');
+
+    expect(postMock).toHaveBeenCalledWith('/integrations/1c', {
+      odataUrl: 'https://company.ru',
+      username: 'buf',
+      password: 'secret',
+    });
+    expect(deleteMock).toHaveBeenCalledWith('/integrations/1c');
+  });
 });
 
 describe('getActiveIntegrationChannels', () => {
@@ -355,6 +451,7 @@ describe('getActiveIntegrationChannels', () => {
         midjourney: { status: 'disconnected' },
         bitrix24: { status: 'disconnected' },
         moysklad: { status: 'disconnected' },
+        onec: { status: 'disconnected' },
       }),
     ).toEqual(['telegram']);
     expect(getActiveIntegrationChannels(undefined)).toEqual([]);
@@ -507,6 +604,27 @@ describe('getIntegrationErrorDetails', () => {
     ).toBe('invalidCredentials');
   });
 
+  it('маппит ошибки подключения 1С в invalidCredentials', () => {
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith(
+          { code: PROVIDER_AUTH_REQUIRED_CODE, message: 'Bad credentials' },
+          502,
+        ),
+        '1cConnect',
+      ),
+    ).toEqual({
+      kind: 'invalidCredentials',
+      serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
+    });
+    expect(
+      getIntegrationErrorDetails(
+        axiosErrorWith({ message: 'Unauthorized' }, 401),
+        '1cConnect',
+      ).kind,
+    ).toBe('sessionExpired');
+  });
+
   it('маппит provider_unavailable в unavailable', () => {
     expect(
       getIntegrationErrorDetails(
@@ -577,6 +695,9 @@ describe('getProviderCredentialRejectionKey', () => {
     expect(getProviderCredentialRejectionKey('moyskladConnect')).toBe(
       'settings.integrations.moysklad.tokenRejected',
     );
+    expect(getProviderCredentialRejectionKey('1cConnect')).toBe(
+      'settings.integrations.oneC.credentialsRejected',
+    );
   });
 
   it('для остальных карточек оставляет общий текст', () => {
@@ -599,6 +720,18 @@ describe('live-проверка ключей Битрикс24/МойСклад',
       serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
     });
     expect(getIntegrationErrorDetails(error, 'moyskladConnect')).toEqual({
+      kind: 'invalidCredentials',
+      serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
+    });
+  });
+
+  it('1С: 400 provider_auth_required → invalidCredentials с кодом', () => {
+    const error = axiosErrorWith(
+      { code: PROVIDER_AUTH_REQUIRED_CODE, message: '1C rejected login' },
+      400,
+    );
+
+    expect(getIntegrationErrorDetails(error, '1cConnect')).toEqual({
       kind: 'invalidCredentials',
       serverMessage: PROVIDER_AUTH_REQUIRED_CODE,
     });

@@ -196,11 +196,14 @@ Google Workspace активен, в карточках агентов и в бо
 
 ## Настройки, интеграции и память
 
-Страница `/app/settings` содержит три независимых блока:
+Страница `/app/settings` содержит четыре независимых блока:
 
 - «Интеграции» — Telegram, Google Workspace, Ozon, Wildberries, Midjourney,
-  Битрикс24 и МойСклад: подключение, статус и отзыв доступа (см. раздел
-  «Интеграции» ниже).
+  Битрикс24, МойСклад и 1С:Предприятие: подключение, статус и отзыв доступа
+  (см. раздел «Интеграции» ниже).
+- «Вебхук-триггеры» — создание/удаление триггеров автозапуска агентов и
+  просмотр готового Webhook URL с секретом `X-Trigger-Secret` (см. раздел
+  «Вебхук-триггеры» ниже).
 - «Долговременная память» — кнопка «Забыть меня» вызывает
   `DELETE /api/v1/chat/memory` и показывает тост об успехе или ошибке.
 - «Память» — список записей RAG-памяти. Раздел управляется feature-флагом
@@ -297,6 +300,19 @@ docker build -f apps/web/Dockerfile \
   `DELETE /api/v1/integrations/moysklad`. Маршруты в API ещё не реализованы
   (KI-075), поэтому до их появления карточки показывают «Интеграция пока
   недоступна».
+- **1С:Предприятие (OData, Sprint 32).** Карточка «1С:Предприятие» запрашивает
+   OData URL (абсолютный `http://` или `https://`, например
+   `https://company.ru`), логин и пароль. Zod-схемы `oneCOdataUrlSchema`,
+   `oneCUsernameSchema`, `oneCPasswordSchema` и `oneCCredentialsSchema`
+   (`src/lib/integrations.ts`) проверяют форму до запроса; пароль рисуется
+   компонентом `SecretField` с маскировкой и хранится только на сервере.
+   Подключение — `POST /api/v1/integrations/1c`
+   (`{ odataUrl, username, password }`), отключение —
+   `DELETE /api/v1/integrations/1c`. Статус из `GET /integrations` содержит
+   `onec: { status, odataUrl?, source?, error? }`; если API о нём не знает,
+   карточка считается отключённой. Отказ 1С (400/502 `errors.provider_auth_required`)
+   показывает локализованное сообщение
+   `settings.integrations.oneC.credentialsRejected`.
 - **Ошибки.** Коды `errors.provider_auth_required`,
   `errors.provider_not_configured`, `errors.provider_unavailable`,
   `errors.provider_rate_limited`, а также `errors.invalid_telegram_token` и
@@ -305,6 +321,34 @@ docker build -f apps/web/Dockerfile \
   403, 404, 5xx). Если endpoint ещё не реализован и backend отвечает `404`,
   UI показывает «Интеграция пока недоступна» и не падает; сырые сообщения
   провайдера в интерфейс не выводятся.
+
+## Вебхук-триггеры (WEB-32.3)
+
+Секция «Вебхук-триггеры (Автозапуск агентов)» расположена на странице
+`/app/settings` сразу после интеграций. Формы и ответы API валидируются Zod
+(`src/lib/triggers.ts`):
+
+- `createTriggerInputSchema` — название, источник (`bitrix24`, `moysklad`,
+  `1c`, `custom`) и шаблон промпта. В шаблоне можно использовать `{{payload}}`
+  — он заменяется на тело входящего события.
+- `triggerSchema` / `triggerListSchema` — карточка триггера (`id`, `name`,
+  `source`, `promptTemplate`, `slug`, `triggerCount`, `status`, `createdAt?`);
+  список приходит массивом или обёрткой `{ items }`. Счётчик срабатываний
+  (`triggerCount`) нормализуется из числа или строки.
+- `createdTriggerSchema` — ответ создания с одноразовым `secret`.
+
+Клиент: `fetchTriggers()` → `GET /api/v1/triggers`, `createTrigger(input)` →
+`POST /api/v1/triggers`, `deleteTrigger(id)` → `DELETE /api/v1/triggers/:id`.
+Ключ кэша TanStack Query — `['triggers', userId]`.
+
+После создания показывается карточка с готовым URL
+`/api/v1/webhooks/triggers/:slug` (функция `getTriggerWebhookUrl`) и секретом
+`X-Trigger-Secret`. URL и секрет можно скопировать; секрет маскируется,
+переключатель «Показать/Скрыть» и кнопка «Скопировать» работают из общего
+интерфейса секций. Секрет выдаётся только при создании и больше не
+возвращается API. Список показывает источник, счётчик срабатываний, шаблон
+промпта и кнопку удаления; при 404/5xx/сетевой ошибке раздел показывает
+локализованное сообщение вместо падения. RU/EN-ключи — `settings.triggers.*`.
 
 ## Финансы
 

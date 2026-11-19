@@ -1521,7 +1521,7 @@
       },
       "providers": {
         "title": "External services",
-        "description": "Ozon, Wildberries, Midjourney, Bitrix24, and MoySklad keys and webhooks are stored on the server.",
+        "description": "Ozon, Wildberries, Midjourney, Bitrix24, MoySklad keys and webhooks, and 1C credentials are stored on the server.",
         "keySaved": "Stored on the server"
       },
       "secret": {
@@ -1616,6 +1616,30 @@
         "connected": "MoySklad connected.",
         "disconnected": "MoySklad disconnected."
       },
+      "oneC": {
+        "title": "1C:Enterprise (OData)",
+        "description": "Document flow, warehouse, and manufacturing data from 1C — for tracks H, J, K, and L. Connect with an OData URL, username, and password.",
+        "odataUrl": "OData URL",
+        "odataUrlPlaceholder": "https://company.ru",
+        "odataUrlHint": "The 1C OData publication address: an absolute URL with http:// or https://.",
+        "username": "Username",
+        "usernamePlaceholder": "1C username",
+        "password": "Password",
+        "passwordPlaceholder": "1C user password",
+        "passwordHint": "The password is masked and stored on the server; it is never shown after connecting.",
+        "invalidOdataUrl": "Enter an absolute OData URL with http:// or https://.",
+        "invalidUsername": "Enter the 1C username.",
+        "invalidPassword": "Enter the 1C user password.",
+        "credentialsRejected": "1C rejected the username or password. Check the credentials and the OData address.",
+        "connect": "Connect",
+        "connecting": "Checking the connection…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "connectedAs": "1C:Enterprise",
+        "keySaved": "Credentials stored on the server",
+        "connected": "1C:Enterprise connected.",
+        "disconnected": "1C:Enterprise disconnected."
+      },
       "errors": {
         "network": "The server is unreachable. Check your connection.",
         "sessionExpired": "Your session has expired. Please sign in again.",
@@ -1628,6 +1652,62 @@
         "invalidResponse": "The server returned an invalid integration response.",
         "providerError": "The provider reported an error. Check the keys and try again.",
         "requestFailed": "Could not complete the action. Please try again.",
+        "unknown": "Could not complete the action. Please try again later."
+      }
+    },
+    "triggers": {
+      "title": "Webhook triggers (Auto-start agents)",
+      "description": "External systems start agents on an event: create a trigger, then put the returned Webhook URL and the X-Trigger-Secret header in the source settings.",
+      "sources": {
+        "bitrix24": "Bitrix24",
+        "moysklad": "MoySklad",
+        "1c": "1C:Enterprise",
+        "custom": "Custom webhook"
+      },
+      "form": {
+        "title": "New trigger",
+        "name": "Name",
+        "namePlaceholder": "For example, New order from 1C",
+        "source": "Source",
+        "promptTemplate": "Agent prompt template",
+        "promptPlaceholder": "Process the new event from 1C: {{payload}}",
+        "promptHint": "{{payload}} is replaced with the incoming webhook body.",
+        "create": "Create trigger",
+        "creating": "Creating…",
+        "created": "Trigger created. Copy the URL and secret below."
+      },
+      "created": {
+        "title": "The trigger is ready",
+        "description": "Configure {{name}} in the external system.",
+        "webhookUrl": "Webhook URL",
+        "webhookUrlHint": "POST events to this address.",
+        "secret": "X-Trigger-Secret",
+        "secretHint": "The secret is shown only now. Send it in the header with the same name on every request.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Could not copy — select the value manually.",
+        "done": "Done"
+      },
+      "list": {
+        "title": "Active triggers",
+        "loading": "Loading triggers…",
+        "retry": "Try again",
+        "empty": "No triggers yet. Create the first one above.",
+        "invocations": "Invocations: {{invocations}}",
+        "delete": "Delete",
+        "deleting": "Deleting…",
+        "paused": "Paused"
+      },
+      "errors": {
+        "invalidFields": "Fill in the name and the prompt template.",
+        "network": "The server is unreachable. Check your connection.",
+        "sessionExpired": "Your session has expired. Please sign in again.",
+        "forbidden": "You do not have permission to manage triggers.",
+        "notFound": "Triggers are not available on the server yet.",
+        "slugConflict": "A trigger with this name already exists. Choose a different name.",
+        "unavailable": "The trigger service is temporarily unavailable. Please try again later.",
+        "invalidResponse": "The server returned an invalid response.",
+        "requestFailed": "Could not complete the action. Check the data and try again.",
         "unknown": "Could not complete the action. Please try again later."
       }
     },

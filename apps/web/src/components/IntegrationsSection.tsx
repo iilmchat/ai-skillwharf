@@ -16,6 +16,10 @@ import {
   getWildberriesTokenExpiry,
   integrationsQueryKey,
   moyskladApiTokenSchema,
+  oneCCredentialsSchema,
+  oneCOdataUrlSchema,
+  oneCPasswordSchema,
+  oneCUsernameSchema,
   PROVIDER_AUTH_REQUIRED_CODE,
   telegramBotTokenSchema,
   type IntegrationErrorKind,
@@ -25,6 +29,7 @@ import {
   type GoogleIntegration,
   type KeyIntegrationConnectInput,
   type KeyIntegrationProvider,
+  type OneCIntegration,
   type TelegramIntegration,
 } from '../lib/integrations';
 import {
@@ -497,8 +502,14 @@ function GoogleIntegrationCard({
   );
 }
 
+/**
+ * Провайдеры с одним секретом (рендерятся через `ProviderKeyCard`). 1С
+ * исключён: у него три поля и своя карточка.
+ */
+type SimpleKeyProvider = Exclude<KeyIntegrationProvider, '1c'>;
+
 const KEY_CONNECT_OPERATIONS: Record<
-  KeyIntegrationProvider,
+  SimpleKeyProvider,
   IntegrationOperation
 > = {
   ozon: 'ozonConnect',
@@ -509,7 +520,7 @@ const KEY_CONNECT_OPERATIONS: Record<
 };
 
 const KEY_DISCONNECT_OPERATIONS: Record<
-  KeyIntegrationProvider,
+  SimpleKeyProvider,
   IntegrationOperation
 > = {
   ozon: 'ozonDisconnect',
@@ -539,7 +550,7 @@ interface KeyProviderFields {
   inputMode?: 'url';
 }
 
-const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
+const KEY_PROVIDER_FIELDS: Record<SimpleKeyProvider, KeyProviderFields> = {
   ozon: {
     label: 'apiKey',
     placeholder: 'apiKeyPlaceholder',
@@ -584,7 +595,7 @@ const KEY_PROVIDER_FIELDS: Record<KeyIntegrationProvider, KeyProviderFields> = {
 };
 
 /** Ключ ошибки формата секрета в локали `<prefix>.<key>`. */
-const SECRET_ERROR_KEYS: Record<KeyIntegrationProvider, string> = {
+const SECRET_ERROR_KEYS: Record<SimpleKeyProvider, string> = {
   ozon: 'invalidFields',
   wildberries: 'invalidFields',
   midjourney: 'invalidFields',
@@ -598,7 +609,7 @@ const SECRET_ERROR_KEYS: Record<KeyIntegrationProvider, string> = {
  * ключей Ozon/Wildberries/Midjourney проверяет провайдер.
  */
 const SECRET_VALIDATORS: Record<
-  KeyIntegrationProvider,
+  SimpleKeyProvider,
   (value: string) => boolean
 > = {
   ozon: () => true,
@@ -610,7 +621,7 @@ const SECRET_VALIDATORS: Record<
 
 /** Тело `POST /integrations/<provider>`: набор полей зависит от провайдера. */
 function buildKeyConnectInput(
-  provider: KeyIntegrationProvider,
+  provider: SimpleKeyProvider,
   clientId: string,
   secret: string,
 ): KeyIntegrationConnectInput {
@@ -645,8 +656,8 @@ function ProviderKeyCard({
   integration,
   onRefresh,
 }: {
-  provider: KeyIntegrationProvider;
-  integration: IntegrationsState[KeyIntegrationProvider] | undefined;
+  provider: SimpleKeyProvider;
+  integration: IntegrationsState[SimpleKeyProvider] | undefined;
   onRefresh: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -876,6 +887,269 @@ function ProviderKeyCard({
   );
 }
 
+/**
+ * Карточка «1С:Предприятие» (Sprint 32). У провайдера три поля, поэтому она
+ * не использует generic `ProviderKeyCard`: OData URL и логин — обычные поля,
+ * пароль — `SecretField` с маскировкой.
+ */
+function OneCIntegrationCard({
+  integration,
+  onRefresh,
+}: {
+  integration: OneCIntegration;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const [odataUrl, setOdataUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [odataUrlError, setOdataUrlError] = useState<string | null>(null);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const isActive = integration.status === 'active';
+  const prefix = 'settings.integrations.oneC';
+
+  const connectMutation = useMutation({
+    mutationFn: (input: KeyIntegrationConnectInput) =>
+      connectKeyIntegration(input),
+    onMutate: () => {
+      setNotice(null);
+    },
+    onSuccess: () => {
+      setPassword('');
+      setPasswordVisible(false);
+      setOdataUrlError(null);
+      setUsernameError(null);
+      setPasswordError(null);
+      setNotice(t(`${prefix}.connected`));
+      onRefresh();
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => disconnectKeyIntegration('1c'),
+    onMutate: () => {
+      setNotice(null);
+    },
+    onSuccess: () => {
+      setNotice(t(`${prefix}.disconnected`));
+      onRefresh();
+    },
+  });
+
+  function handleConnect(): void {
+    const odataUrlResult = oneCOdataUrlSchema.safeParse(odataUrl);
+    const usernameResult = oneCUsernameSchema.safeParse(username);
+    const passwordResult = oneCPasswordSchema.safeParse(password);
+    const credentials = oneCCredentialsSchema.safeParse({
+      odataUrl,
+      username,
+      password,
+    });
+
+    setOdataUrlError(
+      odataUrlResult.success ? null : t(`${prefix}.invalidOdataUrl`),
+    );
+    setUsernameError(
+      usernameResult.success ? null : t(`${prefix}.invalidUsername`),
+    );
+    setPasswordError(
+      passwordResult.success ? null : t(`${prefix}.invalidPassword`),
+    );
+
+    if (!credentials.success) {
+      return;
+    }
+
+    setNotice(null);
+    connectMutation.mutate({ provider: '1c', ...credentials.data });
+  }
+
+  function handleFieldChange(
+    field: 'odataUrl' | 'username' | 'password',
+    value: string,
+  ): void {
+    if (field === 'odataUrl') {
+      setOdataUrl(value);
+      setOdataUrlError(null);
+    } else if (field === 'username') {
+      setUsername(value);
+      setUsernameError(null);
+    } else {
+      setPassword(value);
+      setPasswordError(null);
+    }
+
+    connectMutation.reset();
+  }
+
+  return (
+    <article aria-labelledby="1c-integration-title" className={CARD_CLASSES}>
+      <IntegrationCardHeader
+        provider="1c"
+        title={t(`${prefix}.title`)}
+        description={t(`${prefix}.description`)}
+        status={integration.status}
+        titleId="1c-integration-title"
+      />
+
+      {integration.status === 'error' && (
+        <IntegrationStateError text={integration.error} />
+      )}
+
+      {isActive ? (
+        <>
+          <ConnectedAccount
+            label={t(`${prefix}.odataUrl`)}
+            value={integration.odataUrl ?? null}
+            unknown={t('settings.integrations.providers.keySaved')}
+          />
+          <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+            {t(`${prefix}.keySaved`)}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              aria-busy={disconnectMutation.isPending}
+              className={DANGER_BUTTON_CLASSES}
+            >
+              {disconnectMutation.isPending
+                ? t(`${prefix}.disconnecting`)
+                : t(`${prefix}.disconnect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {disconnectMutation.isError && (
+            <IntegrationErrorAlert
+              error={disconnectMutation.error}
+              operation="1cDisconnect"
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <div className="mt-4">
+            <label
+              htmlFor="1c-odata-url"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t(`${prefix}.odataUrl`)}
+            </label>
+            <input
+              id="1c-odata-url"
+              name="odataUrl"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              value={odataUrl}
+              onChange={(event) =>
+                handleFieldChange('odataUrl', event.target.value)
+              }
+              placeholder={t(`${prefix}.odataUrlPlaceholder`)}
+              aria-invalid={odataUrlError !== null}
+              aria-describedby="1c-odata-url-hint"
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+            <p
+              id="1c-odata-url-hint"
+              className="mt-2 text-xs leading-relaxed text-on-surface-variant"
+            >
+              {t(`${prefix}.odataUrlHint`)}
+            </p>
+            {odataUrlError !== null && (
+              <p role="alert" className="mt-2 text-sm text-error">
+                {odataUrlError}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <label
+              htmlFor="1c-username"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t(`${prefix}.username`)}
+            </label>
+            <input
+              id="1c-username"
+              name="username"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={username}
+              onChange={(event) =>
+                handleFieldChange('username', event.target.value)
+              }
+              placeholder={t(`${prefix}.usernamePlaceholder`)}
+              aria-invalid={usernameError !== null}
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+            {usernameError !== null && (
+              <p role="alert" className="mt-2 text-sm text-error">
+                {usernameError}
+              </p>
+            )}
+          </div>
+
+          <SecretField
+            id="1c-password"
+            name="password"
+            label={t(`${prefix}.password`)}
+            hint={t(`${prefix}.passwordHint`)}
+            placeholder={t(`${prefix}.passwordPlaceholder`)}
+            value={password}
+            onValueChange={(value) => handleFieldChange('password', value)}
+            visible={passwordVisible}
+            onVisibleChange={setPasswordVisible}
+            revealable={false}
+            revealLabel={t('settings.integrations.secret.show')}
+            concealLabel={t('settings.integrations.secret.hide')}
+            disabled={connectMutation.isPending}
+            error={passwordError}
+            className={INPUT_CLASSES}
+          />
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connectMutation.isPending}
+              aria-busy={connectMutation.isPending}
+              className={PRIMARY_BUTTON_CLASSES}
+            >
+              {connectMutation.isPending
+                ? t(`${prefix}.connecting`)
+                : t(`${prefix}.connect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {connectMutation.isError && (
+            <IntegrationErrorAlert
+              error={connectMutation.error}
+              operation="1cConnect"
+            />
+          )}
+        </>
+      )}
+    </article>
+  );
+}
+
 export function IntegrationsSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -1067,6 +1341,10 @@ export function IntegrationsSection() {
               <ProviderKeyCard
                 provider="moysklad"
                 integration={data.moysklad}
+                onRefresh={refreshIntegrations}
+              />
+              <OneCIntegrationCard
+                integration={data.onec}
                 onRefresh={refreshIntegrations}
               />
             </div>

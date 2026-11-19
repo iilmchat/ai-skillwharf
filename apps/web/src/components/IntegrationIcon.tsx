@@ -18,6 +18,7 @@ const PROVIDER_BADGE: Record<
   midjourney: { label: 'MJ', className: 'bg-slate-900 text-white' },
   bitrix24: { label: 'B24', className: 'bg-[#0B66C3] text-white' },
   moysklad: { label: 'MS', className: 'bg-[#D6001C] text-white' },
+  '1c': { label: '1C', className: 'bg-[#E8912D] text-white' },
 };
 
 /** Иконки каналов: узнаваемые, без внешних ассетов и сетевых запросов. */

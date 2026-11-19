@@ -32,7 +32,11 @@ import { api } from './api';
  *   (TT-API-KEY через TTAPI);
  * - `POST/DELETE /api/v1/integrations/bitrix24` — `{ webhookUrl }`, входящий
  *   вебхук портала (Трек K/L);
- * - `POST/DELETE /api/v1/integrations/moysklad` — `{ apiToken }` (Трек K/L).
+ * - `POST/DELETE /api/v1/integrations/moysklad` — `{ apiToken }` (Трек K/L);
+ * - `POST/DELETE /api/v1/integrations/1c` — `{ odataUrl, username, password }`
+ *   (Sprint 32, OData-подключение 1С:Предприятия; в `GET /integrations`
+ *   возвращается `onec: { status, odataUrl?, source?, error? }` — логин и
+ *   пароль не возвращаются, OData URL не является секретом).
  *
  * Ответы валидируются Zod: UI не показывает частично распарсенное состояние
  * и не подставляет вымышленные имена ботов/email. Если endpoint ещё не
@@ -43,13 +47,14 @@ export const INTEGRATION_PROVIDERS = ['telegram', 'google'] as const;
 
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
 
-/** Провайдеры, которые подключаются ключами (Sprint 19, Треки K/L). */
+/** Провайдеры, которые подключаются ключами (Sprint 19, Треки K/L, Sprint 32). */
 export const KEY_INTEGRATION_PROVIDERS = [
   'ozon',
   'wildberries',
   'midjourney',
   'bitrix24',
   'moysklad',
+  '1c',
 ] as const;
 
 export type KeyIntegrationProvider =
@@ -141,6 +146,21 @@ export const moyskladIntegrationSchema = z.object({
 
 export type MoyskladIntegration = z.infer<typeof moyskladIntegrationSchema>;
 
+/**
+ * 1С:Предприятие (Sprint 32): OData + логин/пароль. Как и у Битрикс24 с
+ * МойСкладом, API не возвращает секреты — в статусе только `status`/`error`
+ * (+ `source`: ключи пользователя или системные из env).
+ */
+export const oneCIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  /** Backend 1С возвращает OData URL в статусе (сам адрес не секрет). */
+  odataUrl: z.string().trim().min(1).nullable().optional(),
+  source: z.enum(['user']).nullable().optional(),
+  error: integrationErrorTextSchema,
+});
+
+export type OneCIntegration = z.infer<typeof oneCIntegrationSchema>;
+
 export const integrationsSchema = z.object({
   telegram: telegramIntegrationSchema,
   google: googleIntegrationSchema,
@@ -150,6 +170,7 @@ export const integrationsSchema = z.object({
   midjourney: midjourneyIntegrationSchema.default({ status: 'disconnected' }),
   bitrix24: bitrix24IntegrationSchema.default({ status: 'disconnected' }),
   moysklad: moyskladIntegrationSchema.default({ status: 'disconnected' }),
+  onec: oneCIntegrationSchema.default({ status: 'disconnected' }),
 });
 
 export type IntegrationsState = z.infer<typeof integrationsSchema>;
@@ -202,6 +223,43 @@ export const bitrix24WebhookUrlSchema = httpsAbsoluteUrlSchema;
  */
 export const moyskladApiTokenSchema = z.string().trim().min(10).max(2048);
 
+/**
+ * OData-адрес 1С:Предприятия (Sprint 32): абсолютный `http://` или `https://`
+ * URL, например `https://company.ru`. Обе схемы разрешены намеренно: 1С часто
+ * разворачивается во внутренней сети без TLS. Относительные пути, чужие схемы
+ * (`javascript:`, `file:`) и логин/пароль внутри URL отклоняются до запроса
+ * к API (как это делает backend).
+ */
+export const oneCOdataUrlSchema = z.string().trim().url().refine(
+  (value) => {
+    try {
+      const url = new URL(value);
+
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.username === '' &&
+        url.password === ''
+      );
+    } catch {
+      return false;
+    }
+  },
+  { message: 'ожидается абсолютный http:// или https:// URL без кредов' },
+);
+
+/** Логин и пароль 1С: непустые строки (пробелы по краям обрезаются). */
+export const oneCUsernameSchema = z.string().trim().min(1);
+export const oneCPasswordSchema = z.string().trim().min(1);
+
+/** Тело `POST /integrations/1c`; пароль маскируется в UI через `SecretField`. */
+export const oneCCredentialsSchema = z.object({
+  odataUrl: oneCOdataUrlSchema,
+  username: oneCUsernameSchema,
+  password: oneCPasswordSchema,
+});
+
+export type OneCCredentials = z.infer<typeof oneCCredentialsSchema>;
+
 const googleAuthorizationResponseSchema = z.union([
   z.object({ url: z.string() }).transform((value) => value.url),
   z
@@ -241,10 +299,16 @@ export type KeyIntegrationConnectInput =
   | { provider: 'wildberries'; apiToken: string }
   | { provider: 'midjourney'; apiKey: string }
   | { provider: 'bitrix24'; webhookUrl: string }
-  | { provider: 'moysklad'; apiToken: string };
+  | { provider: 'moysklad'; apiToken: string }
+  | {
+      provider: '1c';
+      odataUrl: string;
+      username: string;
+      password: string;
+    };
 
 /**
- * Подключение Ozon/WB/Midjourney/Битрикс24/МойСклад; тело зависит от
+ * Подключение Ozon/WB/Midjourney/Битрикс24/МойСклад/1С; тело зависит от
  * провайдера.
  */
 export async function connectKeyIntegration(
@@ -315,7 +379,9 @@ export type IntegrationOperation =
   | 'bitrix24Connect'
   | 'bitrix24Disconnect'
   | 'moyskladConnect'
-  | 'moyskladDisconnect';
+  | 'moyskladDisconnect'
+  | '1cConnect'
+  | '1cDisconnect';
 
 export type IntegrationErrorKind =
   | 'network'
@@ -386,6 +452,7 @@ const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
   'midjourneyConnect',
   'bitrix24Connect',
   'moyskladConnect',
+  '1cConnect',
 ];
 
 /**
@@ -411,6 +478,8 @@ export function getProviderCredentialRejectionKey(
       return 'settings.integrations.bitrix24.webhookRejected';
     case 'moyskladConnect':
       return 'settings.integrations.moysklad.tokenRejected';
+    case '1cConnect':
+      return 'settings.integrations.oneC.credentialsRejected';
     default:
       return null;
   }
@@ -463,8 +532,8 @@ export function getIntegrationErrorDetails(
     return { kind: 'oauthUnavailable', serverMessage };
   }
 
-  // Ozon/WB/Midjourney/Битрикс24/МойСклад: provider_auth_required — неверные
-  // ключи провайдера,
+  // Ozon/WB/Midjourney/Битрикс24/МойСклад/1С: provider_auth_required —
+  // неверные ключи провайдера,
   // а не истёкшая сессия SkillWharf (provider-http отдаёт его при 401/403
   // внешнего API, но как 502 для нашего клиента).
   if (

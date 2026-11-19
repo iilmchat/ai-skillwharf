@@ -8,6 +8,7 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { RagMemoryPanel } from '../components/RagMemoryPanel';
 import { StatusToast } from '../components/StatusToast';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TriggersSection } from '../components/TriggersSection';
 import { RAG_MEMORY_PANEL_ENABLED } from '../lib/feature-flags';
 import { clearMemory, getMemoryErrorMessage } from '../lib/memory';
 import { isAdminRole } from '../lib/roles';
@@ -142,6 +143,8 @@ export function SettingsPage() {
 
         <div className="mt-8 space-y-6">
           <IntegrationsSection />
+
+          <TriggersSection />
 
           <section
             aria-labelledby="memory-title"
