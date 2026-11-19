@@ -46,10 +46,9 @@ ALTER TABLE "WorkspaceMember" ADD CONSTRAINT "WorkspaceMember_userId_fkey" FOREI
 
 -- Имя навыка больше не глобально уникально: установки изолируются по пользователю.
 DROP INDEX IF EXISTS "InstalledSkill_name_key";
-CREATE UNIQUE INDEX "InstalledSkill_name_userId_workspaceId_key" ON "InstalledSkill"("name", "userId", "workspaceId");
-
 ALTER TABLE "InstalledSkill" ADD COLUMN "userId" TEXT;
 ALTER TABLE "InstalledSkill" ADD COLUMN "workspaceId" TEXT;
+CREATE UNIQUE INDEX "InstalledSkill_name_userId_workspaceId_key" ON "InstalledSkill"("name", "userId", "workspaceId");
 CREATE INDEX "InstalledSkill_userId_idx" ON "InstalledSkill"("userId");
 CREATE INDEX "InstalledSkill_workspaceId_idx" ON "InstalledSkill"("workspaceId");
 ALTER TABLE "InstalledSkill" ADD CONSTRAINT "InstalledSkill_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
