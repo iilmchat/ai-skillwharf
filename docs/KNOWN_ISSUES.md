@@ -56,7 +56,7 @@
 | KI-050 | Integrations | Низкая | Исправлено | Контракт UI реализован бэкендом (`GET /integrations`, `POST/DELETE /integrations/telegram`, `authorization-url`, `DELETE /integrations/google`); OAuth-callback умеет redirect (`GOOGLE_OAUTH_SUCCESS_REDIRECT`), иначе JSON; реальные ключи проверяются в staging |
 | KI-051 | Security | Средняя | Открыто | Telegram webhook защищён только секретом и rate limit на IP: нет allowlist сетей Telegram, проверки `update_id` на replay/idempotency и очереди дедупликации |
 | KI-052 | Security | Средняя | Открыто | Egress api/worker — прикладной allowlist (`provider-http`, LLM-маршруты), а не NetworkPolicy/iptables; embeddings, MCP и YooKassa API не все проходят через единый guard |
-| KI-053 | Security | Средняя | Исправлено | Envelope `v2:<keyId>:<iv>:<tag>:<ciphertext>`, чтение v1 и previous keys, `pnpm --filter api keys:rotate` перешифровывает все три модели в одной транзакции; облачный KMS (Yandex/Vault) не подключён |
+| KI-053 | Security | Средняя | Исправлено | Envelope `v2:<keyId>:...` + чтение v1/previous keys; адаптеры `IKmsEnvelopeProvider`: локальный AES-GCM, HashiCorp Vault Transit и Yandex Cloud KMS с миграцией `v1/v2 → kms:*` через `keys:rotate` |
 | KI-054 | Security | Низкая | Открыто | `DELETE /integrations/google` удаляет локальные токены, но не вызывает revoke в Google; refresh-token может оставаться действительным |
 | KI-055 | Marketplace | Средняя | Исправлено | `generate_image` реально вызывает Midjourney API (async polling, retry); финансовые данные Ozon/WB идут через MCP — демонстрационных значений в этих инструментах нет |
 | KI-056 | Integrations | Низкая | Открыто | Telegram: webhook обслуживает один системный бот; боты, подключённые пользователями, используются только для исходящих `sendMessage`, входящие для них не принимаются |
@@ -1358,11 +1358,25 @@ HTTP-клиенты API на общий guard, добавить deny-all Network
   отвержение неизвестного keyId и невалидных previous keys, счётчики ротации
   по трём моделям и atomic-rollback.
 
-**Остатки:** облачный KMS (Yandex KMS / HashiCorp Vault) не подключён:
-`KeyManagementService` — абстракция для него, пока используется локальный
-AES-256-GCM. Отдельной колонки `keyId` в БД нет — он хранится внутри
-envelope; ротация всех записей выполняется явно CLI, а не фоновым job'ом.
-Обновление утерянных/отозванных Google-токенов — KI-054.
+**Исправлено (Sprint 34, KMS-34.1/34.2):**
+
+- Выделен интерфейс `IKmsEnvelopeProvider` (`encrypt`/`decrypt`/`providerName`,
+  все ответы и конфигурации валидируются Zod). Локальный AES-256-GCM с `keyId`
+  выделен в `LocalAesKmsProvider` и остаётся дефолтом при `KMS_PROVIDER=local`.
+- `VaultTransitKmsProvider` (`KMS_PROVIDER=vault`) шифрует через
+  `POST ${VAULT_ADDR}/v1/transit/encrypt/${VAULT_TRANSIT_KEY}` и пишет
+  `kms:vault:<keyName>:<ciphertext>`; `YandexCloudKmsProvider`
+  (`KMS_PROVIDER=yandex-kms`) — через `https://yandex.net<keyId>:encrypt` и
+  `kms:yandex:<keyId>:<ciphertext>`. Оба читают старые `v1:`/`v2:` через
+  локальный delegate — плавная миграция без простоя.
+- `CredentialRotationService.rotateAllCredentials()` мигрирует существующие
+  `v1:`/`v2:` → `kms:vault:*` / `kms:yandex:*` в одной транзакции Prisma;
+  CLI `pnpm --filter api keys:rotate`. Тесты: mock HTTP + Zod-отвержение
+  невалидных ответов, расшифровка legacy и миграция конверта.
+
+Ограничений по облачному KMS больше нет. Отдельной колонки `keyId` в БД нет —
+он хранится внутри envelope. Обновление утерянных/отозванных Google-токенов —
+KI-054.
 
 ### KI-054 — Отзыв Google-токенов при disconnect
 

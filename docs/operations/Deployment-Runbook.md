@@ -2071,3 +2071,99 @@ docker compose up -d api llm-worker
 нагрузочным тестированием (см. `HA-34.1` в `ROADMAP-V2.md`); для отладки
 циклов смотрите панель `Мультиагентные handoffs` и трейсы Tempo со сквозным
 `trace_id`.
+
+## 24. Подключение HashiCorp Vault / Yandex Cloud KMS
+
+По умолчанию используется `KMS_PROVIDER=local`: ключ берётся из
+`TOKEN_ENCRYPTION_KEY` в окружении, внешние сервисы не нужны. Для production
+подключите один из внешних провайдеров (Sprint 34, KMS-34.1/34.2):
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `KMS_PROVIDER` | `local` | `local`, `vault` или `yandex-kms` |
+| `VAULT_ADDR` | пусто | Адрес Vault, например `http://vault:8200` |
+| `VAULT_TOKEN` | пусто | Токен доступа (секрет) |
+| `VAULT_TRANSIT_KEY` | `skillwharf-credentials` | Ключ в transit-движке Vault |
+| `YANDEX_KMS_KEY_ID` | пусто | Идентификатор ключа Yandex Cloud KMS |
+| `YANDEX_KMS_IAM_TOKEN` | пусто | IAM-токен сервисного аккаунта (секрет) |
+
+Все переменные проброшены в сервис `api`. Секреты задавайте только в `.env`
+с правами `600` или через секрет-менеджер; в git они не попадают.
+
+### HashiCorp Vault
+
+1. Включите transit-движок и создайте ключ:
+   `vault secrets enable transit && vault write -f transit/keys/skillwharf-credentials`.
+2. Выдайте токен с политикой на `transit/encrypt/skillwharf-credentials` и
+   `transit/decrypt/skillwharf-credentials` (и `update` для ротации).
+3. Заполните `.env`:
+
+   ```text
+   KMS_PROVIDER=vault
+   VAULT_ADDR=http://vault:8200
+   VAULT_TOKEN=<токен>
+   VAULT_TRANSIT_KEY=skillwharf-credentials
+   ```
+
+4. Перезапустите API: `docker compose up -d api`. Проверьте, что шифрование
+   ключей Integrated-токенов работает после ротации (`keys:rotate`).
+
+### Yandex Cloud KMS
+
+1. Создайте симметричный ключ в Yandex Cloud KMS и сервисный аккаунт с ролью
+   `kms.keys.encrypterDecrypter` на этот ключ.
+2. Получите IAM-токен и задайте:
+
+   ```text
+   KMS_PROVIDER=yandex-kms
+   YANDEX_KMS_KEY_ID=<идентификатор ключа>
+   YANDEX_KMS_IAM_TOKEN=<IAM-токен>
+   ```
+
+3. Перезапустите API. IAM-токен короткоживущий — обновляйте его из секретного
+   хранилища; автоматическое получение токена — отдельная задача адаптера
+   KMS-34.1/34.2 в `apps/`.
+
+Смена провайдера не перешифровывает старые записи автоматически: используйте
+`TOKEN_ENCRYPTION_PREVIOUS_KEYS` и `pnpm --filter api keys:rotate`.
+
+## 25. Горизонтальное масштабирование (docker-compose.ha.yml)
+
+Override `docker-compose.ha.yml` поднимает 3 реплики `api`, 3 реплики
+`llm-worker` и 2 реплики `sandbox-worker`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ha.yml \
+  --profile production up -d --build
+```
+
+Что важно:
+
+* Прямой порт `3001:3000` у `api` снимается (`ports: !reset []`) — трафик
+  распределяет Caddy через внутренний DNS compose. Не обращайтесь к API
+  напрямую с хоста; используйте `https://$DOMAIN` или `docker compose exec`.
+* `RATE_LIMIT_STORE=redis` делает лимиты общими для всех реплик (иначе лимит
+  `AUTH_LOGIN_LIMIT` умножается на число реплик).
+* `BILLING_OUTBOX_DISTRIBUTED_LOCK=true` защищает выплаты Revenue Share от
+  параллельной обработки одинаковых задач Outbox несколькими репликами.
+* `docker compose` без Swarm запускает `deploy.replicas` локально; в K8s
+  используйте манифесты из `deploy/k8s/` и HPA.
+
+### Нагрузочный тест
+
+```bash
+# Проверка аргументов и расчёта перцентилей без сервера:
+pnpm loadtest:ha --dry-run
+
+# Боевой прогон (401 на /chat/send без токена не считается ошибкой, но эндпоинт
+# participates только с --token):
+pnpm loadtest:ha --url https://$DOMAIN --token <jwt> \
+  --concurrency 30 --requests 300
+```
+
+Скрипт рассылает запросы на `/api/v1/health/ready`,
+`/api/v1/marketplace/skills` и `/api/v1/chat/send`, считает p50/p95/p99 и
+RPS, завершается с кодом `1` при любом 5xx или сетевой ошибке. Перед прогоном
+убедитесь, что `docker compose --profile monitoring ps` показывает здоровые
+реплики и что Caddy распределяет трафик. Для диагностики используйте дашборд
+Grafana и Tempo (сквозной `trace_id`).

@@ -137,12 +137,23 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 
 ### Sprint 34 — Cloud KMS / HashiCorp Vault & High Availability
 
-* [ ] **[KMS-34.1]** Адаптер Yandex Cloud KMS для `KeyManagementService`.
-* [ ] **[KMS-34.2]** Адаптер HashiCorp Vault для `KeyManagementService` —
-  закрытие остатка **KI-053**; unit- и smoke-тесты ротации ключей.
-* [ ] **[HA-34.1]** Нагрузочное тестирование горизонтального масштабирования:
+* [x] **[KMS-34.1]** Адаптер Yandex Cloud KMS для `KeyManagementService`
+  (`YandexCloudKmsProvider`, `kms:yandex:*`), чтение legacy `v1/v2`. Sprint 34,
+  KI-053 → «Исправлено».
+* [x] **[KMS-34.2]** Адаптер HashiCorp Vault Transit (`VaultTransitKmsProvider`,
+  `kms:vault:*`) + интерфейс `IKmsEnvelopeProvider` и `LocalAesKmsProvider`;
+  миграция `v1/v2 → kms:*` в `CredentialRotationService`, unit-тесты с mock HTTP
+  и Zod-валидацией ответов, закрытие остатка **KI-053**.
+* [x] **[HA-34.1]** Нагрузочное тестирование горизонтального масштабирования:
   `3+` реплик API и `llm-worker`, проверка idempotency и отсутствия гонок в
-  Ledger, метрики latency/p95 под нагрузкой.
+  Ledger, метрики latency/p95 под нагрузкой. Подготовлен `docker-compose.ha.yml`
+  (3/3/2 реплики, Redis rate-limit, распределённая блокировка Outbox) и
+  `scripts/load-test-ha.mjs` (`pnpm loadtest:ha`) с p50/p95/p99; RUNBOOK —
+  разделы 24–25. Проверка гонок в Ledger на живом кластере — отдельный шаг.
+* [x] **[HA-34.2]** Распределённая блокировка Redis для `BillingOutboxService`
+  (`SET billing:outbox:lock <owner> NX PX 10000`, освобождение Lua-скриптом
+  только по совпадению токена). Реплика без блокировки тихо пропускает тик.
+  Тест конкурентности: 3 параллельные реплики → ровно 1 отправка ЮKassa.
 
 ---
 
@@ -181,3 +192,4 @@ Atomic Tasks. Документ не заменяет [ROADMAP.md](ROADMAP.md), �
 | 2026-11-19 | Sprint 31 (31.1–31.4, KI-088) | OpenCode / UI | Выполнено | Модели `Organization`/`Workspace`/`WorkspaceMember` + миграция, автосоздание дефолтной структуры, REST `/workspaces` и управление участниками, `WorkspaceContextGuard` (`X-Workspace-Id`), RBAC/ABAC-гейты для платных инструментов и HITL-лимита, per-user/per-workspace `InstalledSkill`; `WorkspaceSwitcher`, страница `/app/team`, заголовок `X-Workspace-Id` и инвалидация кэшей; хотфикс DI `METRICS_ENV` и тест сборки `MetricsModule`; RU/EN и ~30 unit-тестов | KI-086 закрыт полностью; KI-088 исправлен |
 | 2026-11-19 | Sprint 32 (32.1–32.3) | OpenCode / UI / Infra | Выполнено | MCP-сервер `1c-mcp` (OData, per-request креды, 4 инструмента, тесты); API 1С (`POST/DELETE /integrations/1c` с проверкой `$metadata`, `onec_*`, стартовый навык H/J/K/L) и Event-Driven webhook-триггеры (`WebhookTrigger`, CRUD `/triggers`, constant-time секрет, лимит 32 КБ); карточка 1С и секция «Вебхук-триггеры» в `/app/settings`, RU/EN и unit-тесты | — |
 | 2026-11-19 | Sprint 33 (33.1–33.3) | OpenCode / UI | Выполнено | `BillingOutbox` + миграция, outbox в транзакции сплита, `BillingOutboxService` с backoff/dead-letter и тиком (`BILLING_OUTBOX_POLL_MS`), Platform Treasury с реальным `platform_fee`, админ API `/admin/billing/{treasury,reconciliation,outbox/:id/retry}`; вкладка «Финансы и Клиринг» на `/admin?tab=billing` с карточкой кошелька, сверкой и таблицей Outbox; RU/EN и 30 unit-тестов | KI-087 закрыт; OUTBOX-33.3 (сверка с Journal) — остаток |
+| 2026-11-19 | Sprint 34 (34.1–34.2) | OpenCode / Infra | Выполнено | Адаптеры `IKmsEnvelopeProvider`: `LocalAesKmsProvider`, `VaultTransitKmsProvider` и `YandexCloudKmsProvider` с конвертами `kms:*` и миграцией `v1/v2` через `keys:rotate`; распределённая Redis-блокировка `BillingOutboxService` (3 реплики → 1 перевод); `docker-compose.ha.yml` (3/3/2 реплики, Redis rate-limit, distributed lock), KMS-env и CLI `pnpm loadtest:ha` с p50/p95/p99; Runbook разделы 24–25 | KI-053 закрыт полностью |

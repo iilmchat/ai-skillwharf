@@ -4,6 +4,47 @@
 
 ## [Unreleased]
 
+### Sprint 34: внешний KMS и горизонтальное масштабирование
+
+**KMS-провайдеры: HashiCorp Vault Transit и Yandex Cloud KMS (KMS-34.1/34.2, KI-053).**
+
+- Интерфейс `IKmsEnvelopeProvider` + `LocalAesKmsProvider` (дефолт,
+  `KMS_PROVIDER=local`). `VaultTransitKmsProvider` (`vault`) шифрует через
+  `/v1/transit/encrypt/<key>` и пишет `kms:vault:<key>:<ciphertext>`;
+  `YandexCloudKmsProvider` (`yandex-kms`) — `kms:yandex:<key>:<ciphertext>`.
+  Конфигурации и ответы KMS валидируются Zod, DI только через конструктор.
+  Чтение legacy `v1:`/`v2:` сохранено.
+- `CredentialRotationService.rotateAllCredentials()` теперь асинхронный и
+  мигрирует локальные конверты в `kms:*` при смене `KMS_PROVIDER`, в одной
+  транзакции. Unit-тесты: mock HTTP, отвержение невалидных ответов,
+  `v2 → kms:vault` и миграция legacy-конверта.
+
+**Redis-блокировка Outbox (HA-34.2).**
+
+- `BillingOutboxService.processPendingBatch()` захватывает распределённую
+  блокировку Redis (`SET billing:outbox:lock <ownerToken> NX PX 10000`,
+  снятие Lua-скриптом по токену) при заданном `REDIS_URL`; реплика без
+  блокировки пропускает тик. Тест: 3 реплики outbox → ровно 1 перевод.
+  KI-053 → «Исправлено».
+
+**Инфраструктура и нагрузочный тест (HA-34.1).**
+
+- `.env.example` и `docker-compose.yml`: добавлены `KMS_PROVIDER` (`local` по
+  умолчанию, также `vault` и `yandex-kms`), `VAULT_ADDR`, `VAULT_TOKEN`,
+  `VAULT_TRANSIT_KEY`, `YANDEX_KMS_KEY_ID` и `YANDEX_KMS_IAM_TOKEN` — все
+  проброшены в сервис `api` и используются адаптерами.
+- `docker-compose.ha.yml` (новый override): 3 реплики `api` и `llm-worker`,
+  2 реплики `sandbox-worker`, снят published-порт у `api` (трафик через Caddy),
+  включены `RATE_LIMIT_STORE=redis` и
+  `BILLING_OUTBOX_DISTRIBUTED_LOCK=true`.
+- `scripts/load-test-ha.mjs` и npm-скрипт `loadtest:ha`: конкурентные запросы
+  к `/api/v1/health/ready`, `/api/v1/marketplace/skills` и
+  `/api/v1/chat/send` (с `--token`), p50/p95/p99 и RPS, exit 1 при 5xx/сетевых
+  ошибках; `--dry-run` проверяет аргументы и расчёт перцентилей без сервера.
+- Runbook дополнен разделами про подключение Vault/Yandex KMS и HA-override
+  с нагрузочным тестом. Инфраструктурная подзадача HA отмечена `[x]` в
+  `ROADMAP-V2.md`.
+
 ### Sprint 33: Transactional Outbox, Platform Treasury и клиринг в Admin
 
 **Бэкенд и композиция (OUTBOX-33.1 / OUTBOX-33.2, KI-087).**
