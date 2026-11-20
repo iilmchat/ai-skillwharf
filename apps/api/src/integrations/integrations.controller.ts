@@ -25,16 +25,19 @@ import { GoogleOAuthService } from './google/google-oauth.service.js';
 import {
   KEY_PROVIDERS,
   bitrix24KeysSchema,
+  diadocKeysSchema,
   midjourneyKeysSchema,
   moyskladKeysSchema,
   onecKeysSchema,
   ozonKeysSchema,
+  sbisKeysSchema,
   wildberriesKeysSchema,
   type KeyProvider,
 } from './keys/provider-keys.schemas.js';
 import {
   ProviderKeysService,
   type Bitrix24IntegrationState,
+  type EdoIntegrationState,
   type MidjourneyIntegrationState,
   type MoyskladIntegrationState,
   type OnecIntegrationState,
@@ -77,6 +80,8 @@ export interface IntegrationsState {
   readonly bitrix24: Bitrix24IntegrationState;
   readonly moysklad: MoyskladIntegrationState;
   readonly onec: OnecIntegrationState;
+  readonly diadoc: EdoIntegrationState;
+  readonly sbis: EdoIntegrationState;
 }
 
 /**
@@ -142,6 +147,8 @@ export class IntegrationsController {
       bitrix24: providers.bitrix24,
       moysklad: providers.moysklad,
       onec: providers.onec,
+      diadoc: providers.diadoc,
+      sbis: providers.sbis,
     };
   }
 
@@ -529,6 +536,70 @@ export class IntegrationsController {
       disconnected: await this.providerKeys.disconnect(
         requireUserId(request),
         '1c',
+      ),
+    };
+  }
+
+  /** Подключает Контур.Диадок: `{ apiKey, boxId, token }`. */
+  @Post('diadoc')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить Контур.Диадок' })
+  async connectDiadoc(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<EdoIntegrationState> {
+    const parsed = diadocKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { apiKey, boxId, token }');
+    }
+
+    return this.providerKeys.connectDiadoc(requireUserId(request), parsed.data);
+  }
+
+  @Delete('diadoc')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить Контур.Диадок' })
+  async disconnectDiadoc(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'diadoc',
+      ),
+    };
+  }
+
+  /** Подключает СБИС: `{ token, boxId }`. */
+  @Post('sbis')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить СБИС (Saby)' })
+  async connectSbis(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<EdoIntegrationState> {
+    const parsed = sbisKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { token, boxId }');
+    }
+
+    return this.providerKeys.connectSbis(requireUserId(request), parsed.data);
+  }
+
+  @Delete('sbis')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить СБИС' })
+  async disconnectSbis(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'sbis',
       ),
     };
   }

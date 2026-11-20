@@ -11,6 +11,8 @@ import {
   WB_TOKEN_TTL_DAYS,
   bitrix24KeysSchema,
   bitrix24SecretSchema,
+  diadocKeysSchema,
+  diadocSecretSchema,
   midjourneyKeysSchema,
   midjourneySecretSchema,
   moyskladKeysSchema,
@@ -20,14 +22,18 @@ import {
   ozonKeysSchema,
   ozonSecretSchema,
   providerMetadataSchema,
+  sbisKeysSchema,
+  sbisSecretSchema,
   wildberriesKeysSchema,
   wildberriesSecretSchema,
   type Bitrix24Keys,
+  type DiadocKeys,
   type KeyProvider,
   type MidjourneyKeys,
   type MoyskladKeys,
   type OnecKeys,
   type OzonKeys,
+  type SbisKeys,
   type WildberriesKeys,
 } from './provider-keys.schemas.js';
 
@@ -80,6 +86,14 @@ export interface OnecIntegrationState {
   readonly error?: string;
 }
 
+/** ЭДО: токен и ключи не возвращаются, виден только несекретный boxId. */
+export interface EdoIntegrationState {
+  readonly status: ProviderIntegrationStatus;
+  readonly boxId?: string;
+  readonly source?: 'user';
+  readonly error?: string;
+}
+
 export interface ProviderIntegrationStates {
   readonly ozon: OzonIntegrationState;
   readonly wildberries: WildberriesIntegrationState;
@@ -87,6 +101,8 @@ export interface ProviderIntegrationStates {
   readonly bitrix24: Bitrix24IntegrationState;
   readonly moysklad: MoyskladIntegrationState;
   readonly onec: OnecIntegrationState;
+  readonly diadoc: EdoIntegrationState;
+  readonly sbis: EdoIntegrationState;
 }
 
 /** Ключи провайдера и источник, из которого они получены. */
@@ -114,6 +130,15 @@ export interface ResolvedBitrix24Webhook {
 export interface ResolvedMoyskladToken {
   readonly token: string;
   readonly source: 'user' | 'env';
+}
+
+/** Креды ЭДО, подготовленные для заголовков MCP. */
+export interface ResolvedEdoKeys {
+  readonly provider: 'diadoc' | 'sbis';
+  readonly apiKey?: string;
+  readonly token: string;
+  readonly boxId: string;
+  readonly source: 'user';
 }
 
 const CIPHER_ERROR =
@@ -290,6 +315,75 @@ export class ProviderKeysService {
       : null;
   }
 
+  /** Подключает Контур.Диадок (секретный JSON шифруется целиком). */
+  async connectDiadoc(
+    userId: string,
+    keys: DiadocKeys,
+  ): Promise<EdoIntegrationState> {
+    const parsed = diadocKeysSchema.parse(keys);
+
+    await this.save(userId, 'diadoc', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.diadoc_connected', userId }),
+    );
+
+    return { status: 'active', boxId: parsed.boxId, source: 'user' };
+  }
+
+  /** Подключает СБИС (секретный JSON шифруется целиком). */
+  async connectSbis(
+    userId: string,
+    keys: SbisKeys,
+  ): Promise<EdoIntegrationState> {
+    const parsed = sbisKeysSchema.parse(keys);
+
+    await this.save(userId, 'sbis', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.sbis_connected', userId }),
+    );
+
+    return { status: 'active', boxId: parsed.boxId, source: 'user' };
+  }
+
+  /** Креды ЭДО для per-request заголовков MCP (никогда не логируются). */
+  async edoKeys(
+    userId: string | undefined,
+    provider: 'diadoc' | 'sbis',
+  ): Promise<ResolvedEdoKeys | null> {
+    const row = await this.find(userId, provider);
+
+    if (row === null) {
+      return null;
+    }
+
+    const secret = this.decrypt(row.secret, provider);
+
+    if (provider === 'diadoc') {
+      const parsed = diadocSecretSchema.safeParse(secret);
+
+      return parsed.success
+        ? {
+            provider,
+            apiKey: parsed.data.apiKey,
+            token: parsed.data.token,
+            boxId: parsed.data.boxId,
+            source: 'user',
+          }
+        : null;
+    }
+
+    const parsed = sbisSecretSchema.safeParse(secret);
+
+    return parsed.success
+      ? {
+          provider,
+          token: parsed.data.token,
+          boxId: parsed.data.boxId,
+          source: 'user',
+        }
+      : null;
+  }
+
   /** Удаляет ключи провайдера; `true` — если запись действительно была. */
   async disconnect(userId: string, provider: KeyProvider): Promise<boolean> {
     const { count } = await this.prisma.providerCredential.deleteMany({
@@ -322,6 +416,8 @@ export class ProviderKeysService {
     const bitrixRow = byProvider.get('bitrix24');
     const moyskladRow = byProvider.get('moysklad');
     const onecRow = byProvider.get('1c');
+    const diadocRow = byProvider.get('diadoc');
+    const sbisRow = byProvider.get('sbis');
 
     return {
       ozon: this.describeOzon(ozonRow),
@@ -330,6 +426,8 @@ export class ProviderKeysService {
       bitrix24: this.describeBitrix24(bitrixRow),
       moysklad: this.describeMoysklad(moyskladRow),
       onec: this.describeOnec(onecRow),
+      diadoc: this.describeEdo(diadocRow, 'diadoc'),
+      sbis: this.describeEdo(sbisRow, 'sbis'),
     };
   }
 
@@ -575,6 +673,28 @@ export class ProviderKeysService {
     }
 
     return { status: 'active', source: 'user' };
+  }
+
+  /** В GET возвращаем только boxId — токены и apiKey никогда не раскрываем. */
+  private describeEdo(
+    row: { secret: string } | undefined,
+    provider: 'diadoc' | 'sbis',
+  ): EdoIntegrationState {
+    if (row === undefined) {
+      return { status: 'disconnected' };
+    }
+
+    const secret = this.decrypt(row.secret, provider);
+    const parsed =
+      provider === 'diadoc'
+        ? diadocSecretSchema.safeParse(secret)
+        : sbisSecretSchema.safeParse(secret);
+
+    if (!parsed.success) {
+      return { status: 'error', error: CIPHER_ERROR };
+    }
+
+    return { status: 'active', boxId: parsed.data.boxId, source: 'user' };
   }
 
   private describeBitrix24(

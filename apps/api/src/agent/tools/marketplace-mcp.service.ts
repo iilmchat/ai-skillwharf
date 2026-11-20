@@ -45,6 +45,11 @@ export interface MarketplaceCredentials {
   readonly odataUrl?: string;
   readonly username?: string;
   readonly password?: string;
+  /** Креды ЭДО (Diadoc/Sbis) для per-request заголовков EDO MCP. */
+  readonly edoProvider?: 'diadoc' | 'sbis';
+  readonly edoApiKey?: string;
+  readonly edoToken?: string;
+  readonly edoBoxId?: string;
 }
 
 /** Заголовки MCP-запроса с per-user кредами (`MCP-24.1`). */
@@ -83,6 +88,19 @@ export function providerCredentialHeaders(
             'X-1C-Password': credentials.password,
           }
         : {};
+    case 'diadoc':
+    case 'sbis':
+      return credentials.edoToken === undefined ||
+        credentials.edoBoxId === undefined
+        ? {}
+        : {
+            'X-Edo-Provider': credentials.edoProvider ?? platform,
+            ...(credentials.edoApiKey === undefined
+              ? {}
+              : { 'X-Edo-Api-Key': credentials.edoApiKey }),
+            'X-Edo-Token': credentials.edoToken,
+            'X-Edo-Box-Id': credentials.edoBoxId,
+          };
   }
 }
 
@@ -105,6 +123,8 @@ const PROVIDER_TOOL: Readonly<Record<McpProvider, string>> = {
   bitrix24: BITRIX24_GET_DEAL_TOOL_NAME,
   moysklad: MOYSKLAD_CHECK_STOCK_TOOL_NAME,
   '1c': 'onec_check_stock',
+  diadoc: 'edo_list_incoming_upd',
+  sbis: 'edo_list_incoming_upd',
 };
 
 /** Переменные окружения с ключами провайдера. */
@@ -114,6 +134,8 @@ const PROVIDER_KEY_ENV: Readonly<Record<McpProvider, readonly string[]>> = {
   bitrix24: ['BITRIX24_WEBHOOK_URL'],
   moysklad: ['MOYSKLAD_TOKEN'],
   '1c': ['ONEC_ODATA_URL', 'ONEC_USERNAME', 'ONEC_PASSWORD'],
+  diadoc: ['EDO_MCP_URL'],
+  sbis: ['EDO_MCP_URL'],
 };
 
 /** Переменная окружения с адресом MCP-сервера провайдера. */
@@ -123,6 +145,8 @@ const PROVIDER_MCP_URL_ENV: Readonly<Record<McpProvider, string>> = {
   bitrix24: 'BITRIX24_MCP_URL',
   moysklad: 'MOYSKLAD_MCP_URL',
   '1c': 'ONEC_MCP_URL',
+  diadoc: 'EDO_MCP_URL',
+  sbis: 'EDO_MCP_URL',
 };
 
 /** Человеческое имя провайдера для сообщений об ошибке. */
@@ -132,6 +156,8 @@ const PROVIDER_LABEL: Readonly<Record<McpProvider, string>> = {
   bitrix24: 'Битрикс24',
   moysklad: 'МойСклад',
   '1c': '1С:Предприятие',
+  diadoc: 'Контур.Диадок',
+  sbis: 'СБИС',
 };
 
 /** Названия ключей провайдера для подсказки в сообщении об ошибке. */
@@ -141,6 +167,8 @@ const PROVIDER_KEY_HINT: Readonly<Record<McpProvider, string>> = {
   bitrix24: 'входящий webhook',
   moysklad: 'токен API',
   '1c': 'OData URL, логин и пароль',
+  diadoc: 'API Key, Token и Box ID Диадок',
+  sbis: 'Token и Box ID СБИС',
 };
 
 /**
@@ -260,6 +288,24 @@ function envCredentials(
         ? null
         : { source: 'env', odataUrl, username, password };
     }
+    case 'diadoc':
+    case 'sbis': {
+      // Общие env-переменные EDO-коннектора (EDO_PROVIDER/EDO_API_KEY/
+      // EDO_TOKEN/EDO_BOX_ID) описаны в .env.example и infra/mcp/edo.
+      const token = readEnv('EDO_TOKEN');
+      const boxId = readEnv('EDO_BOX_ID');
+      const apiKey = platform === 'diadoc' ? readEnv('EDO_API_KEY') : null;
+
+      return token === null || boxId === null
+        ? null
+        : {
+            source: 'env',
+            edoProvider: platform,
+            ...(apiKey === null ? {} : { edoApiKey: apiKey }),
+            edoToken: token,
+            edoBoxId: boxId,
+          };
+    }
   }
 }
 
@@ -349,6 +395,23 @@ export class MarketplaceMcpService {
               odataUrl: resolved.odataUrl,
               username: resolved.username,
               password: resolved.password,
+            };
+          }
+          break;
+        }
+        case 'diadoc':
+        case 'sbis': {
+          const resolved = await this.providerKeys.edoKeys(userId, platform);
+
+          if (resolved !== null) {
+            return {
+              source: 'user',
+              edoProvider: resolved.provider,
+              ...(resolved.apiKey === undefined
+                ? {}
+                : { edoApiKey: resolved.apiKey }),
+              edoToken: resolved.token,
+              edoBoxId: resolved.boxId,
             };
           }
           break;

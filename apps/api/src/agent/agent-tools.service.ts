@@ -30,12 +30,23 @@ import {
   type ErpToolContext,
 } from './tools/erp-tools.js';
 import {
+  edoGetDocumentDetails,
+  edoListIncomingUpd,
+  edoPrepareSignPacket,
+  edoReconcileWithErp,
+  type EdoToolContext,
+} from './tools/edo-tools.js';
+import {
   AUDIT_FRAUD_RISK_TOOL_NAME,
   BITRIX24_GET_DEAL_TOOL_NAME,
   BITRIX24_UPDATE_DEAL_TOOL_NAME,
   CALCULATE_UNIT_ECONOMICS_TOOL_NAME,
   CHECK_FACTS_TOOL_NAME,
   DETECT_PROFIT_LEAKS_TOOL_NAME,
+  EDO_GET_DETAILS_TOOL_NAME,
+  EDO_LIST_INCOMING_TOOL_NAME,
+  EDO_PREPARE_SIGN_TOOL_NAME,
+  EDO_RECONCILE_TOOL_NAME,
   EXEC_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
   EXTRACT_PDF_TOOL_NAME,
@@ -68,6 +79,10 @@ import {
   Bitrix24UpdateDealToolSchema,
   CalculateUnitEconomicsToolSchema,
   DetectProfitLeaksToolSchema,
+  EdoGetDocumentDetailsToolSchema,
+  EdoListIncomingToolSchema,
+  EdoPrepareSignPacketToolSchema,
+  EdoReconcileWithErpToolSchema,
   ExecToolSchema,
   GenerateImageToolSchema,
   GoogleCalendarCreateToolSchema,
@@ -207,6 +222,10 @@ export class AgentToolsService {
         MONITOR_COMPETITOR_PRICES_TOOL_NAME,
       ],
       [AUDIT_FRAUD_RISK_TOOL_NAME, AUDIT_FRAUD_RISK_TOOL_NAME],
+      [EDO_LIST_INCOMING_TOOL_NAME, EDO_LIST_INCOMING_TOOL_NAME],
+      [EDO_GET_DETAILS_TOOL_NAME, EDO_GET_DETAILS_TOOL_NAME],
+      [EDO_RECONCILE_TOOL_NAME, EDO_RECONCILE_TOOL_NAME],
+      [EDO_PREPARE_SIGN_TOOL_NAME, EDO_PREPARE_SIGN_TOOL_NAME],
     ];
 
     for (const [toolName, registryName] of optional) {
@@ -331,6 +350,46 @@ export class AgentToolsService {
           this.marketplace,
           input,
           this.erpContext(options),
+        );
+      }
+
+      case EDO_LIST_INCOMING_TOOL_NAME: {
+        const input = EdoListIncomingToolSchema.parse(args);
+
+        return edoListIncomingUpd(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case EDO_GET_DETAILS_TOOL_NAME: {
+        const input = EdoGetDocumentDetailsToolSchema.parse(args);
+
+        return edoGetDocumentDetails(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case EDO_RECONCILE_TOOL_NAME: {
+        const input = EdoReconcileWithErpToolSchema.parse(args);
+
+        return edoReconcileWithErp(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case EDO_PREPARE_SIGN_TOOL_NAME: {
+        const input = EdoPrepareSignPacketToolSchema.parse(args);
+
+        return edoPrepareSignPacket(
+          this.marketplace,
+          input,
+          this.edoContext(options),
         );
       }
 
@@ -617,6 +676,20 @@ export class AgentToolsService {
    * Pay-per-Call после успешного ответа MCP.
    */
   private erpContext(options: McpToolOptions): ErpToolContext {
+    return {
+      ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
+      ...(options.authToken === undefined
+        ? {}
+        : { authToken: options.authToken }),
+      ...(options.skills === undefined ? {} : { skills: options.skills }),
+      ...(options.userId === undefined ? {} : { userId: options.userId }),
+      ...(options.beforeExecute === undefined
+        ? {}
+        : { beforeExecute: options.beforeExecute }),
+    };
+  }
+
+  private edoContext(options: McpToolOptions): EdoToolContext {
     return {
       ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
       ...(options.authToken === undefined

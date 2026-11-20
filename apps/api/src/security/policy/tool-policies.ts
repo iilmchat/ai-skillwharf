@@ -12,6 +12,12 @@ import {
 } from '../../agent/documents/document-tools.schemas.js';
 import { isFinalDealStage } from '../../agent/tools/erp-tools.js';
 import {
+  EdoGetDocumentDetailsToolSchema as EdoGetDocumentDetailsSchema,
+  EdoListIncomingToolSchema as EdoListIncomingSchema,
+  EdoPrepareSignPacketToolSchema as EdoPrepareSignPacketSchema,
+  EdoReconcileWithErpToolSchema as EdoReconcileWithErpSchema,
+} from '../../agent/tools/tool-schemas.js';
+import {
   Bitrix24GetDealToolSchema as Bitrix24GetDealSchema,
   Bitrix24UpdateDealToolSchema as Bitrix24UpdateDealSchema,
   MoyskladCheckStockToolSchema as MoyskladCheckStockSchema,
@@ -326,6 +332,50 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
     // Создание документа в 1С — необратимое действие: подтверждение HITL.
     approval: 'always',
     priceRub: 20,
+  },
+  // --- ЭДО (EDO-41.2/41.3): Диадок и СБИС -------------------------------
+  edo_list_incoming_upd: {
+    name: 'edo_list_incoming_upd',
+    schema: EdoListIncomingSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+  },
+  edo_get_document_details: {
+    name: 'edo_get_document_details',
+    schema: EdoGetDocumentDetailsSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+  },
+  edo_reconcile_with_erp: {
+    name: 'edo_reconcile_with_erp',
+    schema: EdoReconcileWithErpSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 25,
+  },
+  edo_prepare_sign_packet: {
+    name: 'edo_prepare_sign_packet',
+    schema: EdoPrepareSignPacketSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // Пакет на КЭП — юридически значимое действие: обязательный HITL.
+    approval: 'always',
+    priceRub: 25,
   },
   // --- Каналы отправки данных: taint блокирует эксфильтрацию --------------
   send_message: {

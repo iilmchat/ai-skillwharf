@@ -36,7 +36,14 @@ export type { McpToolDescriptor } from './mcp-client.js';
  * `bitrix24` и `moysklad` — коннекторы Треков K (Опт) и L (Производство);
  * их действия описаны в `infra/mcp/bitrix24` и `infra/mcp/moysklad`.
  */
-export type McpProvider = 'ozon' | 'wb' | 'bitrix24' | 'moysklad' | '1c';
+export type McpProvider =
+  | 'ozon'
+  | 'wb'
+  | 'bitrix24'
+  | 'moysklad'
+  | '1c'
+  | 'diadoc'
+  | 'sbis';
 
 /** Действия MCP-сервера 1С:Предприятие (OData/HTTP-сервисы). */
 export const ONEC_MCP_ACTIONS = {
@@ -448,6 +455,23 @@ const ONEC_ACTION_SCHEMAS: Record<string, z.ZodType> = {
   }),
 };
 
+/** Действия MCP-сервера ЭДО (Диадок/СБИС, треки H/J/K). */
+export const EDO_MCP_ACTIONS = {
+  // Имя инструмента в infra/mcp/edo/server.mjs (агентский tool называется
+  // edo_list_incoming_upd по контракту задачи).
+  listIncoming: 'edo_list_incoming_documents',
+  getDetails: 'edo_get_document_details',
+  reconcile: 'edo_reconcile_with_erp',
+  prepareSign: 'edo_prepare_sign_packet',
+} as const;
+
+const EDO_ACTION_SCHEMAS: Record<string, z.ZodType> = {
+  [EDO_MCP_ACTIONS.listIncoming]: z.object({}).passthrough(),
+  [EDO_MCP_ACTIONS.getDetails]: z.object({}).passthrough(),
+  [EDO_MCP_ACTIONS.reconcile]: z.object({}).passthrough(),
+  [EDO_MCP_ACTIONS.prepareSign]: z.object({}).passthrough(),
+};
+
 /** Реестр известных действий по провайдерам. */
 const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
   ozon: OZON_ACTION_SCHEMAS,
@@ -455,6 +479,8 @@ const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
   bitrix24: BITRIX24_ACTION_SCHEMAS,
   moysklad: MOYSKLAD_ACTION_SCHEMAS,
   '1c': ONEC_ACTION_SCHEMAS,
+  diadoc: EDO_ACTION_SCHEMAS,
+  sbis: EDO_ACTION_SCHEMAS,
 };
 
 /** Опции создания gateway. */

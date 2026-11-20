@@ -65,13 +65,25 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
     counterpartyId: 'cp-1',
     items: [{ nomenclatureId: 'nom-1', quantity: 2 }],
   },
+  edo_list_incoming_upd: { provider: 'diadoc', limit: 5 },
+  edo_get_document_details: { provider: 'sbis', documentId: 'doc-1' },
+  edo_reconcile_with_erp: {
+    provider: 'diadoc',
+    documentId: 'doc-1',
+    orderItems: [{ name: 'Болт', quantity: 1, priceRub: 10 }],
+  },
+  edo_prepare_sign_packet: {
+    provider: 'diadoc',
+    documentIds: ['doc-1'],
+    signer: 'Иванов И.И.',
+  },
 };
 
 const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
   it('покрывает политикой все инструменты из tool-schemas.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(31);
+    expect(TOOL_NAMES).toHaveLength(35);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 

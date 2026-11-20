@@ -204,6 +204,8 @@ describe('ProviderKeysService: хранение и шифрование', () => 
       bitrix24: { status: 'active', source: 'user' },
       moysklad: { status: 'disconnected' },
       onec: { status: 'disconnected' },
+      diadoc: { status: 'disconnected' },
+      sbis: { status: 'disconnected' },
     });
   });
 

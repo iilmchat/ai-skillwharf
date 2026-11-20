@@ -269,7 +269,7 @@ version: 1
 
       const seeded = await service.seedStarterSkills();
 
-      expect(seeded).toBe(24);
+      expect(seeded).toBe(25);
 
       const names = (prisma.installedSkill.create.mock.calls as [CreateArgs][])
         .map(([args]) => args.data.name)
@@ -282,6 +282,7 @@ version: 1
         'document-analyzer',
         'docx-writer',
         'dzen-article',
+        'edo-diadoc-sbis',
         'fact-checker',
         'fraud-shield-audit',
         'github',

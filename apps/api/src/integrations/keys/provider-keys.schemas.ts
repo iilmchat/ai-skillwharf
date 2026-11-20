@@ -15,6 +15,8 @@ export const KEY_PROVIDERS = [
   'bitrix24',
   'moysklad',
   '1c',
+  'diadoc',
+  'sbis',
 ] as const;
 
 export type KeyProvider = (typeof KEY_PROVIDERS)[number];
@@ -115,6 +117,19 @@ export const onecKeysSchema = z
 
 export const onecSecretSchema = onecKeysSchema;
 
+/** Тело `POST /integrations/diadoc` (ЭДО, треки H/J/K). */
+export const diadocKeysSchema = z
+  .object({ apiKey: secretSchema, boxId: clientIdSchema, token: secretSchema })
+  .strict();
+
+/** Тело `POST /integrations/sbis` (ЭДО, треки H/J/K). */
+export const sbisKeysSchema = z
+  .object({ token: secretSchema, boxId: clientIdSchema })
+  .strict();
+
+export const diadocSecretSchema = diadocKeysSchema;
+export const sbisSecretSchema = sbisKeysSchema;
+
 /** Полезная нагрузка, которая шифруется в `ProviderCredential.secret`. */
 export const ozonSecretSchema = z
   .object({ clientId: clientIdSchema, apiKey: secretSchema })
@@ -153,6 +168,8 @@ export type MidjourneyKeys = z.infer<typeof midjourneyKeysSchema>;
 export type Bitrix24Keys = z.infer<typeof bitrix24KeysSchema>;
 export type MoyskladKeys = z.infer<typeof moyskladKeysSchema>;
 export type OnecKeys = z.infer<typeof onecKeysSchema>;
+export type DiadocKeys = z.infer<typeof diadocKeysSchema>;
+export type SbisKeys = z.infer<typeof sbisKeysSchema>;
 export type ProviderMetadata = z.infer<typeof providerMetadataSchema>;
 
 /** Срок жизни токена Wildberries: продавец выдаёт его на 180 дней. */

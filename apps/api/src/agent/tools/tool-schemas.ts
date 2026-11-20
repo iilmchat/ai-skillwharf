@@ -196,6 +196,62 @@ export type OnecCheckStockArgs = z.infer<typeof OnecCheckStockToolSchema>;
 export type OnecCheckDebtArgs = z.infer<typeof OnecCheckDebtToolSchema>;
 export type OnecCreateOrderArgs = z.infer<typeof OnecCreateOrderToolSchema>;
 
+/** Инструменты ЭДО: Диадок и СБИС (EDO-41.2/41.3, треки H/J/K). */
+export const EDO_LIST_INCOMING_TOOL_NAME = 'edo_list_incoming_upd';
+export const EDO_GET_DETAILS_TOOL_NAME = 'edo_get_document_details';
+export const EDO_RECONCILE_TOOL_NAME = 'edo_reconcile_with_erp';
+export const EDO_PREPARE_SIGN_TOOL_NAME = 'edo_prepare_sign_packet';
+
+const edoProviderSchema = z.enum(['diadoc', 'sbis']);
+
+export const EdoListIncomingToolSchema = z
+  .object({
+    provider: edoProviderSchema,
+    limit: z.number().int().min(1).max(100).optional(),
+  })
+  .strict();
+export const EdoGetDocumentDetailsToolSchema = z
+  .object({
+    provider: edoProviderSchema,
+    documentId: z.string().min(1).max(256),
+  })
+  .strict();
+export const EdoReconcileWithErpToolSchema = z
+  .object({
+    provider: edoProviderSchema,
+    documentId: z.string().min(1).max(256),
+    orderItems: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(256),
+          quantity: z.number().positive().max(1_000_000),
+          priceRub: z.number().nonnegative().max(100_000_000),
+        }),
+      )
+      .min(1)
+      .max(200),
+    orderTotalRub: z.number().nonnegative().max(1_000_000_000).optional(),
+  })
+  .strict();
+export const EdoPrepareSignPacketToolSchema = z
+  .object({
+    provider: edoProviderSchema,
+    documentIds: z.array(z.string().min(1).max(256)).min(1).max(50),
+    signer: z.string().min(1).max(256),
+  })
+  .strict();
+
+export type EdoListIncomingArgs = z.infer<typeof EdoListIncomingToolSchema>;
+export type EdoGetDocumentDetailsArgs = z.infer<
+  typeof EdoGetDocumentDetailsToolSchema
+>;
+export type EdoReconcileWithErpArgs = z.infer<
+  typeof EdoReconcileWithErpToolSchema
+>;
+export type EdoPrepareSignPacketArgs = z.infer<
+  typeof EdoPrepareSignPacketToolSchema
+>;
+
 export type Bitrix24GetDealArgs = z.infer<typeof Bitrix24GetDealToolSchema>;
 export type Bitrix24UpdateDealArgs = z.infer<
   typeof Bitrix24UpdateDealToolSchema
@@ -481,6 +537,22 @@ export const TOOL_REGISTRY = {
   onec_create_order: {
     description: 'Создаёт заказ покупателя в 1С:Предприятие (требует HITL)',
     schema: OnecCreateOrderToolSchema,
+  },
+  [EDO_LIST_INCOMING_TOOL_NAME]: {
+    description: 'Список входящих УПД и актов из Диадок или СБИС',
+    schema: EdoListIncomingToolSchema,
+  },
+  [EDO_GET_DETAILS_TOOL_NAME]: {
+    description: 'Детальная спецификация УПД: поставщик, ИНН, позиции, НДС',
+    schema: EdoGetDocumentDetailsToolSchema,
+  },
+  [EDO_RECONCILE_TOOL_NAME]: {
+    description: 'Сверяет позиции и сумму УПД с заказом из 1С или МойСклад',
+    schema: EdoReconcileWithErpToolSchema,
+  },
+  [EDO_PREPARE_SIGN_TOOL_NAME]: {
+    description: 'Готовит пакет документов на подпись КЭП (обязательный HITL)',
+    schema: EdoPrepareSignPacketToolSchema,
   },
   [SEND_MESSAGE_TOOL_NAME]: {
     description: SEND_MESSAGE_TOOL_DESCRIPTION,
