@@ -4,6 +4,52 @@
 
 ## [Unreleased]
 
+### Sprint 42: маркировка DataMatrix / ГИС МТ «Честный ЗНАК» (MARK-42.1–42.3)
+
+**MCP-сервер ГИС МТ (MARK-42.1): `infra/mcp/marking/server.mjs`.**
+
+- `infra/mcp/marking/server.mjs` (новый): MCP-сервер с `GET /sse`,
+  `POST /messages`, `GET /health` и constant-time `MCP_AUTH_TOKEN`. Per-request
+  `X-Marking-Token` / `X-Marking-Inn` (ИНН 10 или 12 цифр) с fallback на
+  `MARKING_TOKEN` / `MARKING_INN`; базовый адрес `MARKING_API_URL` (`https://crpt.ru`).
+- Инструменты: `marking_check_codes` (`POST /cises/info`, нормализация `cis`,
+  `status`, `ownerInn`, `productName`, `gtin`, `expirationDate`),
+  `marking_document_status` (`GET /doc/{docId}/info`) и
+  `marking_create_discrepancy_draft` (черновик `draftOnly: true` без подписи и
+  отправки). Retry до 2 попыток на 429/5xx; Bearer-токены и DataMatrix-коды
+  маскируются в ошибках.
+- Dockerfile, 8 тестов на `node:test`, сервис `marking-mcp` на
+  `127.0.0.1:5007` с healthcheck в `docker-compose.mcp.yml`, `MARKING_MCP_URL`
+  в API и переменные в `.env.example`. Обновлён
+  `docs/architecture/MCP-ERP-Connectors.md`.
+
+**Бэкенд (MARK-42.2): подключение и инструменты маркировки.**
+
+- Провайдер `chestny_znak`: `{token, inn}` шифруется целиком через
+  `TokenCipherService`, ИНН валидируется Zod (`^\d{10}(\d{2})?$`),
+  `POST/DELETE /integrations/chestny_znak`. В GET — только `innMasked`,
+  токен не возвращается и не логируется.
+- `MarketplaceMcpService` передаёт `X-Marking-Token` / `X-Marking-Inn` в
+  `MARKING_MCP_URL`; имена MCP-действий приведены к контракту
+  `infra/mcp/marking/server.mjs` (проверка кодов и черновик расхождений).
+- Три инструмента: `marking_check_codes`, `marking_verify_shipment`,
+  `marking_report_violation`. Сверка партии детерминированная: выбывшие марки,
+  чужой ИНН, просрочка, недостача/пересорт по GTIN → `{valid, issues}`.
+- Политики: `approval: 'always'` для `marking_report_violation`,
+  `priceRub: 15` для инструментов маркировки. Стартовый навык
+  `starter-skills/chestny-znak-marking/SKILL.md`.
+
+**Web UI (MARK-42.3): карточка «Честный ЗНАК» в `/app/settings`.**
+
+- `apps/web/src/lib/integrations.ts`: Zod-схема `chestnyZnakCredentialsSchema`
+  (Bearer-токен True API и ИНН 10/12 цифр), статус `chestny_znak` в
+  `GET /integrations` с поддержкой поля `innMasked`, клиенты подключения и
+  отключения, отдельный ключ ошибки карточки.
+- `IntegrationsSection`: карточка с подсказкой о проверке кодов DataMatrix на
+  складе, в опте и на ПВЗ; токен через `SecretField`, валидация ИНН до запроса
+  к API. Добавлена векторная иконка DataMatrix в `IntegrationIcon.tsx`.
+- RU/EN-ключи и unit-тесты. Все задачи Sprint 42 отмечены `[x]` в `ROADMAP-V3.md`.
+
 ### Sprint 41: ЭДО Контур.Диадок и СБИС (EDO-41.1–41.4)
 
 **MCP-шлюз ЭДО (EDO-41.1): `infra/mcp/edo/server.mjs`.**

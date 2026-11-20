@@ -105,6 +105,23 @@ Pod слушает `5005`, наружу выставлен только `127.0.0
 только формирует пакет к подписанию руководителем. Сверка номенклатуры и цен
 со счётом/заказом 1С — отдельные задачи EDO-41.3/41.4.
 
+### Коннектор маркировки: ГИС МТ «Честный ЗНАК» (MARK-42.1)
+
+`marking-mcp` (`infra/mcp/marking/server.mjs`) проверяет коды DataMatrix через
+True API. Слушает `5007`, наружу выставлен только `127.0.0.1:5007`.
+
+| Инструмент MCP | Запрос | Назначение |
+| --- | --- | --- |
+| `marking_check_codes` | `POST /cises/info` | Пакетная проверка кодов: `cis`, `status` (`INTRODUCED`/`EMITTED`/`RETIRED`/`WRITTEN_OFF`), `ownerInn`, `productName`, `gtin`, `expirationDate` |
+| `marking_document_status` | `GET /doc/{docId}/info` | Статус электронного документа в ГИС МТ |
+| `marking_create_discrepancy_draft` | локально, `draftOnly: true` | Черновик акта о расхождении кодов при приёмке (без подписи и отправки) |
+
+Креды: `X-Marking-Token` (Bearer True API) и `X-Marking-Inn` (10 или 12 цифр)
+с fallback на `MARKING_TOKEN` / `MARKING_INN`; базовый адрес —
+`MARKING_API_URL` (`https://crpt.ru`). Токены и коды (GTIN/серийные номера)
+маскируются в ошибках; retry — до двух попыток на 429/5xx. Отправка
+уведомлений и криптоподпись выполняются вне MCP-сервера.
+
 ## Схемы и ошибки
 
 - Аргументы инструментов — строгие Zod-схемы (`tool-schemas.ts`), политики

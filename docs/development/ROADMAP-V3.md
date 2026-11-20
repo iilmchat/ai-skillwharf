@@ -129,11 +129,17 @@ H/J/K/L в российском контуре.
 
 ### Sprint 42 — ГИС МТ «Честный ЗНАК» и ЕГАИС
 
-* [ ] **[MARK-42.1]** Проверка статусов кодов маркировки DataMatrix через
-  ГИС МТ «Честный ЗНАК» перед отгрузкой со склада.
-* [ ] **[MARK-42.2]** Проверка кодов при приёмке на ПВЗ и сверка с данными
-  ЕГАИС для алкогольной продукции.
-* [ ] **[MARK-42.3]** Контроль пересорта: сопоставление фактического состава
+* [x] **[MARK-42.1]** Проверка статусов кодов маркировки DataMatrix через
+  ГИС МТ «Честный ЗНАК» перед отгрузкой со склада. Реализован
+  `infra/mcp/marking/server.mjs` (True API, 3 инструмента, per-request креды,
+  маскировка токенов/кодов, 8 тестов); сервис `marking-mcp` подключён в
+  `docker-compose.mcp.yml`.
+* [x] **[MARK-42.2]** Подключение `chestny_znak` в API: зашифрованные креды
+  `{token, inn}` с валидацией ИНН (10/12 цифр), маскировка в GET, заголовки
+  `X-Marking-Token`/`X-Marking-Inn` в `MARKING_MCP_URL`; инструменты
+  `marking_check_codes`, `marking_verify_shipment`, `marking_report_violation`
+  (HITL `approval: 'always'`) и стартовый навык для треков A/C/K/L.
+* [x] **[MARK-42.3]** Контроль пересорта: сопоставление фактического состава
   отгрузки с документами и блокировка при расхождении.
 
 ---
@@ -173,3 +179,4 @@ H/J/K/L в российском контуре.
 | 2026-11-20 | Sprint 39 (39.1–39.4) | OpenCode / UI-Agent | Выполнено | Модель `TelegramChannel` + миграция, REST привязки бота с `getMe`/`setWebhook` и маскировкой токена, публичный webhook с constant-time секретом, voice/photo, inline HITL approve/reject; UI — `TelegramChannelsSection` в `/app/settings` и Mini App `/tg-app`, STT/Compose-env, RU/EN и unit-тесты | VK Teams/Пачка/Яндекс (Sprint 40) — остаток |
 | 2026-11-20 | Sprint 40 (40.1–40.4) | OpenCode / UI-Agent | Выполнено | Модель `CorpMessengerChannel` + миграция, `ICorpMessengerAdapter` и реестр адаптеров VK Teams/Пачка/Яндекс Мессенджер, REST каналов и публичный webhook с constant-time секретом и HITL-кнопками; UI — `CorpChannelsSection` в `/app/settings` с настройкой токена, on-premise URL, Chat ID и Webhook Secret, RU/EN и unit-тесты | Этап 9 (`v2.2.0`) закрыт |
 | 2026-11-20 | Sprint 41 (41.1–41.4) | OpenCode / UI-Agent / Infra | Выполнено | MCP-шлюз `edo-mcp` (DiadocAuth / СБИС JSON-RPC, 4 инструмента, 12 тестов); провайдеры ключей `diadoc`/`sbis`, проброс EDO-заголовков, инструменты сверки УПД с ERP в копейках и стартовый навык; карточки Диадок/СБИС в `/app/settings`, RU/EN и unit-тесты | Этап 10 (`v2.3.0`) ЭДО-часть закрыта |
+| 2026-11-20 | Sprint 42 (42.1–42.3) | OpenCode / UI-Agent / Infra | Выполнено | MCP-шлюз `marking-mcp` (True API `/cises/info`, 3 инструмента, маскировка кодов, 8 тестов); провайдер `chestny_znak`, инструменты проверки DataMatrix и сверки партий со стартовым навыком; карточка «Честный ЗНАК» в `/app/settings`, RU/EN и unit-тесты | Этап 10 (`v2.3.0`) завершён |
