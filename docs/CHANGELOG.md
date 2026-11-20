@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### Sprint 40: Корпоративные мессенджеры РФ (VK Teams, Пачка, Яндекс)
+
+**Бэкенд (OMNI-40.1/40.2): единый шлюз и адаптеры.**
+
+- Модель `CorpMessengerChannel` + миграция
+  `20261120130000_add_corp_messenger_channels`: `provider`, `apiBaseUrl`,
+  `encryptedBotToken`, `webhookSecret`, `allowedChatIds`, активность.
+- `ICorpMessengerAdapter` (`parseIncomingWebhook`, `sendTextMessage`) и реестр
+  трёх адаптеров: VK Teams, Пачка, Яндекс Мессенджер. Входящие события и
+  HTTP-ответы валидируются Zod, токены шифруются через `TokenCipherService`.
+- REST (owner/admin): `GET|POST /workspaces/:id/channels/corporate` и
+  `DELETE .../:channelId`. В GET — только `tokenMasked`; `webhookSecret`
+  возвращается один раз при создании.
+- `POST /webhooks/corporate/:channelId`: constant-time проверка
+  `X-Webhook-Secret`/`X-Signature`, фильтр `allowedChatIds`, запуск
+  `ChatService`, отправка ответа или HITL-кнопок одобрения/отклонения
+  (`hitl:<action>:<runId>`) через адаптер провайдера.
+
+**Web UI (OMNI-40.3/40.4): настройки корпоративных каналов в `/app/settings`.**
+
+- `apps/web/src/lib/corp-channels.ts`: Zod-схемы провайдеров `vk_teams`,
+  `pachca`, `yandex_messenger`, канала и формы подключения (валидация
+  http(s) `apiBaseUrl`, парсинг Chat ID), клиент
+  `/workspaces/:workspaceId/channels/corporate`, категории ошибок.
+- `CorpChannelsSection`: секция в `/app/settings` с карточками провайдеров и
+  подсказками по токену, скрытым полем токена, полем on-premise Base URL,
+  списком Chat ID, одноразовым Webhook Secret и Webhook URL с копированием,
+  списком каналов и отключением. RU/EN-ключи и unit-тесты; все задачи
+  Sprint 40 отмечены `[x]` в `ROADMAP-V3.md`.
+
 ### Sprint 39: Telegram-бот, Mini App и HITL в мессенджере
 
 **Бэкенд (OMNI-39.1/39.2, HITL-39.3): канал, голос/фото и inline-одобрения.**

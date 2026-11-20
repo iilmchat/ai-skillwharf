@@ -91,12 +91,17 @@ Atomic Tasks. Документ продолжает [ROADMAP.md](ROADMAP.md) и
 
 ### Sprint 40 — Корпоративные мессенджеры РФ
 
-* [ ] **[OMNI-40.1]** Единый шлюз адаптеров корпоративных мессенджеров с
-  общим контрактом сообщений, HITL и аудита.
-* [ ] **[OMNI-40.2]** Адаптер VK Teams: бот, команды, вложения и одобрения.
-* [ ] **[OMNI-40.3]** Адаптер Пачка: доставка сообщений и событий в закрытом
+* [x] **[OMNI-40.1]** Единый шлюз: `ICorpMessengerAdapter`, реестр и модель
+  `CorpMessengerChannel` + миграция; REST `/workspaces/:id/channels/corporate`
+  (owner/admin, токен зашифрован, в GET только маска), публичный webhook
+  `/webhooks/corporate/:channelId` с constant-time секретом, `allowedChatIds`
+  и HITL-кнопками через общий контракт.
+* [x] **[OMNI-40.2]** Адаптер VK Teams (`newMessage`/`callbackQuery`,
+  `messages/sendText` + `inlineKeyboardMarkup`), а также Пачка и Яндекс
+  Мессенджер в том же контракте; парсинг и ответы валидируются Zod.
+* [x] **[OMNI-40.3]** Адаптер Пачка: доставка сообщений и событий в закрытом
   контуре компании.
-* [ ] **[OMNI-40.4]** Адаптер Яндекс Мессенджера с поддержкой ботов и
+* [x] **[OMNI-40.4]** Адаптер Яндекс Мессенджера с поддержкой ботов и
   файловых вложений.
 
 ---
@@ -161,3 +166,4 @@ H/J/K/L в российском контуре.
 | 2026-11-20 | Sprint 37 (37.0, 37.1–37.3) | OpenCode / UI-Agent | Выполнено | Парсер `<skillwharf-artifact>` и fenced-блоков, `artifactItemSchema`/`executionStepSchema`, `Message.metadataJson` + миграция, `POST /chat/artifacts/refine`, `ExecutionTraceCollector` в llm-worker; UI — `ArtifactCanvasDrawer` с правкой и экспортом `.md`/`.csv`/`.html`/`.doc`, `ExecutionTraceAccordion`, RU/EN и unit-тесты | Экспорт `.xlsx`/`.pdf` и ссылка на Tempo — остаток |
 | 2026-11-20 | Sprint 38 (38.0, 38.1, 38.2, WEB-38.2) | OpenCode / UI-Agent | Выполнено | `KnowledgeFolder` + миграция и REST `/knowledge/{folders,documents}`, `citations` в `stream_end`/`metadataJson` и кликабельные сноски, `SpeechToTextService` + `POST /chat/transcribe` (mock/Whisper/Yandex, STT-env в Compose); страница `/app/knowledge`, голосовой ввод через MediaRecorder, PWA-манифест, RU/EN и unit-тесты | VOICE-38.2 (TTS), offline-shell/push PWA и переиндексация — остаток |
 | 2026-11-20 | Sprint 39 (39.1–39.4) | OpenCode / UI-Agent | Выполнено | Модель `TelegramChannel` + миграция, REST привязки бота с `getMe`/`setWebhook` и маскировкой токена, публичный webhook с constant-time секретом, voice/photo, inline HITL approve/reject; UI — `TelegramChannelsSection` в `/app/settings` и Mini App `/tg-app`, STT/Compose-env, RU/EN и unit-тесты | VK Teams/Пачка/Яндекс (Sprint 40) — остаток |
+| 2026-11-20 | Sprint 40 (40.1–40.4) | OpenCode / UI-Agent | Выполнено | Модель `CorpMessengerChannel` + миграция, `ICorpMessengerAdapter` и реестр адаптеров VK Teams/Пачка/Яндекс Мессенджер, REST каналов и публичный webhook с constant-time секретом и HITL-кнопками; UI — `CorpChannelsSection` в `/app/settings` с настройкой токена, on-premise URL, Chat ID и Webhook Secret, RU/EN и unit-тесты | Этап 9 (`v2.2.0`) закрыт |
