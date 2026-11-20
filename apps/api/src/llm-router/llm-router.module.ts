@@ -4,11 +4,12 @@ import { AuthModule } from '../auth/auth.module.js';
 import { LlmActiveController } from './llm-active.controller.js';
 import { LlmRouterController } from './llm-router.controller.js';
 import { LlmRouterService } from './llm-router.service.js';
+import { ModelCascadeService } from './model-cascade.service.js';
 
 @Module({
   imports: [AuthModule, AuditModule],
   controllers: [LlmRouterController, LlmActiveController],
-  providers: [LlmRouterService],
-  exports: [LlmRouterService],
+  providers: [LlmRouterService, ModelCascadeService],
+  exports: [LlmRouterService, ModelCascadeService],
 })
 export class LlmRouterModule {}

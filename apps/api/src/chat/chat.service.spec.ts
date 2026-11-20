@@ -8,6 +8,8 @@ import type {
 } from '../agent/contracts.js';
 import { ApiException } from '../common/api-error.js';
 import { ERROR_KEYS } from '../i18n/error-keys.js';
+import { ModelCascadeService } from '../llm-router/model-cascade.service.js';
+import { PiiMaskingService } from '../security/pii-masking.service.js';
 import {
   ChatService,
   resolveApprovalRules,
@@ -100,6 +102,8 @@ interface HarnessOptions {
     hitlPolicy: string;
     dailyBudgetRub: Prisma.Decimal | null;
   }[];
+  readonly pii?: PiiMaskingService;
+  readonly cascade?: ModelCascadeService;
 }
 
 function createHarness(
@@ -193,6 +197,8 @@ function createHarness(
     tools as unknown as ConstructorParameters<typeof ChatService>[9],
     undefined,
     workspaces as unknown as ConstructorParameters<typeof ChatService>[10],
+    options.pii,
+    options.cascade,
   );
 
   return {
@@ -351,6 +357,68 @@ describe('ChatService (llm-worker client)', () => {
     };
 
     expect(createCall?.data.metadataJson?.citations).toHaveLength(1);
+  });
+
+  it('маскирует ПДн до worker и восстанавливает ответ (PII-44)', async () => {
+    const harness = createHarness(
+      [
+        {
+          type: 'done',
+          conversationId: 'c1',
+          reply: 'Перезвоните по номеру [PHONE_1]',
+          pendingApproval: false,
+        },
+      ],
+      [],
+      {
+        pii: new PiiMaskingService({ PII_MASKING_ENABLED: 'true' }),
+        cascade: new ModelCascadeService({
+          LLM_CASCADE_ENABLED: 'true',
+          LLM_CASCADE_LITE_MODEL: 'lite-model',
+        }),
+      },
+    );
+    harness.tools.buildDescriptors.mockReturnValue([]);
+    harness.prisma.message.findMany.mockResolvedValue([
+      { role: 'user', content: 'Позвоните +7 999 123-45-67' },
+    ]);
+    harness.router.selectRoutes.mockResolvedValue([
+      {
+        id: 'route-1',
+        name: 'main',
+        modelName: 'flagship-model',
+        providerType: 'openai',
+        baseUrl: 'https://llm.example.com/v1',
+        apiKeyEnvVar: null,
+        taskType: 'chat',
+        dailyCostLimit: null,
+      },
+    ]);
+
+    const result = await harness.service.streamMessage(
+      'u1',
+      'c1',
+      'Позвоните +7 999 123-45-67',
+      () => {},
+    );
+
+    const request = harness.worker.run.mock.calls[0]?.[0] as RunGraphRequest;
+
+    expect(JSON.stringify(request.messages)).not.toContain('+7 999 123-45-67');
+    expect(JSON.stringify(request.messages)).toContain('[PHONE_1]');
+    expect(request.llmRoutes[0]?.modelName).toBe('lite-model');
+    expect(result.reply).toContain('+7 999 123-45-67');
+    expect(result.piiMaskedCount).toBe(1);
+    expect(result.modelTier).toBe('lite');
+
+    const createCall = harness.prisma.message.create.mock.calls.at(-1)?.[0] as {
+      data: { metadataJson?: { piiMaskedCount?: number; modelTier?: string } };
+    };
+
+    expect(createCall?.data.metadataJson).toMatchObject({
+      piiMaskedCount: 1,
+      modelTier: 'lite',
+    });
   });
 
   it('resolveApprovalRules передаёт условие HITL по stageId (KI-079)', () => {

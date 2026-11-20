@@ -24,6 +24,14 @@ import {
   type LlmRouteSelection,
 } from '../llm-router/llm-router.service.js';
 import {
+  ModelCascadeService,
+  type ModelTier,
+} from '../llm-router/model-cascade.service.js';
+import {
+  PiiMaskingService,
+  type PiiMaskResult,
+} from '../security/pii-masking.service.js';
+import {
   ApiException,
   insufficientFundsError,
 } from '../common/api-error.js';
@@ -94,6 +102,10 @@ export interface ChatReply {
   executionTrace?: ExecutionStep[];
   /** Сноски на фрагменты базы знаний (KB-38.2). */
   citations?: Citation[];
+  /** Сколько ПДн заменено до отправки в LLM (PII-44.2). */
+  piiMaskedCount?: number;
+  /** Уровень модели каскада (CASCADE-44.1). */
+  modelTier?: ModelTier;
 }
 
 interface HistoryMessage {
@@ -364,6 +376,8 @@ export class ChatService {
     private readonly toolsService: AgentToolsService,
     @Optional() private readonly semanticCache?: SemanticCacheService,
     @Optional() private readonly workspaces?: WorkspacesService,
+    @Optional() private readonly pii?: PiiMaskingService,
+    @Optional() private readonly cascade?: ModelCascadeService,
   ) {}
 
   /**
@@ -555,7 +569,10 @@ export class ChatService {
       prepared.skills.map((skill) => skill.id),
     );
 
-    const routes = await this.llmRouterService.selectRoutes('chat');
+    const selected = await this.llmRouterService.selectRoutes('chat');
+    const decision = this.routeDecision(selected, content, prepared);
+    const routes = decision.routes;
+    const maskRef: { current: PiiMaskResult | null } = { current: null };
     const cacheQuery = this.cacheQuery(userId, content, prepared, routes);
 
     if (cacheQuery !== null) {
@@ -572,7 +589,7 @@ export class ChatService {
     try {
       const result = await this.consumeWorkerStream(
         this.worker.run(
-          this.runRequest(userId, conversationId, prepared, routes),
+          this.runRequest(userId, conversationId, prepared, routes, maskRef),
         ),
         conversationId,
       );
@@ -581,22 +598,37 @@ export class ChatService {
         return { conversationId, reply: '', pendingApproval: true };
       }
 
+      const reply = this.restorePii(result.reply, maskRef.current);
+
       if (cacheQuery !== null) {
-        await this.semanticCache!.store(cacheQuery, result.reply);
+        await this.semanticCache!.store(cacheQuery, reply);
       }
       const metadata: AssistantMetadata = {
-        ...(result.artifacts.length > 0 ? { artifacts: result.artifacts } : {}),
+        ...(result.artifacts.length > 0
+          ? {
+              artifacts: result.artifacts.map((artifact) => ({
+                ...artifact,
+                content: this.restorePii(artifact.content, maskRef.current),
+              })),
+            }
+          : {}),
         ...(result.executionTrace.length > 0
           ? { executionTrace: result.executionTrace }
           : {}),
         ...(prepared.citations.length > 0
           ? { citations: prepared.citations }
           : {}),
+        ...(maskRef.current === null
+          ? {}
+          : { piiMaskedCount: maskRef.current.maskedCount }),
+        ...(decision.modelTier === undefined
+          ? {}
+          : { modelTier: decision.modelTier }),
       };
-      await this.persistReply(conversationId, result.reply, metadata);
-      await this.rememberExchange(userId, content, result.reply);
+      await this.persistReply(conversationId, reply, metadata);
+      await this.rememberExchange(userId, content, reply);
 
-      return { conversationId, reply: result.reply, ...metadata };
+      return { conversationId, reply, ...metadata };
     } catch (error) {
       if (!isInsufficientFunds(error)) {
         throw error;
@@ -626,7 +658,10 @@ export class ChatService {
       prepared.skills.map((skill) => skill.id),
     );
 
-    const routes = await this.llmRouterService.selectRoutes('chat');
+    const selected = await this.llmRouterService.selectRoutes('chat');
+    const decision = this.routeDecision(selected, content, prepared);
+    const routes = decision.routes;
+    const maskRef: { current: PiiMaskResult | null } = { current: null };
     const cacheQuery = this.cacheQuery(userId, content, prepared, routes);
 
     if (cacheQuery !== null) {
@@ -644,7 +679,7 @@ export class ChatService {
     try {
       const result = await this.consumeWorkerStream(
         this.worker.run(
-          this.runRequest(userId, conversationId, prepared, routes),
+          this.runRequest(userId, conversationId, prepared, routes, maskRef),
         ),
         conversationId,
         onDelta,
@@ -655,22 +690,37 @@ export class ChatService {
         return { conversationId, reply: result.reply, pendingApproval: true };
       }
 
+      const reply = this.restorePii(result.reply, maskRef.current);
+
       if (cacheQuery !== null) {
-        await this.semanticCache!.store(cacheQuery, result.reply);
+        await this.semanticCache!.store(cacheQuery, reply);
       }
       const metadata: AssistantMetadata = {
-        ...(result.artifacts.length > 0 ? { artifacts: result.artifacts } : {}),
+        ...(result.artifacts.length > 0
+          ? {
+              artifacts: result.artifacts.map((artifact) => ({
+                ...artifact,
+                content: this.restorePii(artifact.content, maskRef.current),
+              })),
+            }
+          : {}),
         ...(result.executionTrace.length > 0
           ? { executionTrace: result.executionTrace }
           : {}),
         ...(prepared.citations.length > 0
           ? { citations: prepared.citations }
           : {}),
+        ...(maskRef.current === null
+          ? {}
+          : { piiMaskedCount: maskRef.current.maskedCount }),
+        ...(decision.modelTier === undefined
+          ? {}
+          : { modelTier: decision.modelTier }),
       };
-      await this.persistReply(conversationId, result.reply, metadata);
-      await this.rememberExchange(userId, content, result.reply);
+      await this.persistReply(conversationId, reply, metadata);
+      await this.rememberExchange(userId, content, reply);
 
-      return { conversationId, reply: result.reply, ...metadata };
+      return { conversationId, reply, ...metadata };
     } catch (error) {
       if (!isInsufficientFunds(error)) {
         throw error;
@@ -683,26 +733,91 @@ export class ChatService {
     }
   }
 
+  /** Выбор маршрутов с учётом каскада моделей (CASCADE-44.1). */
+  private routeDecision(
+    selected: readonly LlmRouteSelection[],
+    prompt: string,
+    prepared: PreparedMessage,
+  ): { routes: LlmRouteSelection[]; modelTier?: ModelTier } {
+    if (this.cascade === undefined) {
+      return { routes: [...selected] };
+    }
+
+    const decision = this.cascade.apply(
+      selected,
+      prompt,
+      prepared.tools.length > 0,
+    );
+
+    return { routes: [...decision.routes], modelTier: decision.modelTier };
+  }
+
+  /** Локальная подстановка ПДн в уже полученном ответе (PII-44.2). */
+  private restorePii(
+    text: string,
+    masked: PiiMaskResult | null,
+  ): string {
+    return masked === null || this.pii === undefined
+      ? text
+      : this.pii.unmaskPii(text, masked.tokensMap);
+  }
+
+  /**
+   * Маскирует только данные, уходящие в llm-worker. mapping живёт в `maskRef`
+   * в рамках одного вызова и никогда не попадает в БД/Redis/логи (PII-44.1).
+   */
+  private maskForWorker(
+    prepared: PreparedMessage,
+    maskRef?: { current: PiiMaskResult | null },
+  ): { messages: HistoryMessage[]; memoryContext: string; systemPrompt: string } {
+    if (this.pii === undefined || !this.pii.enabled || maskRef === undefined) {
+      return {
+        messages: prepared.messages,
+        memoryContext: prepared.memoryContext,
+        systemPrompt: prepared.systemPrompt,
+      };
+    }
+
+    const state = { map: new Map<string, string>(), counters: new Map<string, number>() };
+    const systemPrompt = this.pii.maskPii(prepared.systemPrompt, state).maskedText;
+    const memoryContext = this.pii.maskPii(prepared.memoryContext, state).maskedText;
+    const messages = prepared.messages.map((message) => ({
+      role: message.role,
+      content: this.pii!.maskPii(message.content, state).maskedText,
+    }));
+
+    maskRef.current = {
+      maskedText: '',
+      tokensMap: state.map,
+      maskedCount: state.map.size,
+    };
+
+    return { messages, memoryContext, systemPrompt };
+  }
+
   private runRequest(
     userId: string,
     conversationId: string,
     prepared: PreparedMessage,
-    routes: LlmRouteSelection[],
+    routes: readonly LlmRouteSelection[],
+    maskRef?: { current: PiiMaskResult | null },
   ): RunGraphRequest {
+    const outbound = this.maskForWorker(prepared, maskRef);
+
     return {
       conversationId,
       userId,
-      messages: prepared.messages,
+      messages: outbound.messages,
       skills: prepared.skills,
       approvalRequiredTools: prepared.approvalRequiredTools,
       approvalRules: prepared.approvalRules,
       outcomePrices: prepared.outcomePrices,
-      llmRoutes: routes,
-      memoryContext: prepared.memoryContext,
+      llmRoutes: [...routes],
+      memoryContext: outbound.memoryContext,
       userRole: prepared.userRole,
       toolSkills: prepared.toolSkills,
       taintedSecrets: [],
-      systemPrompt: prepared.systemPrompt,
+      systemPrompt: outbound.systemPrompt,
       tools: prepared.tools,
       agentId: DEFAULT_OFFICE_AGENT_ID,
       ...(prepared.skills.length === 0

@@ -189,6 +189,10 @@ export class ChatGateway implements OnGatewayConnection {
             ? {}
             : { executionTrace: reply.executionTrace }),
           ...(reply.citations === undefined ? {} : { citations: reply.citations }),
+          ...(reply.piiMaskedCount === undefined
+            ? {}
+            : { piiMaskedCount: reply.piiMaskedCount }),
+          ...(reply.modelTier === undefined ? {} : { modelTier: reply.modelTier }),
         }),
       );
 
@@ -277,6 +281,10 @@ export class ChatGateway implements OnGatewayConnection {
           ? {}
           : { executionTrace: reply.executionTrace }),
         ...(reply.citations === undefined ? {} : { citations: reply.citations }),
+        ...(reply.piiMaskedCount === undefined
+          ? {}
+          : { piiMaskedCount: reply.piiMaskedCount }),
+        ...(reply.modelTier === undefined ? {} : { modelTier: reply.modelTier }),
       }),
     );
 

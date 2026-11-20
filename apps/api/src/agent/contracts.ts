@@ -206,6 +206,8 @@ export const streamEndPayloadSchema = z.object({
   artifacts: z.array(artifactItemSchema).optional(),
   executionTrace: z.array(executionStepSchema).optional(),
   citations: z.array(citationSchema).optional(),
+  piiMaskedCount: z.number().int().nonnegative().optional(),
+  modelTier: z.enum(['lite', 'standard', 'flagship']).optional(),
 });
 export type StreamEndPayload = z.infer<typeof streamEndPayloadSchema>;
 

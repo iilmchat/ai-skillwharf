@@ -12,6 +12,10 @@ export const assistantMetadataSchema = z
     artifacts: z.array(artifactItemSchema).optional(),
     executionTrace: z.array(executionStepSchema).optional(),
     citations: z.array(citationSchema).optional(),
+    /** Сколько ПДн заменено токенами до отправки в LLM (PII-44.2). */
+    piiMaskedCount: z.number().int().nonnegative().optional(),
+    /** Уровень модели, выбранный каскадом (CASCADE-44.1). */
+    modelTier: z.enum(['lite', 'standard', 'flagship']).optional(),
     cacheHit: z.boolean().optional(),
   })
   .strict();

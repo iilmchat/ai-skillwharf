@@ -115,6 +115,10 @@ services:
       BILLING_OUTBOX_POLL_MS: ${BILLING_OUTBOX_POLL_MS:-15000}
       # Период опроса Cron-планировщика автономных задач (Sprint 43).
       SCHEDULER_POLL_MS: ${SCHEDULER_POLL_MS:-30000}
+      # Sprint 44: 152-ФЗ PII-маскирование и Smart Model Cascade.
+      PII_MASKING_ENABLED: ${PII_MASKING_ENABLED:-false}
+      LLM_CASCADE_ENABLED: ${LLM_CASCADE_ENABLED:-false}
+      LLM_CASCADE_LITE_MODEL: ${LLM_CASCADE_LITE_MODEL:-}
       # API ходит к sandbox-worker по внутренней сети compose.
       SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
       # LLM-инференс и LangGraph вынесены в отдельный сервис.
