@@ -5,40 +5,64 @@ import {
   parseAssistantMessageMetadata,
 } from './message-metadata';
 
-describe('assistantMessageMetadataSchema', () => {
-  it('принимает cacheHit=true и false', () => {
-    expect(assistantMessageMetadataSchema.parse({ cacheHit: true })).toEqual({
+const ARTIFACT = {
+  id: 'art-1',
+  type: 'document',
+  title: 'Договор',
+  content: 'Текст',
+};
+
+const STEP = {
+  stepIndex: 0,
+  name: 'Поиск',
+  durationMs: 100,
+  status: 'completed',
+};
+
+describe('assistantMessageMetadataSchema (Sprint 37)', () => {
+  it('принимает артефакты и шаги выполнения', () => {
+    const parsed = assistantMessageMetadataSchema.parse({
       cacheHit: true,
+      artifacts: [ARTIFACT],
+      executionTrace: [STEP],
     });
-    expect(assistantMessageMetadataSchema.parse({ cacheHit: false })).toEqual({
-      cacheHit: false,
-    });
+
+    expect(parsed.artifacts?.[0]?.title).toBe('Договор');
+    expect(parsed.executionTrace?.[0]?.stepIndex).toBe(0);
+    expect(isCacheHitMessage({ metadata: parsed })).toBe(true);
   });
 
-  it('совместим со старым ответом без метаданных', () => {
-    expect(assistantMessageMetadataSchema.parse({})).toEqual({});
+  it('остаётся совместимой со старыми метаданными', () => {
+    const parsed = assistantMessageMetadataSchema.parse({ cacheHit: false });
+
+    expect(parsed.artifacts).toBeUndefined();
+    expect(parsed.executionTrace).toBeUndefined();
   });
 
-  it('отвергает нелогическое значение cacheHit', () => {
+  it('отклоняет невалидные артефакты и шаги', () => {
     expect(
-      assistantMessageMetadataSchema.safeParse({ cacheHit: 'true' }).success,
+      assistantMessageMetadataSchema.safeParse({ artifacts: [{ ...ARTIFACT, id: '' }] })
+        .success,
     ).toBe(false);
     expect(
-      assistantMessageMetadataSchema.safeParse({ cacheHit: 1 }).success,
+      assistantMessageMetadataSchema.safeParse({
+        executionTrace: [{ ...STEP, status: 'unknown' }],
+      }).success,
     ).toBe(false);
   });
+});
 
-  it('показывает бейдж только при cacheHit: true', () => {
-    expect(isCacheHitMessage({ metadata: { cacheHit: true } })).toBe(true);
-    expect(isCacheHitMessage({ metadata: { cacheHit: false } })).toBe(false);
-    expect(isCacheHitMessage({})).toBe(false);
-  });
-
-  it('парсер игнорирует невалидные и лишние поля', () => {
-    expect(parseAssistantMessageMetadata({ cacheHit: true, extra: 'x' })).toEqual({
-      cacheHit: true,
+describe('parseAssistantMessageMetadata', () => {
+  it('возвращает только валидные метаданные', () => {
+    expect(
+      parseAssistantMessageMetadata({
+        cacheHit: true,
+        artifacts: [{ ...ARTIFACT, type: 'image' }],
+      }),
+    ).toEqual({});
+    expect(parseAssistantMessageMetadata({ artifacts: [ARTIFACT] })).toEqual({
+      artifacts: [ARTIFACT],
     });
-    expect(parseAssistantMessageMetadata({ cacheHit: 'true' })).toEqual({});
     expect(parseAssistantMessageMetadata(null)).toEqual({});
   });
 });

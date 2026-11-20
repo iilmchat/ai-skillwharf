@@ -1570,6 +1570,64 @@
       "label": "Из кеша · 0 ₽",
       "tooltip": "Ответ найден в семантическом кеше без расхода токенов."
     },
+    "artifacts": {
+      "open": "Открыть в Canvas",
+      "types": {
+        "document": "Документ",
+        "table": "Таблица",
+        "code": "Код"
+      },
+      "canvas": {
+        "title": "Canvas артефакта",
+        "close": "Закрыть Canvas",
+        "preview": "Просмотр",
+        "edit": "Правка",
+        "instruction": "Инструкция для ИИ",
+        "instructionPlaceholder": "Опишите, что изменить в выделенном фрагменте…",
+        "presets": {
+          "recalculate": "Пересчитать только этот раздел",
+          "stricterLegal": "Сделать строже юридически"
+        },
+        "selection": "Фрагмент выбран",
+        "selectionHint": "Выделите текст в просмотре или в режиме правки — он уйдёт в запрос к ИИ. Остальное содержимое не изменится.",
+        "selectionEmpty": "Фрагмент не выбран",
+        "apply": "Применить через ИИ",
+        "applying": "Применяем…",
+        "copy": "Копировать",
+        "copied": "Скопировано",
+        "copyFailed": "Не удалось скопировать",
+        "download": {
+          "md": "Скачать .md",
+          "csv": "Скачать .csv",
+          "html": "Печать .html",
+          "doc": "Скачать .doc"
+        },
+        "refinementError": "Не удалось применить правку. Попробуйте ещё раз.",
+        "export": {
+          "lang": "ru",
+          "platform": "SkillWharf",
+          "generatedAt": "Сформировано: {{date}}"
+        }
+      }
+    },
+    "execution": {
+      "summary_one": "Ход работы агента ({{count}} шаг · {{seconds}} сек · {{cost}} ₽)",
+      "summary_few": "Ход работы агента ({{count}} шага · {{seconds}} сек · {{cost}} ₽)",
+      "summary_many": "Ход работы агента ({{count}} шагов · {{seconds}} сек · {{cost}} ₽)",
+      "summary_other": "Ход работы агента ({{count}} шагов · {{seconds}} сек · {{cost}} ₽)",
+      "expand": "Показать шаги",
+      "collapse": "Скрыть шаги",
+      "step": "Шаг {{stepIndex}}",
+      "tool": "Инструмент: {{toolName}}",
+      "duration": "{{milliseconds}} мс",
+      "cost": "{{rubles}} ₽",
+      "noCost": "без расхода",
+      "status": {
+        "completed": "Завершён",
+        "failed": "Ошибка",
+        "hitl_paused": "Ожидает подтверждения"
+      }
+    },
     "messageLabel": "Сообщение",
     "inputPlaceholder": "Напишите сообщение…",
     "inputWaiting": "Ожидание подключения…",

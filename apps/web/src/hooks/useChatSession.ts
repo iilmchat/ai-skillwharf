@@ -62,6 +62,12 @@ export interface ChatSession {
   sendMessage: (content: string) => void;
   /** Подтверждает или отклоняет действие, на котором остановился агент. */
   approveAction: (approved: boolean) => void;
+  /** Сохраняет отредактированный через Canvas текст в метаданные ответа. */
+  updateArtifactContent: (
+    messageId: string,
+    artifactId: string,
+    content: string,
+  ) => void;
   clearNotice: () => void;
   retry: () => void;
 }
@@ -702,6 +708,30 @@ export function useChatSession(): ChatSession {
     [],
   );
 
+  /** Правка артефакта остаётся в контексте диалога и видна при повторном открытии. */
+  const updateArtifactContent = useCallback(
+    (messageId: string, artifactId: string, content: string): void => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId && message.metadata?.artifacts !== undefined
+            ? {
+                ...message,
+                metadata: {
+                  ...message.metadata,
+                  artifacts: message.metadata.artifacts.map((artifact) =>
+                    artifact.id === artifactId
+                      ? { ...artifact, content }
+                      : artifact,
+                  ),
+                },
+              }
+            : message,
+        ),
+      );
+    },
+    [],
+  );
+
   const sendMessage = useCallback(
     (content: string) => {
       const trimmed = content.trim();
@@ -778,6 +808,7 @@ export function useChatSession(): ChatSession {
     approval,
     sendMessage,
     approveAction,
+    updateArtifactContent,
     clearNotice,
     retry,
   };

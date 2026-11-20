@@ -11,6 +11,16 @@ import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { Brand } from '../components/Brand';
 import { ApprovalPrompt } from '../components/ApprovalPrompt';
+import {
+  ArtifactCanvasDrawer,
+  ArtifactCard,
+  type ArtifactCanvasLabels,
+  type ArtifactCardLabels,
+} from '../components/chat/ArtifactCanvasDrawer';
+import {
+  ExecutionTraceAccordion,
+  type ExecutionTraceLabels,
+} from '../components/chat/ExecutionTraceAccordion';
 import { DocumentUploader } from '../components/DocumentUploader';
 import { ErrorToast } from '../components/ErrorToast';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -34,6 +44,7 @@ import { useBalance } from '../hooks/useBalance';
 import { useActiveLlm } from '../hooks/useActiveLlm';
 import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import { useTokenQuota } from '../hooks/useTokenQuota';
+import type { ArtifactItem } from '../lib/artifacts';
 import { ledgerQueryKey } from '../lib/ledger';
 import { normalizeProvider } from '../lib/llm';
 import { isCacheHitMessage } from '../lib/message-metadata';
@@ -72,13 +83,21 @@ function MessageBubble({
   message,
   isStreaming,
   labels,
+  artifactLabels,
+  executionLabels,
+  onOpenArtifact,
 }: {
   message: ChatMessage;
   isStreaming: boolean;
   labels: MessageContentLabels;
+  artifactLabels: ArtifactCardLabels;
+  executionLabels: ExecutionTraceLabels;
+  onOpenArtifact: (artifact: ArtifactItem, messageId: string) => void;
 }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
+  const artifacts = message.metadata?.artifacts ?? [];
+  const executionTrace = message.metadata?.executionTrace ?? [];
 
   return (
     <li className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -92,12 +111,27 @@ function MessageBubble({
         <span className="sr-only">
           {isUser ? t('chat.you') : t('chat.assistant')}
         </span>
+        {!isUser && executionTrace.length > 0 && (
+          <ExecutionTraceAccordion
+            steps={executionTrace}
+            labels={executionLabels}
+          />
+        )}
         <MessageContent
           content={message.content}
           isStreaming={isStreaming}
           imageAltFallback={t('chat.imageAlt')}
           labels={labels}
         />
+        {!isUser &&
+          artifacts.map((artifact) => (
+            <ArtifactCard
+              key={artifact.id}
+              artifact={artifact}
+              labels={artifactLabels}
+              onOpen={(artifact) => onOpenArtifact(artifact, message.id)}
+            />
+          ))}
         {!isUser && isCacheHitMessage(message) && (
           <span
             title={t('chat.cacheHit.tooltip')}
@@ -190,6 +224,7 @@ export function ChatPage() {
     approval,
     sendMessage,
     approveAction,
+    updateArtifactContent,
     clearNotice,
     retry,
   } = useChatSession();
@@ -206,6 +241,15 @@ export function ChatPage() {
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [canvasArtifact, setCanvasArtifact] = useState<{
+    artifact: ArtifactItem;
+    messageId: string;
+  } | null>(null);
+  const [exportGeneratedAt] = useState(() =>
+    t('chat.artifacts.canvas.export.generatedAt', {
+      date: new Date().toLocaleString(),
+    }),
+  );
   const [paymentNotice, setPaymentNotice] = useState<
     'success' | 'cancel' | null
   >(() => {
@@ -219,6 +263,19 @@ export function ChatPage() {
   const closeTopUp = useCallback(() => setIsTopUpOpen(false), []);
   const openHistory = useCallback(() => setIsHistoryOpen(true), []);
   const closeHistory = useCallback(() => setIsHistoryOpen(false), []);
+  const closeCanvas = useCallback(() => setCanvasArtifact(null), []);
+
+  function handleOpenArtifact(artifact: ArtifactItem, messageId: string): void {
+    setCanvasArtifact({ artifact, messageId });
+  }
+
+  function handleArtifactRefined(content: string): void {
+    if (canvasArtifact === null) {
+      return;
+    }
+
+    updateArtifactContent(canvasArtifact.messageId, canvasArtifact.artifact.id, content);
+  }
 
   useEffect(() => {
     const payment = searchParams.get('payment');
@@ -298,6 +355,71 @@ export function ChatPage() {
       match: t('chat.results.match'),
       years: t('chat.results.years'),
       score: t('chat.results.score'),
+    },
+  };
+
+  const artifactLabels: ArtifactCardLabels = {
+    open: t('chat.artifacts.open'),
+    types: {
+      document: t('chat.artifacts.types.document'),
+      table: t('chat.artifacts.types.table'),
+      code: t('chat.artifacts.types.code'),
+    },
+  };
+
+  const executionLabels: ExecutionTraceLabels = {
+    summary: (stats) =>
+      t('chat.execution.summary', {
+        count: stats.count,
+        seconds: stats.seconds,
+        cost: stats.cost,
+      }),
+    expand: t('chat.execution.expand'),
+    collapse: t('chat.execution.collapse'),
+    step: (stepIndex) => t('chat.execution.step', { stepIndex }),
+    tool: (toolName) => t('chat.execution.tool', { toolName }),
+    duration: (milliseconds) =>
+      t('chat.execution.duration', { milliseconds }),
+    cost: (rubles) => t('chat.execution.cost', { rubles }),
+    noCost: t('chat.execution.noCost'),
+    status: {
+      completed: t('chat.execution.status.completed'),
+      failed: t('chat.execution.status.failed'),
+      hitl_paused: t('chat.execution.status.hitl_paused'),
+    },
+  };
+
+  const canvasLabels: ArtifactCanvasLabels = {
+    ...artifactLabels,
+    title: t('chat.artifacts.canvas.title'),
+    close: t('chat.artifacts.canvas.close'),
+    preview: t('chat.artifacts.canvas.preview'),
+    edit: t('chat.artifacts.canvas.edit'),
+    instruction: t('chat.artifacts.canvas.instruction'),
+    instructionPlaceholder: t('chat.artifacts.canvas.instructionPlaceholder'),
+    presets: {
+      recalculate: t('chat.artifacts.canvas.presets.recalculate'),
+      stricterLegal: t('chat.artifacts.canvas.presets.stricterLegal'),
+    },
+    selection: t('chat.artifacts.canvas.selection'),
+    selectionHint: t('chat.artifacts.canvas.selectionHint'),
+    selectionEmpty: t('chat.artifacts.canvas.selectionEmpty'),
+    apply: t('chat.artifacts.canvas.apply'),
+    applying: t('chat.artifacts.canvas.applying'),
+    copy: t('chat.artifacts.canvas.copy'),
+    copied: t('chat.artifacts.canvas.copied'),
+    copyFailed: t('chat.artifacts.canvas.copyFailed'),
+    download: {
+      md: t('chat.artifacts.canvas.download.md'),
+      csv: t('chat.artifacts.canvas.download.csv'),
+      html: t('chat.artifacts.canvas.download.html'),
+      doc: t('chat.artifacts.canvas.download.doc'),
+    },
+    refinementError: t('chat.artifacts.canvas.refinementError'),
+    export: {
+      lang: t('chat.artifacts.canvas.export.lang'),
+      platform: t('chat.artifacts.canvas.export.platform'),
+      generatedAt: exportGeneratedAt,
     },
   };
 
@@ -856,6 +978,9 @@ export function ChatPage() {
                       key={message.id}
                       message={message}
                       labels={messageLabels}
+                      artifactLabels={artifactLabels}
+                      executionLabels={executionLabels}
+                      onOpenArtifact={handleOpenArtifact}
                       isStreaming={isStreaming && index === messages.length - 1}
                     />
                   ))}
@@ -995,6 +1120,16 @@ export function ChatPage() {
       />
 
       <LedgerHistoryModal open={isHistoryOpen} onClose={closeHistory} />
+
+      {canvasArtifact !== null && (
+        <ArtifactCanvasDrawer
+          key={canvasArtifact.artifact.id}
+          artifact={canvasArtifact.artifact}
+          labels={canvasLabels}
+          onClose={closeCanvas}
+          onRefined={handleArtifactRefined}
+        />
+      )}
 
       {notice !== null && (
         <ErrorToast

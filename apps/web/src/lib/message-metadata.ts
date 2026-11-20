@@ -1,13 +1,17 @@
 import { z } from 'zod';
+import { artifactItemSchema, executionStepSchema } from './artifacts';
 
 /**
- * Метаданные ответа ассистента (Sprint 30, CACHE-30.1).
+ * Метаданные ответа ассистента (Sprint 30, CACHE-30.1; Sprint 37, UX-37.1/37.3).
  *
  * Поля необязательны: старый API не присылает метаданные вовсе, поэтому
- * отсутствие новых полей не должно ломать ленту сообщений.
+ * отсутствие новых полей не должно ломать ленту сообщений. Невалидные
+ * артефакты или шаги трассировки отбрасываются целиком парсером ниже.
  */
 export const assistantMessageMetadataSchema = z.object({
   cacheHit: z.boolean().optional(),
+  artifacts: z.array(artifactItemSchema).optional(),
+  executionTrace: z.array(executionStepSchema).optional(),
 });
 
 export type AssistantMessageMetadata = z.infer<

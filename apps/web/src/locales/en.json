@@ -1570,6 +1570,62 @@
       "label": "Cached · 0 ₽",
       "tooltip": "Answer found in the semantic cache without spending tokens."
     },
+    "artifacts": {
+      "open": "Open in Canvas",
+      "types": {
+        "document": "Document",
+        "table": "Table",
+        "code": "Code"
+      },
+      "canvas": {
+        "title": "Artifact canvas",
+        "close": "Close canvas",
+        "preview": "Preview",
+        "edit": "Edit",
+        "instruction": "AI instruction",
+        "instructionPlaceholder": "Describe what to change in the selected fragment…",
+        "presets": {
+          "recalculate": "Recalculate only this section",
+          "stricterLegal": "Make the wording legally stricter"
+        },
+        "selection": "Fragment selected",
+        "selectionHint": "Select text in the preview or in edit mode — it is sent to the AI. The rest of the content stays unchanged.",
+        "selectionEmpty": "No fragment selected",
+        "apply": "Apply with AI",
+        "applying": "Applying…",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Could not copy",
+        "download": {
+          "md": "Download .md",
+          "csv": "Download .csv",
+          "html": "Print .html",
+          "doc": "Download .doc"
+        },
+        "refinementError": "Could not apply the edit. Please try again.",
+        "export": {
+          "lang": "en",
+          "platform": "SkillWharf",
+          "generatedAt": "Generated: {{date}}"
+        }
+      }
+    },
+    "execution": {
+      "summary_one": "Agent run ({{count}} step · {{seconds}} s · {{cost}} ₽)",
+      "summary_other": "Agent run ({{count}} steps · {{seconds}} s · {{cost}} ₽)",
+      "expand": "Show steps",
+      "collapse": "Hide steps",
+      "step": "Step {{stepIndex}}",
+      "tool": "Tool: {{toolName}}",
+      "duration": "{{milliseconds}} ms",
+      "cost": "{{rubles}} ₽",
+      "noCost": "no cost",
+      "status": {
+        "completed": "Completed",
+        "failed": "Failed",
+        "hitl_paused": "Awaiting approval"
+      }
+    },
     "messageLabel": "Message",
     "inputPlaceholder": "Write a message…",
     "inputWaiting": "Waiting for connection…",
