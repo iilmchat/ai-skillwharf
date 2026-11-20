@@ -4,6 +4,39 @@
 
 ## [Unreleased]
 
+### Sprint 43: Cron-планировщик, дайджесты и расписания (CRON-43.1–43.3)
+
+**Бэкенд (CRON-43.1/43.2): планировщик и доставка дайджестов.**
+
+- Модель `ScheduledAgentJob` + миграция `20261120140000_add_scheduled_agent_jobs`:
+  cron, таймзона, промпт, канал доставки, `nextRunAt` и журнал последнего запуска.
+- `parseCronExpression`/`computeNextCronRun`: детерминированный расчёт для `*`,
+  чисел, списков, диапазонов и шагов (`*/15`) с учётом IANA-таймзон и DST;
+  cron валидируется Zod.
+- `ScheduledJobsService`: тик с Redis-блокировкой `scheduler:jobs:lock`
+  (`SET NX PX 15000`, Lua-освобождение по токену), `SCHEDULER_POLL_MS=0`
+  отключает тик. `executeJob` запускает диалог в `ChatService`, сохраняет
+  статус/выжимку и пересчитывает `nextRunAt`.
+- Доставка результата в Telegram (`X`-токен канала) или корпоративный канал
+  через адаптер; best-effort, не роняет задачу.
+- REST (owner/admin/operator): `GET|POST /workspaces/:id/schedules`,
+  `PATCH|DELETE .../:jobId`, `POST .../:jobId/run-now`. Переменная
+  `SCHEDULER_POLL_MS=30000` добавлена в `.env.example` и проброшена в сервис
+  `api` в `docker-compose.yml`.
+
+**Web UI (CRON-43.3): страница `/app/schedules`.**
+
+- `apps/web/src/lib/schedules.ts`: Zod-схемы задачи и формы, валидация
+  5-полевого cron, пресеты расписаний, клиент
+  `/workspaces/:workspaceId/schedules` с созданием, обновлением, удалением и
+  `POST .../run-now`, категории ошибок.
+- `SchedulesPage`: защищённый маршрут `/app/schedules` и пункт навигации;
+  конструктор с пресетами, cron, таймзоной, заданием и выбором канала доставки
+  (Telegram/корпоративный) из подключённых каналов воркспейса; список задач со
+  статусом, временем запуска, итогом последнего выполнения, паузой, запуском
+  сейчас и удалением. RU/EN-ключи и unit-тесты; все задачи Sprint 43 отмечены
+  `[x]` в `ROADMAP-V3.md`.
+
 ### Sprint 42: маркировка DataMatrix / ГИС МТ «Честный ЗНАК» (MARK-42.1–42.3)
 
 **MCP-сервер ГИС МТ (MARK-42.1): `infra/mcp/marking/server.mjs`.**

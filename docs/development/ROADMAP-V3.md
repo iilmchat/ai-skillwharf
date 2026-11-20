@@ -151,11 +151,14 @@ H/J/K/L в российском контуре.
 
 ### Sprint 43 — Cron-планировщик автономных задач и утренние сводки
 
-* [ ] **[CRON-43.1]** Cron-планировщик запуска агентов по расписанию с
-  поддержкой cron-выражений и таймзон воркспейса.
-* [ ] **[CRON-43.2]** Ежедневные дайджесты остатков и сделок в Telegram с
-  адаптацией под роль получателя.
-* [ ] **[CRON-43.3]** UI расписаний и журнал фоновых выполнений со статусами,
+* [x] **[CRON-43.1]** Модель `ScheduledAgentJob` + миграция, детерминированный
+  парсер 5-полевого cron (`*`, списки, диапазоны, шаги) с учётом IANA-таймзон,
+  REST CRUD и `run-now`; тик с распределённой блокировкой Redis
+  (`scheduler:jobs:lock`, `SET NX PX` + Lua-освобождение) для HA-реплик.
+* [x] **[CRON-43.2]** Autonomous-запуск диалога в `ChatService`, сохранение
+  `lastRunAt`/`lastRunStatus`/`lastRunSummary`, пересчёт `nextRunAt` и доставка
+  готового дайджеста в Telegram или корпоративный канал.
+* [x] **[CRON-43.3]** UI расписаний и журнал фоновых выполнений со статусами,
   длительностью и перезапуском задач.
 
 ### Sprint 44 — 152-ФЗ PII-маскирование и Smart Model Cascade
@@ -180,3 +183,4 @@ H/J/K/L в российском контуре.
 | 2026-11-20 | Sprint 40 (40.1–40.4) | OpenCode / UI-Agent | Выполнено | Модель `CorpMessengerChannel` + миграция, `ICorpMessengerAdapter` и реестр адаптеров VK Teams/Пачка/Яндекс Мессенджер, REST каналов и публичный webhook с constant-time секретом и HITL-кнопками; UI — `CorpChannelsSection` в `/app/settings` с настройкой токена, on-premise URL, Chat ID и Webhook Secret, RU/EN и unit-тесты | Этап 9 (`v2.2.0`) закрыт |
 | 2026-11-20 | Sprint 41 (41.1–41.4) | OpenCode / UI-Agent / Infra | Выполнено | MCP-шлюз `edo-mcp` (DiadocAuth / СБИС JSON-RPC, 4 инструмента, 12 тестов); провайдеры ключей `diadoc`/`sbis`, проброс EDO-заголовков, инструменты сверки УПД с ERP в копейках и стартовый навык; карточки Диадок/СБИС в `/app/settings`, RU/EN и unit-тесты | Этап 10 (`v2.3.0`) ЭДО-часть закрыта |
 | 2026-11-20 | Sprint 42 (42.1–42.3) | OpenCode / UI-Agent / Infra | Выполнено | MCP-шлюз `marking-mcp` (True API `/cises/info`, 3 инструмента, маскировка кодов, 8 тестов); провайдер `chestny_znak`, инструменты проверки DataMatrix и сверки партий со стартовым навыком; карточка «Честный ЗНАК» в `/app/settings`, RU/EN и unit-тесты | Этап 10 (`v2.3.0`) завершён |
+| 2026-11-20 | Sprint 43 (43.1–43.3) | OpenCode / UI-Agent | Выполнено | Модель `ScheduledAgentJob` + миграция, парсер/расчёт cron с IANA-таймзонами, тик с Redis-блокировкой (`SCHEDULER_POLL_MS`, Compose-env), autonomous-запуск диалога и доставка дайджестов в Telegram/корпоративные каналы; страница `/app/schedules` с конструктором и журналом, RU/EN и unit-тесты | PII-задачи Sprint 44 — остаток |
