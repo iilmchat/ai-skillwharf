@@ -31,14 +31,20 @@ Atomic Tasks. Документ продолжает [ROADMAP.md](ROADMAP.md) и
 
 ### Sprint 37 — Interactive Artifacts / Canvas & Execution DAG Inspector
 
-* [ ] **[UX-37.1]** Боковая выдвижная рабочая область (Canvas) для документов,
+* [x] **[UX-37.1]** Боковая выдвижная рабочая область (Canvas) для документов,
   таблиц и кода, созданных агентом, с точечным редактированием фрагментов и
   сохранением правок обратно в контекст диалога.
-* [ ] **[UX-37.2]** Экспорт артефактов в `.docx` / `.xlsx` / `.pdf` из Canvas
+* [x] **[UX-37.2]** Экспорт артефактов в `.docx` / `.xlsx` / `.pdf` из Canvas
   через существующий документный пайплайн (`write_docx`, OCR/PDF).
-* [ ] **[UX-37.3]** Сворачиваемый инспектор шагов агента (Execution DAG) в
+* [x] **[UX-37.3]** Сворачиваемый инспектор шагов агента (Execution DAG) в
   карточке ответа: вызванные инструменты, время, стоимость, статус HITL и
   ссылка на trace в Tempo.
+* [x] **[API-37.0]** Бэкенд артефактов и трассировки (UX-37.1/37.3): Zod-
+  контракты `artifactItemSchema` / `executionStepSchema`, парсер тегов
+  `<skillwharf-artifact>` и fenced-блоков, `Message.metadataJson` + миграция,
+  `POST /chat/artifacts/refine` (LLM-правка только выделенного фрагмента),
+  сбор `executionTrace` в `llm-worker` и проброс артефактов/трассы в `done` и
+  `stream_end`.
 
 ### Sprint 38 — Knowledge Hub с цитированием и Голосовой ввод
 
@@ -138,3 +144,4 @@ H/J/K/L в российском контуре.
 
 | Дата | Спринт / Задача | Агент | Статус | Коммит / Детали | Найденные проблемы (KI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-20 | Sprint 37 (37.0, 37.1–37.3) | OpenCode / UI-Agent | Выполнено | Парсер `<skillwharf-artifact>` и fenced-блоков, `artifactItemSchema`/`executionStepSchema`, `Message.metadataJson` + миграция, `POST /chat/artifacts/refine`, `ExecutionTraceCollector` в llm-worker; UI — `ArtifactCanvasDrawer` с правкой и экспортом `.md`/`.csv`/`.html`/`.doc`, `ExecutionTraceAccordion`, RU/EN и unit-тесты | Экспорт `.xlsx`/`.pdf` и ссылка на Tempo — остаток |

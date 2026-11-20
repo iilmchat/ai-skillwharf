@@ -15,6 +15,38 @@
   152-ФЗ PII-маскирование и Smart Model Cascade. Базой служит релиз `v2.0.0`;
   ссылка добавлена в `docs/README.md`.
 
+### Sprint 37: Interactive Artifacts, Canvas и Execution DAG Inspector
+
+**Бэкенд и Worker (API-37.0): парсер, refine API, ExecutionTraceCollector.**
+
+- Контракты `artifactItemSchema` (`document|table|code`) и
+  `executionStepSchema` (`stepIndex`, `name`, `toolName?`, `durationMs`,
+  `status`, `costRub?`) в API и llm-worker; `done` и `stream_end` несут
+  дополнительные поля `artifacts` / `executionTrace`.
+- `parseArtifacts`: извлечение `<skillwharf-artifact type="..." title="...">`
+  и fenced-блоков с `title="..."`; служебные теги убираются из текста ответа.
+- `Message.metadataJson` + миграция `20261120100000_add_message_metadata`:
+  `ChatService` сохраняет артефакты, трассу и `cacheHit` в метаданных ассистента
+  и отдаёт их в `stream_end`.
+- `POST /api/v1/chat/artifacts/refine`: Zod-валидация запроса (в т.ч.
+  `selectedText` должен входить в `fullContent`), точечный промпт в LLM через
+  `LlmRouterService`, ответ `{updatedContent, summary}` через Zod.
+- `llm-worker`: `ExecutionTraceCollector` собирает шаги из `updates`-потока
+  графа, завершений инструментов, событий `agent_handoff` и HITL; трасса
+  добавляется в событие `done`.
+
+**Web UI (UX-37.1/37.2/37.3): ArtifactCanvasDrawer и ExecutionTraceAccordion.**
+
+- `src/lib/artifacts.ts`: Zod-контракты артефактов и трассы, парсинг метаданных
+  сообщения и клиент `refineArtifact` для точечной правки фрагмента.
+- `src/components/chat/ArtifactCanvasDrawer.tsx`: выдвижная панель с
+  редактированием выбранного фрагмента, превью и экспортом в
+  `.md`/`.csv`/`.html`/`.doc` (расширения `.xlsx`/`.pdf` — через документный
+  пайплайн отдельной задачей).
+- `src/components/chat/ExecutionTraceAccordion.tsx`: сворачиваемый инспектор
+  шагов агента (инструмент, длительность, стоимость, статус HITL) в карточке
+  ответа; RU/EN-ключи и unit-тесты.
+
 ### Производительность: Splitting бандла лендинга
 
 - `apps/web/vite.landing.config.ts`: добавлен
