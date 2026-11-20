@@ -66,6 +66,7 @@ model Workspace {
   installedSkills InstalledSkill[]
   webhookTriggers WebhookTrigger[]
   customAgentRoles CustomAgentRole[]
+  telegramChannels TelegramChannel[]
 
   @@unique([organizationId, slug])
 }
@@ -428,6 +429,29 @@ model WebhookTrigger {
   createdAt       DateTime  @default(now())
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+/// Подключение Telegram-бота к воркспейсу (OMNI-39.1).
+model TelegramChannel {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  userId           String
+  botUsername      String?
+  /// Bot Token в envelope TokenCipherService — никогда не в логах/GET.
+  encryptedBotToken String
+  /// Секрет заголовка X-Telegram-Bot-Api-Secret-Token.
+  webhookSecret    String
+  /// Белый список chat_id; пустой — разрешён первый привязанный чат.
+  allowedChatIds   String[]
+  isActive         Boolean   @default(true)
+  lastMessageAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, botUsername])
   @@index([workspaceId])
   @@index([userId])
 }

@@ -1,5 +1,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { providerNotConfiguredError } from '../../common/api-error.js';
+import {
+  providerNotConfiguredError,
+  providerUnavailableError,
+} from '../../common/api-error.js';
 import {
   providerRequest,
   type ProviderRetryPolicy,
@@ -8,6 +11,8 @@ import { TelegramConfig } from './telegram.config.js';
 import {
   normalizeChatId,
   telegramButtonsSchema,
+  telegramEditMessageResultSchema,
+  telegramGetFileResultSchema,
   telegramGetMeSchema,
   telegramOkResultSchema,
   telegramSendMessageResultSchema,
@@ -180,6 +185,64 @@ export class TelegramService {
         ...(text === undefined || text === '' ? {} : { text }),
       },
       schema: telegramOkResultSchema,
+      ...(this.retry === undefined ? {} : { retry: this.retry }),
+      logger: this.logger,
+    });
+  }
+
+  /** Возвращает путь к файлу Telegram по file_id. */
+  async getFile(fileId: string, botToken?: string): Promise<string> {
+    const response = await providerRequest({
+      provider: 'telegram',
+      method: 'POST',
+      url: this.methodUrl('getFile', botToken),
+      data: { file_id: fileId },
+      schema: telegramGetFileResultSchema,
+      ...(this.retry === undefined ? {} : { retry: this.retry }),
+      logger: this.logger,
+    });
+
+    return response.result.file_path;
+  }
+
+  /** Скачивает файл Telegram по file_path (голос/фото накладной). */
+  async downloadFile(filePath: string, botToken?: string): Promise<Buffer> {
+    const token = botToken?.trim() || this.config.botToken;
+
+    if (token === null || token === '') {
+      throw providerNotConfiguredError('Telegram: не задан токен бота');
+    }
+
+    const response = await fetch(
+      `${this.config.apiBaseUrl}/file/bot${token}/${filePath.replace(/^\/+/, '')}`,
+      { signal: AbortSignal.timeout(30_000) },
+    );
+
+    if (!response.ok) {
+      throw providerUnavailableError(`Telegram file API HTTP ${response.status}`);
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  /** Обновляет текст сообщения с inline-кнопками после HITL-решения. */
+  async editMessageText(input: {
+    chatId: string | number;
+    messageId: number;
+    text: string;
+    botToken?: string;
+  }): Promise<void> {
+    await providerRequest({
+      provider: 'telegram',
+      method: 'POST',
+      url: this.methodUrl('editMessageText', input.botToken),
+      data: {
+        chat_id: normalizeChatId(input.chatId),
+        message_id: input.messageId,
+        text: input.text.slice(0, TELEGRAM_MESSAGE_LIMIT),
+        disable_web_page_preview: true,
+      },
+      schema: telegramEditMessageResultSchema,
       ...(this.retry === undefined ? {} : { retry: this.retry }),
       logger: this.logger,
     });

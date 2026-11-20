@@ -38,6 +38,6 @@ import { ChatPersistenceModule } from './persistence/persistence.module.js';
     ArtifactRefineService,
     SpeechToTextService,
   ],
-  exports: [ChatService],
+  exports: [ChatService, SpeechToTextService],
 })
 export class ChatModule {}

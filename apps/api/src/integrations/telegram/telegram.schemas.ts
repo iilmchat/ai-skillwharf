@@ -65,6 +65,25 @@ export const telegramMessageSchema = z.object({
     .optional(),
   text: z.string().optional(),
   caption: z.string().optional(),
+  /** Голосовое сообщение (OMNI-39.2). */
+  voice: z
+    .object({
+      file_id: z.string().min(1),
+      duration: z.number().int().nonnegative().optional(),
+      mime_type: z.string().optional(),
+    })
+    .optional(),
+  /** Фото накладной: массив размеров, последний — самый большой (OMNI-39.2). */
+  photo: z
+    .array(
+      z.object({
+        file_id: z.string().min(1),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
@@ -111,6 +130,22 @@ export const telegramSendMessageResultSchema = z.object({
 export const telegramOkResultSchema = z.object({
   ok: z.literal(true),
   result: z.union([z.boolean(), z.record(z.string(), z.unknown())]),
+});
+
+/** Ответ getFile: путь к файлу на сервере Telegram. */
+export const telegramGetFileResultSchema = z.object({
+  ok: z.literal(true),
+  result: z.object({
+    file_id: z.string().min(1),
+    file_unique_id: z.string().optional(),
+    file_path: z.string().min(1),
+  }),
+});
+
+/** Ответ editMessageText: true или обновлённое сообщение. */
+export const telegramEditMessageResultSchema = z.object({
+  ok: z.literal(true),
+  result: z.unknown(),
 });
 
 /** Ответ getMe: бот, которому принадлежит токен. */
