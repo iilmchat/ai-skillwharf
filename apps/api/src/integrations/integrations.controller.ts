@@ -25,6 +25,7 @@ import { GoogleOAuthService } from './google/google-oauth.service.js';
 import {
   KEY_PROVIDERS,
   bitrix24KeysSchema,
+  chestnyZnakKeysSchema,
   diadocKeysSchema,
   midjourneyKeysSchema,
   moyskladKeysSchema,
@@ -38,6 +39,7 @@ import {
   ProviderKeysService,
   type Bitrix24IntegrationState,
   type EdoIntegrationState,
+  type MarkingIntegrationState,
   type MidjourneyIntegrationState,
   type MoyskladIntegrationState,
   type OnecIntegrationState,
@@ -82,6 +84,7 @@ export interface IntegrationsState {
   readonly onec: OnecIntegrationState;
   readonly diadoc: EdoIntegrationState;
   readonly sbis: EdoIntegrationState;
+  readonly chestnyZnak: MarkingIntegrationState;
 }
 
 /**
@@ -149,6 +152,7 @@ export class IntegrationsController {
       onec: providers.onec,
       diadoc: providers.diadoc,
       sbis: providers.sbis,
+      chestnyZnak: providers.chestnyZnak,
     };
   }
 
@@ -600,6 +604,41 @@ export class IntegrationsController {
       disconnected: await this.providerKeys.disconnect(
         requireUserId(request),
         'sbis',
+      ),
+    };
+  }
+
+  /** Подключает ГИС МТ «Честный ЗНАК»: `{ token, inn }`. */
+  @Post('chestny_znak')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Подключить ГИС МТ «Честный ЗНАК»' })
+  async connectChestnyZnak(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<MarkingIntegrationState> {
+    const parsed = chestnyZnakKeysSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw invalidRequestError('Ожидается { token, inn } (ИНН из 10 или 12 цифр)');
+    }
+
+    return this.providerKeys.connectChestnyZnak(
+      requireUserId(request),
+      parsed.data,
+    );
+  }
+
+  @Delete('chestny_znak')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Отключить ГИС МТ «Честный ЗНАК»' })
+  async disconnectChestnyZnak(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ disconnected: boolean }> {
+    return {
+      disconnected: await this.providerKeys.disconnect(
+        requireUserId(request),
+        'chestny_znak',
       ),
     };
   }

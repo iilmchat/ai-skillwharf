@@ -269,7 +269,7 @@ version: 1
 
       const seeded = await service.seedStarterSkills();
 
-      expect(seeded).toBe(25);
+      expect(seeded).toBe(26);
 
       const names = (prisma.installedSkill.create.mock.calls as [CreateArgs][])
         .map(([args]) => args.data.name)
@@ -277,6 +277,7 @@ version: 1
 
       expect(names).toEqual([
         'bitrix24-crm',
+        'chestny-znak-marking',
         'code-runner',
         'cron-automation',
         'document-analyzer',

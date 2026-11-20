@@ -11,6 +11,8 @@ import {
   WB_TOKEN_TTL_DAYS,
   bitrix24KeysSchema,
   bitrix24SecretSchema,
+  chestnyZnakKeysSchema,
+  chestnyZnakSecretSchema,
   diadocKeysSchema,
   diadocSecretSchema,
   midjourneyKeysSchema,
@@ -27,6 +29,7 @@ import {
   wildberriesKeysSchema,
   wildberriesSecretSchema,
   type Bitrix24Keys,
+  type ChestnyZnakKeys,
   type DiadocKeys,
   type KeyProvider,
   type MidjourneyKeys,
@@ -103,6 +106,7 @@ export interface ProviderIntegrationStates {
   readonly onec: OnecIntegrationState;
   readonly diadoc: EdoIntegrationState;
   readonly sbis: EdoIntegrationState;
+  readonly chestnyZnak: MarkingIntegrationState;
 }
 
 /** Ключи провайдера и источник, из которого они получены. */
@@ -133,6 +137,26 @@ export interface ResolvedMoyskladToken {
 }
 
 /** Креды ЭДО, подготовленные для заголовков MCP. */
+/** ГИС МТ: в GET только маскированный ИНН, токен не раскрывается. */
+export interface MarkingIntegrationState {
+  readonly status: ProviderIntegrationStatus;
+  readonly innMasked?: string;
+  readonly source?: 'user';
+  readonly error?: string;
+}
+
+/** Креды маркировки для заголовков MCP. */
+export interface ResolvedMarkingKeys {
+  readonly token: string;
+  readonly inn: string;
+  readonly source: 'user';
+}
+
+/** Маска ИНН: первые и последние две цифры. */
+export function maskInn(inn: string): string {
+  return inn.length <= 4 ? '****' : `${inn.slice(0, 2)}****${inn.slice(-2)}`;
+}
+
 export interface ResolvedEdoKeys {
   readonly provider: 'diadoc' | 'sbis';
   readonly apiKey?: string;
@@ -384,6 +408,43 @@ export class ProviderKeysService {
       : null;
   }
 
+  /** Подключает ГИС МТ «Честный ЗНАК» (токен шифруется целиком). */
+  async connectChestnyZnak(
+    userId: string,
+    keys: ChestnyZnakKeys,
+  ): Promise<MarkingIntegrationState> {
+    const parsed = chestnyZnakKeysSchema.parse(keys);
+
+    await this.save(userId, 'chestny_znak', parsed);
+    this.logger.log(
+      JSON.stringify({ event: 'integration.chestny_znak_connected', userId }),
+    );
+
+    return {
+      status: 'active',
+      innMasked: maskInn(parsed.inn),
+      source: 'user',
+    };
+  }
+
+  /** Креды ГИС МТ для per-request заголовков MCP (не логируются). */
+  async markingKeys(
+    userId: string | undefined,
+  ): Promise<ResolvedMarkingKeys | null> {
+    const row = await this.find(userId, 'chestny_znak');
+
+    if (row === null) {
+      return null;
+    }
+
+    const secret = this.decrypt(row.secret, 'chestny_znak');
+    const parsed = chestnyZnakSecretSchema.safeParse(secret);
+
+    return parsed.success
+      ? { token: parsed.data.token, inn: parsed.data.inn, source: 'user' }
+      : null;
+  }
+
   /** Удаляет ключи провайдера; `true` — если запись действительно была. */
   async disconnect(userId: string, provider: KeyProvider): Promise<boolean> {
     const { count } = await this.prisma.providerCredential.deleteMany({
@@ -418,6 +479,7 @@ export class ProviderKeysService {
     const onecRow = byProvider.get('1c');
     const diadocRow = byProvider.get('diadoc');
     const sbisRow = byProvider.get('sbis');
+    const markingRow = byProvider.get('chestny_znak');
 
     return {
       ozon: this.describeOzon(ozonRow),
@@ -428,6 +490,7 @@ export class ProviderKeysService {
       onec: this.describeOnec(onecRow),
       diadoc: this.describeEdo(diadocRow, 'diadoc'),
       sbis: this.describeEdo(sbisRow, 'sbis'),
+      chestnyZnak: this.describeMarking(markingRow),
     };
   }
 
@@ -673,6 +736,28 @@ export class ProviderKeysService {
     }
 
     return { status: 'active', source: 'user' };
+  }
+
+  /** В GET только маска ИНН — токен ГИС МТ никогда не раскрывается. */
+  private describeMarking(
+    row: { secret: string } | undefined,
+  ): MarkingIntegrationState {
+    if (row === undefined) {
+      return { status: 'disconnected' };
+    }
+
+    const secret = this.decrypt(row.secret, 'chestny_znak');
+    const parsed = chestnyZnakSecretSchema.safeParse(secret);
+
+    if (!parsed.success) {
+      return { status: 'error', error: CIPHER_ERROR };
+    }
+
+    return {
+      status: 'active',
+      innMasked: maskInn(parsed.data.inn),
+      source: 'user',
+    };
   }
 
   /** В GET возвращаем только boxId — токены и apiKey никогда не раскрываем. */

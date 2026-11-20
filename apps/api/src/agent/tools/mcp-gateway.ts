@@ -43,7 +43,8 @@ export type McpProvider =
   | 'moysklad'
   | '1c'
   | 'diadoc'
-  | 'sbis';
+  | 'sbis'
+  | 'chestny_znak';
 
 /** Действия MCP-сервера 1С:Предприятие (OData/HTTP-сервисы). */
 export const ONEC_MCP_ACTIONS = {
@@ -465,6 +466,20 @@ export const EDO_MCP_ACTIONS = {
   prepareSign: 'edo_prepare_sign_packet',
 } as const;
 
+/** Действия MCP-сервера маркировки (ГИС МТ «Честный ЗНАК»). */
+export const MARKING_MCP_ACTIONS = {
+  checkCodes: 'marking_check_codes',
+  verifyShipment: 'marking_verify_shipment',
+  // Агентский инструмент marking_report_violation → черновик акта в MCP.
+  reportViolation: 'marking_create_discrepancy_draft',
+} as const;
+
+const MARKING_ACTION_SCHEMAS: Record<string, z.ZodType> = {
+  [MARKING_MCP_ACTIONS.checkCodes]: z.object({}).passthrough(),
+  [MARKING_MCP_ACTIONS.verifyShipment]: z.object({}).passthrough(),
+  [MARKING_MCP_ACTIONS.reportViolation]: z.object({}).passthrough(),
+};
+
 const EDO_ACTION_SCHEMAS: Record<string, z.ZodType> = {
   [EDO_MCP_ACTIONS.listIncoming]: z.object({}).passthrough(),
   [EDO_MCP_ACTIONS.getDetails]: z.object({}).passthrough(),
@@ -481,6 +496,7 @@ const KNOWN_ACTION_SCHEMAS: Record<McpProvider, Record<string, z.ZodType>> = {
   '1c': ONEC_ACTION_SCHEMAS,
   diadoc: EDO_ACTION_SCHEMAS,
   sbis: EDO_ACTION_SCHEMAS,
+  chestny_znak: MARKING_ACTION_SCHEMAS,
 };
 
 /** Опции создания gateway. */

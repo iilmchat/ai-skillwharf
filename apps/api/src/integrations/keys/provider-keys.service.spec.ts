@@ -206,6 +206,7 @@ describe('ProviderKeysService: хранение и шифрование', () => 
       onec: { status: 'disconnected' },
       diadoc: { status: 'disconnected' },
       sbis: { status: 'disconnected' },
+      chestnyZnak: { status: 'disconnected' },
     });
   });
 

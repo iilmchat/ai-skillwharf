@@ -37,6 +37,11 @@ import {
   type EdoToolContext,
 } from './tools/edo-tools.js';
 import {
+  markingCheckCodes,
+  markingReportViolation,
+  markingVerifyShipment,
+} from './tools/marking-tools.js';
+import {
   AUDIT_FRAUD_RISK_TOOL_NAME,
   BITRIX24_GET_DEAL_TOOL_NAME,
   BITRIX24_UPDATE_DEAL_TOOL_NAME,
@@ -48,6 +53,9 @@ import {
   EDO_PREPARE_SIGN_TOOL_NAME,
   EDO_RECONCILE_TOOL_NAME,
   EXEC_TOOL_NAME,
+  MARKING_CHECK_CODES_TOOL_NAME,
+  MARKING_REPORT_VIOLATION_TOOL_NAME,
+  MARKING_VERIFY_SHIPMENT_TOOL_NAME,
   EXTRACT_DOCUMENT_DATA_TOOL_NAME,
   EXTRACT_PDF_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
@@ -88,6 +96,9 @@ import {
   GoogleCalendarCreateToolSchema,
   GoogleDocsCreateToolSchema,
   GoogleSheetsAppendToolSchema,
+  MarkingCheckCodesToolSchema,
+  MarkingReportViolationToolSchema,
+  MarkingVerifyShipmentToolSchema,
   McpToolSchema,
   MonitorCompetitorPricesToolSchema,
   MoyskladCheckStockToolSchema,
@@ -226,6 +237,9 @@ export class AgentToolsService {
       [EDO_GET_DETAILS_TOOL_NAME, EDO_GET_DETAILS_TOOL_NAME],
       [EDO_RECONCILE_TOOL_NAME, EDO_RECONCILE_TOOL_NAME],
       [EDO_PREPARE_SIGN_TOOL_NAME, EDO_PREPARE_SIGN_TOOL_NAME],
+      [MARKING_CHECK_CODES_TOOL_NAME, MARKING_CHECK_CODES_TOOL_NAME],
+      [MARKING_VERIFY_SHIPMENT_TOOL_NAME, MARKING_VERIFY_SHIPMENT_TOOL_NAME],
+      [MARKING_REPORT_VIOLATION_TOOL_NAME, MARKING_REPORT_VIOLATION_TOOL_NAME],
     ];
 
     for (const [toolName, registryName] of optional) {
@@ -387,6 +401,36 @@ export class AgentToolsService {
         const input = EdoPrepareSignPacketToolSchema.parse(args);
 
         return edoPrepareSignPacket(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case MARKING_CHECK_CODES_TOOL_NAME: {
+        const input = MarkingCheckCodesToolSchema.parse(args);
+
+        return markingCheckCodes(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case MARKING_VERIFY_SHIPMENT_TOOL_NAME: {
+        const input = MarkingVerifyShipmentToolSchema.parse(args);
+
+        return markingVerifyShipment(
+          this.marketplace,
+          input,
+          this.edoContext(options),
+        );
+      }
+
+      case MARKING_REPORT_VIOLATION_TOOL_NAME: {
+        const input = MarkingReportViolationToolSchema.parse(args);
+
+        return markingReportViolation(
           this.marketplace,
           input,
           this.edoContext(options),

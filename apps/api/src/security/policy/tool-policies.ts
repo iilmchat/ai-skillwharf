@@ -16,6 +16,9 @@ import {
   EdoListIncomingToolSchema as EdoListIncomingSchema,
   EdoPrepareSignPacketToolSchema as EdoPrepareSignPacketSchema,
   EdoReconcileWithErpToolSchema as EdoReconcileWithErpSchema,
+  MarkingCheckCodesToolSchema as MarkingCheckCodesSchema,
+  MarkingReportViolationToolSchema as MarkingReportViolationSchema,
+  MarkingVerifyShipmentToolSchema as MarkingVerifyShipmentSchema,
 } from '../../agent/tools/tool-schemas.js';
 import {
   Bitrix24GetDealToolSchema as Bitrix24GetDealSchema,
@@ -376,6 +379,41 @@ export const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
     // Пакет на КЭП — юридически значимое действие: обязательный HITL.
     approval: 'always',
     priceRub: 25,
+  },
+  // --- Маркировка «Честный ЗНАК» (MARK-42.2/42.3) ------------------------
+  marking_check_codes: {
+    name: 'marking_check_codes',
+    schema: MarkingCheckCodesSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 15,
+  },
+  marking_verify_shipment: {
+    name: 'marking_verify_shipment',
+    schema: MarkingVerifyShipmentSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    approval: 'none',
+    priceRub: 15,
+  },
+  marking_report_violation: {
+    name: 'marking_report_violation',
+    schema: MarkingReportViolationSchema,
+    requiredPermission: null,
+    egress: 'gateway-network',
+    egressRequested: true,
+    taint: 'block',
+    allowedRoles: ALL_ROLES,
+    // Акт о расхождении блокирует партию — юридически значимое действие.
+    approval: 'always',
+    priceRub: 15,
   },
   // --- Каналы отправки данных: taint блокирует эксфильтрацию --------------
   send_message: {

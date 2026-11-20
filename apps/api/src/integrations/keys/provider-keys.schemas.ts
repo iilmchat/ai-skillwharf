@@ -17,12 +17,19 @@ export const KEY_PROVIDERS = [
   '1c',
   'diadoc',
   'sbis',
+  'chestny_znak',
 ] as const;
 
 export type KeyProvider = (typeof KEY_PROVIDERS)[number];
 
 const clientIdSchema = z.string().trim().min(1).max(128);
 const secretSchema = z.string().trim().min(1).max(512);
+
+/** ИНН организации (10 цифр) или ИП (12 цифр). */
+export const innSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{10}(\d{2})?$/, 'ожидается ИНН из 10 или 12 цифр');
 
 /** Токен МойСклада длиннее прочих секретов: провайдер выдаёт base64-строку. */
 const moyskladTokenSchema = z.string().trim().min(10).max(2048);
@@ -130,6 +137,12 @@ export const sbisKeysSchema = z
 export const diadocSecretSchema = diadocKeysSchema;
 export const sbisSecretSchema = sbisKeysSchema;
 
+/** Тело `POST /integrations/chestny_znak` (ГИС МТ, треки A/C/K/L). */
+export const chestnyZnakKeysSchema = z
+  .object({ token: secretSchema, inn: innSchema })
+  .strict();
+export const chestnyZnakSecretSchema = chestnyZnakKeysSchema;
+
 /** Полезная нагрузка, которая шифруется в `ProviderCredential.secret`. */
 export const ozonSecretSchema = z
   .object({ clientId: clientIdSchema, apiKey: secretSchema })
@@ -170,6 +183,7 @@ export type MoyskladKeys = z.infer<typeof moyskladKeysSchema>;
 export type OnecKeys = z.infer<typeof onecKeysSchema>;
 export type DiadocKeys = z.infer<typeof diadocKeysSchema>;
 export type SbisKeys = z.infer<typeof sbisKeysSchema>;
+export type ChestnyZnakKeys = z.infer<typeof chestnyZnakKeysSchema>;
 export type ProviderMetadata = z.infer<typeof providerMetadataSchema>;
 
 /** Срок жизни токена Wildberries: продавец выдаёт его на 180 дней. */

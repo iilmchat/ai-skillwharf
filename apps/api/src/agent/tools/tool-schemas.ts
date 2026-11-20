@@ -252,6 +252,57 @@ export type EdoPrepareSignPacketArgs = z.infer<
   typeof EdoPrepareSignPacketToolSchema
 >;
 
+/** Инструменты маркировки DataMatrix (MARK-42.2/42.3, треки A/C/K/L). */
+export const MARKING_CHECK_CODES_TOOL_NAME = 'marking_check_codes';
+export const MARKING_VERIFY_SHIPMENT_TOOL_NAME = 'marking_verify_shipment';
+export const MARKING_REPORT_VIOLATION_TOOL_NAME = 'marking_report_violation';
+
+/** Код DataMatrix: 14–150 символов, как печатается на упаковке. */
+const dataMatrixCodeSchema = z.string().trim().min(14).max(150);
+/** Лимит True API на одну проверку — 100 кодов. */
+const MAX_CODES_PER_CHECK = 100;
+
+export const MarkingCheckCodesToolSchema = z
+  .object({ codes: z.array(dataMatrixCodeSchema).min(1).max(MAX_CODES_PER_CHECK) })
+  .strict();
+export const MarkingVerifyShipmentToolSchema = z
+  .object({
+    codes: z.array(dataMatrixCodeSchema).min(1).max(MAX_CODES_PER_CHECK),
+    /** ИНН владельца марок из подключения ГИС МТ. */
+    expectedOwnerInn: z
+      .string()
+      .trim()
+      .regex(/^\d{10}(\d{2})?$/, 'ожидается ИНН из 10 или 12 цифр'),
+    expectedItems: z
+      .array(
+        z.object({
+          gtin: z.string().trim().regex(/^\d{14}$/, 'ожидается GTIN из 14 цифр'),
+          quantity: z.number().int().positive().max(1_000_000),
+          name: z.string().trim().min(1).max(256).optional(),
+        }),
+      )
+      .min(1)
+      .max(200),
+    direction: z.enum(['shipment', 'receipt']),
+  })
+  .strict();
+export const MarkingReportViolationToolSchema = z
+  .object({
+    reason: z.string().trim().min(5).max(1000),
+    codes: z.array(dataMatrixCodeSchema).min(1).max(MAX_CODES_PER_CHECK),
+    gtin: z.string().trim().regex(/^\d{14}$/, 'ожидается GTIN из 14 цифр').optional(),
+    documentRef: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+export type MarkingCheckCodesArgs = z.infer<typeof MarkingCheckCodesToolSchema>;
+export type MarkingVerifyShipmentArgs = z.infer<
+  typeof MarkingVerifyShipmentToolSchema
+>;
+export type MarkingReportViolationArgs = z.infer<
+  typeof MarkingReportViolationToolSchema
+>;
+
 export type Bitrix24GetDealArgs = z.infer<typeof Bitrix24GetDealToolSchema>;
 export type Bitrix24UpdateDealArgs = z.infer<
   typeof Bitrix24UpdateDealToolSchema
@@ -553,6 +604,18 @@ export const TOOL_REGISTRY = {
   [EDO_PREPARE_SIGN_TOOL_NAME]: {
     description: 'Готовит пакет документов на подпись КЭП (обязательный HITL)',
     schema: EdoPrepareSignPacketToolSchema,
+  },
+  [MARKING_CHECK_CODES_TOOL_NAME]: {
+    description: 'Проверяет коды DataMatrix в ГИС МТ «Честный ЗНАК»',
+    schema: MarkingCheckCodesToolSchema,
+  },
+  [MARKING_VERIFY_SHIPMENT_TOOL_NAME]: {
+    description: 'Сверяет отсканированные коды с партией отгрузки/приёмки',
+    schema: MarkingVerifyShipmentToolSchema,
+  },
+  [MARKING_REPORT_VIOLATION_TOOL_NAME]: {
+    description: 'Формирует акт о расхождении маркировки (обязательный HITL)',
+    schema: MarkingReportViolationToolSchema,
   },
   [SEND_MESSAGE_TOOL_NAME]: {
     description: SEND_MESSAGE_TOOL_DESCRIPTION,

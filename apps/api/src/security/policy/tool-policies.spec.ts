@@ -77,13 +77,24 @@ const VALID_ARGS: Readonly<Record<string, Record<string, unknown>>> = {
     documentIds: ['doc-1'],
     signer: 'Иванов И.И.',
   },
+  marking_check_codes: { codes: ['0104600451023421AAAAAAAAAAA1'] },
+  marking_verify_shipment: {
+    codes: ['0104600451023421AAAAAAAAAAA1'],
+    expectedOwnerInn: '7700000000',
+    expectedItems: [{ gtin: '04600451023457', quantity: 1 }],
+    direction: 'shipment',
+  },
+  marking_report_violation: {
+    reason: 'Выбывшая марка',
+    codes: ['0104600451023421AAAAAAAAAAA1'],
+  },
 };
 
 const TOOL_NAMES = Object.keys(VALID_ARGS);
 
 describe('tool-policies', () => {
   it('покрывает политикой все инструменты из tool-schemas.ts', () => {
-    expect(TOOL_NAMES).toHaveLength(35);
+    expect(TOOL_NAMES).toHaveLength(38);
     expect([...KNOWN_TOOL_NAMES].sort()).toEqual([...TOOL_NAMES].sort());
   });
 

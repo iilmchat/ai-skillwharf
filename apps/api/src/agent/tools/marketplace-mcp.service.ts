@@ -50,6 +50,9 @@ export interface MarketplaceCredentials {
   readonly edoApiKey?: string;
   readonly edoToken?: string;
   readonly edoBoxId?: string;
+  /** Креды ГИС МТ «Честный ЗНАК». */
+  readonly markingToken?: string;
+  readonly markingInn?: string;
 }
 
 /** Заголовки MCP-запроса с per-user кредами (`MCP-24.1`). */
@@ -101,6 +104,14 @@ export function providerCredentialHeaders(
             'X-Edo-Token': credentials.edoToken,
             'X-Edo-Box-Id': credentials.edoBoxId,
           };
+    case 'chestny_znak':
+      return credentials.markingToken === undefined ||
+        credentials.markingInn === undefined
+        ? {}
+        : {
+            'X-Marking-Token': credentials.markingToken,
+            'X-Marking-Inn': credentials.markingInn,
+          };
   }
 }
 
@@ -125,6 +136,7 @@ const PROVIDER_TOOL: Readonly<Record<McpProvider, string>> = {
   '1c': 'onec_check_stock',
   diadoc: 'edo_list_incoming_upd',
   sbis: 'edo_list_incoming_upd',
+  chestny_znak: 'marking_check_codes',
 };
 
 /** Переменные окружения с ключами провайдера. */
@@ -136,6 +148,7 @@ const PROVIDER_KEY_ENV: Readonly<Record<McpProvider, readonly string[]>> = {
   '1c': ['ONEC_ODATA_URL', 'ONEC_USERNAME', 'ONEC_PASSWORD'],
   diadoc: ['EDO_MCP_URL'],
   sbis: ['EDO_MCP_URL'],
+  chestny_znak: ['MARKING_MCP_URL'],
 };
 
 /** Переменная окружения с адресом MCP-сервера провайдера. */
@@ -147,6 +160,7 @@ const PROVIDER_MCP_URL_ENV: Readonly<Record<McpProvider, string>> = {
   '1c': 'ONEC_MCP_URL',
   diadoc: 'EDO_MCP_URL',
   sbis: 'EDO_MCP_URL',
+  chestny_znak: 'MARKING_MCP_URL',
 };
 
 /** Человеческое имя провайдера для сообщений об ошибке. */
@@ -158,6 +172,7 @@ const PROVIDER_LABEL: Readonly<Record<McpProvider, string>> = {
   '1c': '1С:Предприятие',
   diadoc: 'Контур.Диадок',
   sbis: 'СБИС',
+  chestny_znak: 'Честный ЗНАК',
 };
 
 /** Названия ключей провайдера для подсказки в сообщении об ошибке. */
@@ -169,6 +184,7 @@ const PROVIDER_KEY_HINT: Readonly<Record<McpProvider, string>> = {
   '1c': 'OData URL, логин и пароль',
   diadoc: 'API Key, Token и Box ID Диадок',
   sbis: 'Token и Box ID СБИС',
+  chestny_znak: 'токен ГИС МТ и ИНН',
 };
 
 /**
@@ -306,6 +322,14 @@ function envCredentials(
             edoBoxId: boxId,
           };
     }
+    case 'chestny_znak': {
+      const token = readEnv('MARKING_TOKEN');
+      const inn = readEnv('MARKING_INN');
+
+      return token === null || inn === null
+        ? null
+        : { source: 'env', markingToken: token, markingInn: inn };
+    }
   }
 }
 
@@ -412,6 +436,18 @@ export class MarketplaceMcpService {
                 : { edoApiKey: resolved.apiKey }),
               edoToken: resolved.token,
               edoBoxId: resolved.boxId,
+            };
+          }
+          break;
+        }
+        case 'chestny_znak': {
+          const resolved = await this.providerKeys.markingKeys(userId);
+
+          if (resolved !== null) {
+            return {
+              source: 'user',
+              markingToken: resolved.token,
+              markingInn: resolved.inn,
             };
           }
           break;
