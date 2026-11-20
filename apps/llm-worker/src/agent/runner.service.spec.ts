@@ -327,3 +327,31 @@ describe('AgentRunnerService: HITL interrupt/resume', () => {
     );
   });
 });
+
+describe('AgentRunnerService: executionTrace (UX-37.3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('передаёт хронологию шагов в событие done', async () => {
+    const { runner } = createRunner({ first: 'tool-call' });
+
+    const events = await collect(
+      runner.run({
+        ...graphContext(),
+        messages: [{ role: 'user', content: 'выполни команду' }],
+      }),
+    );
+    const done = events.at(-1);
+
+    expect(done?.type).toBe('done');
+    expect(done?.type === 'done' && done.executionTrace?.length).toBeGreaterThan(0);
+    if (done?.type === 'done') {
+      expect(done.executionTrace?.[0]).toMatchObject({
+        stepIndex: 0,
+        name: expect.any(String),
+        status: expect.any(String),
+      });
+    }
+  });
+});

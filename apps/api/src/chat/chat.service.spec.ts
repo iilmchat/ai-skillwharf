@@ -268,6 +268,47 @@ describe('ChatService (llm-worker client)', () => {
     expect(request.systemPrompt).toContain('250 ₽');
   });
 
+  it('сохраняет артефакты и executionTrace в metadataJson ассистента (UX-37)', async () => {
+    const harness = createHarness([
+      {
+        type: 'done',
+        conversationId: 'c1',
+        reply: 'Готово',
+        pendingApproval: false,
+        artifacts: [
+          {
+            id: 'art-1',
+            type: 'document',
+            title: 'Отчёт',
+            content: 'Текст отчёта',
+          },
+        ],
+        executionTrace: [
+          { stepIndex: 0, name: 'llm', durationMs: 12, status: 'completed' },
+        ],
+      },
+    ]);
+
+    const result = await harness.service.streamMessage(
+      'u1',
+      'c1',
+      'сделай отчёт',
+      () => {},
+    );
+
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.executionTrace).toHaveLength(1);
+
+    const createCall = harness.prisma.message.create.mock.calls.at(-1)?.[0] as {
+      data: {
+        metadataJson?: { artifacts?: unknown[]; executionTrace?: unknown[] };
+      };
+    };
+
+    expect(createCall?.data.metadataJson?.artifacts).toHaveLength(1);
+    expect(createCall?.data.metadataJson?.executionTrace).toHaveLength(1);
+  });
+
   it('resolveApprovalRules передаёт условие HITL по stageId (KI-079)', () => {
     const rules = resolveApprovalRules([
       {

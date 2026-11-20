@@ -9,6 +9,7 @@ import { PromptsModule } from '../prompts/prompts.module.js';
 import { SecurityModule } from '../security/security.module.js';
 import { SkillsModule } from '../skills/skills.module.js';
 import { WorkspacesModule } from '../workspaces/workspaces.module.js';
+import { ArtifactRefineService } from './artifact-refine.service.js';
 import { ChatController } from './chat.controller.js';
 import { ChatGateway } from './chat.gateway.js';
 import { ChatService } from './chat.service.js';
@@ -30,7 +31,7 @@ import { ChatPersistenceModule } from './persistence/persistence.module.js';
     ChatPersistenceModule,
   ],
   controllers: [ChatController],
-  providers: [ChatGateway, ChatService],
+  providers: [ChatGateway, ChatService, ArtifactRefineService],
   exports: [ChatService],
 })
 export class ChatModule {}

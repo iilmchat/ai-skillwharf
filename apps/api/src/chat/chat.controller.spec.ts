@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ArtifactRefineService } from './artifact-refine.service.js';
 import { ChatController } from './chat.controller.js';
 import { ChatService } from './chat.service.js';
 
@@ -28,6 +29,7 @@ function createRequest(user?: TestUser): ControllerRequest {
 describe('ChatController', () => {
   let controller: ChatController;
   let chat: ChatServiceMock;
+  let refine: { refine: MockFn };
 
   beforeEach(async () => {
     chat = {
@@ -35,10 +37,14 @@ describe('ChatController', () => {
       clearMemory: vi.fn(),
       listPendingApprovals: vi.fn(),
     };
+    refine = { refine: vi.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [ChatController],
-      providers: [{ provide: ChatService, useValue: chat }],
+      providers: [
+        { provide: ChatService, useValue: chat },
+        { provide: ArtifactRefineService, useValue: refine },
+      ],
     }).compile();
 
     controller = moduleRef.get(ChatController);
@@ -131,6 +137,57 @@ describe('ChatController', () => {
         controller.listPendingApprovals(createRequest()),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(chat.listPendingApprovals).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refineArtifact', () => {
+    const body = {
+      artifactType: 'document',
+      title: 'Договор',
+      fullContent: 'Пункт 1\nПункт 2',
+      selectedText: 'Пункт 2',
+      instruction: 'Переформулируй',
+    };
+
+    it('возвращает обновлённый фрагмент и сводку', async () => {
+      refine.refine.mockResolvedValue({
+        updatedContent: 'Пункт 1\nНовый пункт 2',
+        summary: 'Изменён пункт 2',
+      });
+
+      const result = await controller.refineArtifact(
+        createRequest({
+          userId: USER_ID,
+          email: 'user@example.com',
+          role: 'user',
+        }),
+        body,
+      );
+
+      expect(result.summary).toBe('Изменён пункт 2');
+      expect(refine.refine).toHaveBeenCalledWith(body);
+    });
+
+    it('отвержает неавторизованный запрос', async () => {
+      await expect(
+        controller.refineArtifact(createRequest(), body),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(refine.refine).not.toHaveBeenCalled();
+    });
+
+    it('валидирует ответ сервиса через Zod', async () => {
+      refine.refine.mockResolvedValue({ updatedContent: 'x' });
+
+      await expect(
+        controller.refineArtifact(
+          createRequest({
+            userId: USER_ID,
+            email: 'user@example.com',
+            role: 'user',
+          }),
+          body,
+        ),
+      ).rejects.toThrow();
     });
   });
 });

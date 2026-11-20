@@ -10,6 +10,7 @@ import {
 } from '@nestjs/websockets';
 import type { Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/jwt.strategy.js';
+import { streamEndPayloadSchema } from '../agent/contracts.js';
 import { ChatService, type ChatReply } from './chat.service.js';
 import {
   DEFAULT_OFFICE_AGENT_ID,
@@ -179,7 +180,16 @@ export class ChatGateway implements OnGatewayConnection {
         (event) => this.sendOfficeEvent(client, event),
       );
 
-      client.emit('stream_end', { conversationId: payload.conversationId });
+      client.emit(
+        'stream_end',
+        streamEndPayloadSchema.parse({
+          conversationId: payload.conversationId,
+          ...(reply.artifacts === undefined ? {} : { artifacts: reply.artifacts }),
+          ...(reply.executionTrace === undefined
+            ? {}
+            : { executionTrace: reply.executionTrace }),
+        }),
+      );
 
       return reply;
     } catch (error) {
@@ -257,7 +267,16 @@ export class ChatGateway implements OnGatewayConnection {
       `Действие ${approved ? 'одобрено' : 'отклонено'}: conversationId=${payload.conversationId}, userId=${userId}`,
     );
 
-    client.emit('stream_end', { conversationId: payload.conversationId });
+    client.emit(
+      'stream_end',
+      streamEndPayloadSchema.parse({
+        conversationId: payload.conversationId,
+        ...(reply.artifacts === undefined ? {} : { artifacts: reply.artifacts }),
+        ...(reply.executionTrace === undefined
+          ? {}
+          : { executionTrace: reply.executionTrace }),
+      }),
+    );
 
     return reply;
   }

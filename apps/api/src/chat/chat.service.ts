@@ -5,7 +5,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import type { InstalledSkill } from '@prisma/client';
+import { Prisma, type InstalledSkill } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { SkillManifestSchema } from '@skillwharf/shared';
 import { BillingService } from '../billing/billing.service.js';
@@ -27,6 +27,11 @@ import {
   ApiException,
   insufficientFundsError,
 } from '../common/api-error.js';
+import {
+  assistantMetadataSchema,
+  parseArtifacts,
+  type AssistantMetadata,
+} from './artifact-parser.js';
 import { CheckpointStoreService } from '../agent/checkpoint-store.service.js';
 import {
   PendingApprovalService,
@@ -41,6 +46,8 @@ import { AgentToolsService } from '../agent/agent-tools.service.js';
 import type {
   AgentRole,
   ApprovalRule,
+  ArtifactItem,
+  ExecutionStep,
   GraphEvent,
   OutcomePrice,
   ResumeGraphRequest,
@@ -80,6 +87,10 @@ export interface ChatReply {
   pendingApproval?: boolean;
   /** Ответ взят из семантического кеша — LLM не вызывалась (CACHE-30.2). */
   cacheHit?: boolean;
+  /** Структурированные артефакты ответа (UX-37.1). */
+  artifacts?: ArtifactItem[];
+  /** Хронология шагов графа (UX-37.3). */
+  executionTrace?: ExecutionStep[];
 }
 
 interface HistoryMessage {
@@ -105,6 +116,8 @@ interface PreparedMessage {
 interface StreamResult {
   reply: string;
   pendingApproval: boolean;
+  artifacts: ArtifactItem[];
+  executionTrace: ExecutionStep[];
 }
 
 /** Роли, выводимые из имён подключённых навыков (GRAPH-30.1). */
@@ -566,10 +579,16 @@ export class ChatService {
       if (cacheQuery !== null) {
         await this.semanticCache!.store(cacheQuery, result.reply);
       }
-      await this.persistReply(conversationId, result.reply);
+      const metadata: AssistantMetadata = {
+        ...(result.artifacts.length > 0 ? { artifacts: result.artifacts } : {}),
+        ...(result.executionTrace.length > 0
+          ? { executionTrace: result.executionTrace }
+          : {}),
+      };
+      await this.persistReply(conversationId, result.reply, metadata);
       await this.rememberExchange(userId, content, result.reply);
 
-      return { conversationId, reply: result.reply };
+      return { conversationId, reply: result.reply, ...metadata };
     } catch (error) {
       if (!isInsufficientFunds(error)) {
         throw error;
@@ -631,10 +650,16 @@ export class ChatService {
       if (cacheQuery !== null) {
         await this.semanticCache!.store(cacheQuery, result.reply);
       }
-      await this.persistReply(conversationId, result.reply);
+      const metadata: AssistantMetadata = {
+        ...(result.artifacts.length > 0 ? { artifacts: result.artifacts } : {}),
+        ...(result.executionTrace.length > 0
+          ? { executionTrace: result.executionTrace }
+          : {}),
+      };
+      await this.persistReply(conversationId, result.reply, metadata);
       await this.rememberExchange(userId, content, result.reply);
 
-      return { conversationId, reply: result.reply };
+      return { conversationId, reply: result.reply, ...metadata };
     } catch (error) {
       if (!isInsufficientFunds(error)) {
         throw error;
@@ -688,6 +713,8 @@ export class ChatService {
   ): Promise<StreamResult> {
     let reply = '';
     let pendingApproval = false;
+    let artifacts: ArtifactItem[] = [];
+    let executionTrace: ExecutionStep[] = [];
 
     for await (const event of events) {
       switch (event.type) {
@@ -717,13 +744,23 @@ export class ChatService {
         case 'done':
           reply = event.reply;
           pendingApproval = event.pendingApproval;
+          artifacts = event.artifacts ?? [];
+          executionTrace = event.executionTrace ?? [];
           break;
         default:
           break;
       }
     }
 
-    return { reply, pendingApproval };
+    // Worker может не передать артефакты явно — тогда их извлекаем из текста.
+    const parsed = parseArtifacts(reply);
+
+    return {
+      reply: parsed.cleanText,
+      pendingApproval,
+      artifacts: artifacts.length > 0 ? artifacts : parsed.artifacts,
+      executionTrace,
+    };
   }
 
   /** Проверяет диалог, баланс, сохраняет вопрос и собирает контекст. */
@@ -895,9 +932,22 @@ export class ChatService {
   private async persistReply(
     conversationId: string,
     reply: string,
+    metadata: AssistantMetadata = {},
   ): Promise<void> {
+    const parsedMetadata = assistantMetadataSchema.parse(metadata);
+    const hasMetadata = Object.keys(parsedMetadata).length > 0;
+
     await this.prisma.message.create({
-      data: { conversationId, role: 'assistant', content: reply },
+      data: {
+        conversationId,
+        role: 'assistant',
+        content: reply,
+        ...(hasMetadata
+          ? {
+              metadataJson: parsedMetadata as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
+      },
     });
     await this.prisma.conversation.update({
       where: { id: conversationId },

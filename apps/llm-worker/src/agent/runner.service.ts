@@ -4,6 +4,7 @@ import {
   HumanMessage,
   type BaseMessage,
   SystemMessage,
+  ToolMessage,
 } from '@langchain/core/messages';
 import { Command, MemorySaver } from '@langchain/langgraph';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
@@ -30,6 +31,7 @@ import {
   type ChatApprovalInterrupt,
   type ChatState,
 } from './graph.js';
+import { ExecutionTraceCollector } from './execution-trace.js';
 import { DEFAULT_OFFICE_AGENT_ID } from './office.js';
 import { freshTraceId } from './supervisor.js';
 import { RemoteCheckpointSaver } from './remote-checkpoint.saver.js';
@@ -57,6 +59,7 @@ export class AgentRunnerService {
     try {
       const graph = this.buildGraph(request);
       const traceId = freshTraceId(request.traceId);
+      const trace = new ExecutionTraceCollector();
 
       yield* this.consume(
         await graph.stream(
@@ -81,11 +84,12 @@ export class AgentRunnerService {
           },
           {
             ...graphConfig(request.conversationId),
-            streamMode: ['custom', 'values'] as const,
+            streamMode: ['custom', 'values', 'updates'] as const,
           },
         ),
         graph,
         request,
+        trace,
       );
     } catch (error) {
       yield toErrorEvent(error);
@@ -95,17 +99,19 @@ export class AgentRunnerService {
   async *resume(request: ResumeGraphRequest): AsyncGenerator<GraphEvent> {
     try {
       const graph = this.buildGraph(request);
+      const trace = new ExecutionTraceCollector();
 
       yield* this.consume(
         await graph.stream(
           new Command({ resume: { approved: request.approved } }),
           {
             ...graphConfig(request.conversationId),
-            streamMode: ['custom', 'values'] as const,
+            streamMode: ['custom', 'values', 'updates'] as const,
           },
         ),
         graph,
         request,
+        trace,
       );
     } catch (error) {
       yield toErrorEvent(error);
@@ -125,6 +131,7 @@ export class AgentRunnerService {
     stream: AsyncIterable<unknown>,
     graph: ReturnType<typeof buildChatGraph>,
     context: GraphContext,
+    trace: ExecutionTraceCollector,
   ): AsyncGenerator<GraphEvent> {
     let reply = '';
 
@@ -135,7 +142,40 @@ export class AgentRunnerService {
         const parsed = graphEventSchema.safeParse(chunk);
 
         if (parsed.success && parsed.data.type !== 'done') {
+          if (parsed.data.type === 'agent_handoff') {
+            trace.observeHandoff(parsed.data.toRole);
+          }
+
+          if (parsed.data.type === 'approval') {
+            trace.observeHitl(parsed.data.tools);
+          }
+
           yield parsed.data;
+        }
+
+        continue;
+      }
+
+      if (mode === 'updates' && typeof chunk === 'object' && chunk !== null) {
+        for (const [node, state] of Object.entries(chunk)) {
+          const durationMs = trace.observeNode(node);
+
+          if (node !== 'tools' || typeof state !== 'object' || state === null) {
+            continue;
+          }
+
+          const messages = (state as { messages?: unknown }).messages;
+
+          if (Array.isArray(messages)) {
+            for (const message of messages) {
+              if (message instanceof ToolMessage) {
+                const failed =
+                  'status' in message && message.status === 'error';
+
+                trace.observeTool(message.name ?? 'unknown', durationMs, failed);
+              }
+            }
+          }
         }
 
         continue;
@@ -168,6 +208,7 @@ export class AgentRunnerService {
         reply,
         pendingApproval: true,
         ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
+        ...(trace.steps().length > 0 ? { executionTrace: trace.steps() } : {}),
       };
 
       return;
@@ -179,6 +220,7 @@ export class AgentRunnerService {
       reply,
       pendingApproval: false,
       ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
+      ...(trace.steps().length > 0 ? { executionTrace: trace.steps() } : {}),
     };
   }
 

@@ -164,12 +164,46 @@ export const approvalEventSchema = z.object({
   task: z.string(),
 });
 
+/** Структурированный артефакт ответа ассистента (UX-37.1). */
+export const artifactItemSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.enum(['document', 'table', 'code']),
+    title: z.string().min(1),
+    language: z.string().optional(),
+    content: z.string(),
+  })
+  .strict();
+export type ArtifactItem = z.infer<typeof artifactItemSchema>;
+
+/** Шаг выполнения графа для инспектора Execution DAG (UX-37.3). */
+export const executionStepSchema = z
+  .object({
+    stepIndex: z.number().int().nonnegative(),
+    name: z.string().min(1),
+    toolName: z.string().optional(),
+    durationMs: z.number().nonnegative(),
+    status: z.enum(['completed', 'failed', 'hitl_paused']),
+    costRub: z.number().nonnegative().optional(),
+  })
+  .strict();
+export type ExecutionStep = z.infer<typeof executionStepSchema>;
+
+export const streamEndPayloadSchema = z.object({
+  conversationId: z.string(),
+  artifacts: z.array(artifactItemSchema).optional(),
+  executionTrace: z.array(executionStepSchema).optional(),
+});
+export type StreamEndPayload = z.infer<typeof streamEndPayloadSchema>;
+
 export const doneEventSchema = z.object({
   type: z.literal('done'),
   conversationId: z.string(),
   reply: z.string(),
   pendingApproval: z.boolean(),
   traceId: z.string().optional(),
+  artifacts: z.array(artifactItemSchema).optional(),
+  executionTrace: z.array(executionStepSchema).optional(),
 });
 
 export const errorEventSchema = z.object({

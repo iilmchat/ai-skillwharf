@@ -138,6 +138,8 @@ model Message {
   conversationId String
   role           String
   content        String
+  /// Метаданные ассистента: артефакты, executionTrace, cacheHit (UX-37).
+  metadataJson   Json?
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

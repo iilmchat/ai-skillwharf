@@ -18,7 +18,12 @@ import {
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { ArtifactRefineService } from './artifact-refine.service.js';
 import { ChatService } from './chat.service.js';
+import {
+  refineArtifactResponseSchema,
+  type RefineArtifactResponse,
+} from './dto/refine-artifact.dto.js';
 import { CreateConversationDto } from './dto/create-conversation.dto.js';
 import {
   pendingApprovalListSchema,
@@ -33,7 +38,27 @@ interface AuthenticatedRequest extends Request {
 @ApiBearerAuth()
 @Controller('chat')
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly refineService: ArtifactRefineService,
+  ) {}
+
+  /** Точечное редактирование выделенного фрагмента артефакта (UX-37.1). */
+  @Post('artifacts/refine')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Переписать выделенный фрагмент артефакта' })
+  async refineArtifact(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<RefineArtifactResponse> {
+    if (!request.user?.userId) {
+      throw new UnauthorizedException('Пользователь не аутентифицирован');
+    }
+
+    return refineArtifactResponseSchema.parse(
+      await this.refineService.refine(body),
+    );
+  }
 
   @Post('conversations')
   @UseGuards(JwtAuthGuard)
