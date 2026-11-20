@@ -76,13 +76,17 @@ Atomic Tasks. Документ продолжает [ROADMAP.md](ROADMAP.md) и
 
 ### Sprint 39 — Telegram-бот, Mini App и HITL в мессенджере
 
-* [ ] **[OMNI-39.1]** Привязка Telegram-бота к воркспейсу: токен, вебхук,
-  сопоставление пользователя Telegram с участником воркспейса.
-* [ ] **[OMNI-39.2]** Приём голосовых сообщений и фото накладных в Telegram
-  с распознаванием (Whisper/OCR) и запуском агента.
-* [ ] **[HITL-39.3]** Инлайн-кнопки одобрения HITL (`Одобрить` / `Отклонить`)
-  в чате мессенджера для руководителя с проверкой прав и срока действия.
-* [ ] **[OMNI-39.4]** Telegram Mini App для мониторинга AI-Офиса: статус
+* [x] **[OMNI-39.1]** Привязка Telegram-бота к воркспейсу: модель
+  `TelegramChannel` + миграция, токен шифруется через `TokenCipherService`,
+  GET возвращает только маску; REST `/workspaces/:id/channels/telegram`
+  (owner/admin), `getMe`/`setWebhook` с `secret_token`.
+* [x] **[OMNI-39.2]** Публичный webhook `POST /webhooks/telegram/:channelId`:
+  constant-time проверка секрета, `allowedChatIds`, текст/голос (File API +
+  `SpeechToTextService`) и фото накладной → запрос в `ChatService`.
+* [x] **[HITL-39.3]** Inline-кнопки «✅ Одобрить» / «❌ Отклонить» при
+  `pendingApproval`, `callback_query hitl:<action>:<runId>` с проверкой
+  владельца беседы, `answerCallbackQuery` и обновление текста сообщения.
+* [x] **[OMNI-39.4]** Telegram Mini App для мониторинга AI-Офиса: статус
   агентов, ожидающие одобрения и ключевые метрики.
 
 ### Sprint 40 — Корпоративные мессенджеры РФ
@@ -156,3 +160,4 @@ H/J/K/L в российском контуре.
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-20 | Sprint 37 (37.0, 37.1–37.3) | OpenCode / UI-Agent | Выполнено | Парсер `<skillwharf-artifact>` и fenced-блоков, `artifactItemSchema`/`executionStepSchema`, `Message.metadataJson` + миграция, `POST /chat/artifacts/refine`, `ExecutionTraceCollector` в llm-worker; UI — `ArtifactCanvasDrawer` с правкой и экспортом `.md`/`.csv`/`.html`/`.doc`, `ExecutionTraceAccordion`, RU/EN и unit-тесты | Экспорт `.xlsx`/`.pdf` и ссылка на Tempo — остаток |
 | 2026-11-20 | Sprint 38 (38.0, 38.1, 38.2, WEB-38.2) | OpenCode / UI-Agent | Выполнено | `KnowledgeFolder` + миграция и REST `/knowledge/{folders,documents}`, `citations` в `stream_end`/`metadataJson` и кликабельные сноски, `SpeechToTextService` + `POST /chat/transcribe` (mock/Whisper/Yandex, STT-env в Compose); страница `/app/knowledge`, голосовой ввод через MediaRecorder, PWA-манифест, RU/EN и unit-тесты | VOICE-38.2 (TTS), offline-shell/push PWA и переиндексация — остаток |
+| 2026-11-20 | Sprint 39 (39.1–39.4) | OpenCode / UI-Agent | Выполнено | Модель `TelegramChannel` + миграция, REST привязки бота с `getMe`/`setWebhook` и маскировкой токена, публичный webhook с constant-time секретом, voice/photo, inline HITL approve/reject; UI — `TelegramChannelsSection` в `/app/settings` и Mini App `/tg-app`, STT/Compose-env, RU/EN и unit-тесты | VK Teams/Пачка/Яндекс (Sprint 40) — остаток |

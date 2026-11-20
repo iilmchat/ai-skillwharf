@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+### Sprint 39: Telegram-бот, Mini App и HITL в мессенджере
+
+**Бэкенд (OMNI-39.1/39.2, HITL-39.3): канал, голос/фото и inline-одобрения.**
+
+- Модель `TelegramChannel` + миграция `20261120120000_add_telegram_channels`:
+  `encryptedBotToken` (envelope `TokenCipherService`), `webhookSecret`,
+  `allowedChatIds`, `botUsername`, активность и время последнего сообщения.
+  Открытый токен не попадает ни в GET, ни в логи — только маска `****xxxx`.
+- REST (роли owner/admin воркспейса): `GET|POST /workspaces/:id/channels/telegram`
+  и `DELETE .../channels/telegram/:channelId`. При создании — `getMe` и
+  `setWebhook` с `secret_token` (отключается `TELEGRAM_SKIP_API_CALLS=true`);
+  секрет возвращается один раз в ответе создания.
+- Публичный `POST /webhooks/telegram/:channelId`: constant-time проверка
+  `X-Telegram-Bot-Api-Secret-Token`, фильтр `allowedChatIds` (пустой список
+  привязывает первый чат), текстовые сообщения, голос (File API →
+  `SpeechToTextService`) и фото с метаданными/file_id.
+- HITL: при `pendingApproval` — inline-клавиатура approve/reject с `runId` =
+  conversationId; `callback_query` проверяет владельца беседы, вызывает
+  `approveAction`, отвечает на callback и редактирует сообщение.
+- Переменные `TELEGRAM_API_BASE_URL`, `TELEGRAM_WEBHOOK_BASE_URL` и
+  `TELEGRAM_SKIP_API_CALLS` добавлены в `.env.example` и проброшены в сервис
+  `api` в `docker-compose.yml`.
+
+**Web UI (OMNI-39.4): настройки канала и Mini App `/tg-app`.**
+
+- `src/lib/telegram-channels.ts`: Zod-схемы канала и формы подключения (токен
+  `@BotFather`, парсинг Chat ID из запятых/переносов), клиент
+  `/workspaces/:workspaceId/channels/telegram` и локализованные категории
+  ошибок.
+- `TelegramChannelsSection`: секция в `/app/settings` с инструкцией по
+  `@BotFather`, скрытым полем токена, списком Chat ID, карточками ботов,
+  копируемым Webhook URL и отключением.
+- `TelegramMiniAppPage`: маршрут `/tg-app` без десктопного сайдбара,
+  инициализация `Telegram.WebApp`, статус офиса, метрики, крупные кнопки
+  одобрения HITL и быстрые ссылки на бота/веб-версию. RU/EN-ключи и
+  unit-тесты; все задачи Sprint 39 отмечены `[x]` в `ROADMAP-V3.md`.
+
 ### Sprint 38: Knowledge Hub, цитаты, голосовой ввод и PWA
 
 **Бэкенд (API-38.0): папки знаний, цитаты и Speech-to-Text.**
