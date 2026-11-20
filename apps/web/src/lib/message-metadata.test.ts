@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   assistantMessageMetadataSchema,
   citationSchema,
+  getModelTier,
+  getModelTierLabelKey,
+  getPiiMaskedBadgeCount,
   isCacheHitMessage,
+  modelTierSchema,
   parseAssistantMessageMetadata,
 } from './message-metadata';
 
@@ -109,5 +113,52 @@ describe('parseAssistantMessageMetadata', () => {
       artifacts: [ARTIFACT],
     });
     expect(parseAssistantMessageMetadata(null)).toEqual({});
+  });
+});
+
+describe('Sprint 44: 152-ФЗ и Smart Cascade', () => {
+  it('парсит piiMaskedCount и уровень модели', () => {
+    const parsed = assistantMessageMetadataSchema.parse({
+      piiMaskedCount: 3,
+      modelTier: 'lite',
+    });
+
+    expect(parsed.piiMaskedCount).toBe(3);
+    expect(parsed.modelTier).toBe('lite');
+    expect(assistantMessageMetadataSchema.parse({ piiMaskedCount: 0 })).toEqual(
+      { piiMaskedCount: 0 },
+    );
+  });
+
+  it('отклоняет невалидные значения', () => {
+    expect(
+      assistantMessageMetadataSchema.safeParse({ piiMaskedCount: -1 }).success,
+    ).toBe(false);
+    expect(
+      assistantMessageMetadataSchema.safeParse({ piiMaskedCount: 1.5 }).success,
+    ).toBe(false);
+    expect(
+      assistantMessageMetadataSchema.safeParse({ modelTier: 'max' }).success,
+    ).toBe(false);
+    expect(modelTierSchema.safeParse('standard').success).toBe(true);
+    expect(modelTierSchema.safeParse('flagship').success).toBe(true);
+  });
+
+  it('отбрасывает метаданные целиком при невалидном счетчике ПДн', () => {
+    expect(
+      parseAssistantMessageMetadata({ piiMaskedCount: -2, modelTier: 'lite' }),
+    ).toEqual({});
+  });
+
+  it('определяет условия отображения бейджей', () => {
+    expect(getPiiMaskedBadgeCount(undefined)).toBe(0);
+    expect(getPiiMaskedBadgeCount({})).toBe(0);
+    expect(getPiiMaskedBadgeCount({ piiMaskedCount: 0 })).toBe(0);
+    expect(getPiiMaskedBadgeCount({ piiMaskedCount: 4 })).toBe(4);
+    expect(getModelTier(undefined)).toBeNull();
+    expect(getModelTier({ modelTier: 'flagship' })).toBe('flagship');
+    expect(getModelTierLabelKey('lite')).toBe('chat.modelTier.lite');
+    expect(getModelTierLabelKey('standard')).toBe('chat.modelTier.standard');
+    expect(getModelTierLabelKey('flagship')).toBe('chat.modelTier.flagship');
   });
 });

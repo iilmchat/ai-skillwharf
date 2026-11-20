@@ -49,7 +49,12 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import type { ArtifactItem } from '../lib/artifacts';
 import { ledgerQueryKey } from '../lib/ledger';
 import { normalizeProvider } from '../lib/llm';
-import { isCacheHitMessage } from '../lib/message-metadata';
+import {
+  getModelTier,
+  getModelTierLabelKey,
+  getPiiMaskedBadgeCount,
+  isCacheHitMessage,
+} from '../lib/message-metadata';
 import { pendingApprovalsQueryKey } from '../lib/pending-approvals';
 import { isAdminRole } from '../lib/roles';
 import { useAuthStore } from '../store/auth.store';
@@ -101,6 +106,8 @@ function MessageBubble({
   const artifacts = message.metadata?.artifacts ?? [];
   const executionTrace = message.metadata?.executionTrace ?? [];
   const citations = message.metadata?.citations ?? [];
+  const piiMaskedCount = getPiiMaskedBadgeCount(message.metadata);
+  const modelTier = getModelTier(message.metadata);
 
   return (
     <li className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -138,10 +145,15 @@ function MessageBubble({
               onOpen={(artifact) => onOpenArtifact(artifact, message.id)}
             />
           ))}
-        {!isUser && isCacheHitMessage(message) && (
-          <span
+        {!isUser &&
+          (isCacheHitMessage(message) ||
+            piiMaskedCount > 0 ||
+            modelTier !== null) && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {isCacheHitMessage(message) && (
+                <span
             title={t('chat.cacheHit.tooltip')}
-            className="mt-2 inline-flex items-center gap-1 rounded-full border border-tertiary/30 bg-tertiary-container px-2 py-0.5 text-[11px] font-semibold text-on-tertiary-container"
+                  className="inline-flex items-center gap-1 rounded-full border border-tertiary/30 bg-tertiary-container px-2 py-0.5 text-[11px] font-semibold text-on-tertiary-container"
           >
             <svg
               aria-hidden="true"
@@ -152,8 +164,55 @@ function MessageBubble({
               <path d="M11.2 1.8a.6.6 0 0 0-1.05-.42L4.1 8.2a.6.6 0 0 0 .43 1.02h3.3l-1.05 6.9a.4.4 0 0 0 .7.3l6.1-7.2a.6.6 0 0 0-.45-1h-3.2l1.27-6a.4.4 0 0 0 0-.82Z" />
             </svg>
             {t('chat.cacheHit.label')}
-          </span>
-        )}
+                </span>
+              )}
+
+              {piiMaskedCount > 0 && (
+                <span
+                  title={t('chat.piiMasked.tooltip')}
+                  className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-3"
+                  >
+                    <path d="M10 2.5 16 5v4.6c0 3.7-2.4 6.4-6 7.9-3.6-1.5-6-4.2-6-7.9V5l6-2.5Z" />
+                    <path d="m7.5 10 1.8 1.8 3.4-3.6" />
+                  </svg>
+                  {t('chat.piiMasked.label', { count: piiMaskedCount })}
+                </span>
+              )}
+
+              {modelTier !== null && (
+                <span
+                  title={t('chat.modelTier.tooltip')}
+                  className="inline-flex items-center gap-1 rounded-full border border-outline-variant bg-surface-container px-2 py-0.5 text-[11px] font-semibold text-on-surface-variant"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-3"
+                  >
+                    <path d="m10 2 2.2 4.6 5.1.7-3.7 3.6.9 5-4.5-2.4L5.5 15.9l.9-5L2.7 7.3l5.1-.7L10 2Z" />
+                  </svg>
+                  {t('chat.modelTier.label', {
+                    tier: t(getModelTierLabelKey(modelTier)),
+                  })}
+                </span>
+              )}
+            </div>
+          )}
       </div>
     </li>
   );

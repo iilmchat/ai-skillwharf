@@ -17,14 +17,21 @@ export const citationSchema = z.object({
   pageNumber: z.number().optional(),
 });
 
+/** Уровень модели из Smart Model Cascade (Sprint 44, CASCADE-44.1). */
+export const modelTierSchema = z.enum(['lite', 'standard', 'flagship']);
+
 export const assistantMessageMetadataSchema = z.object({
   cacheHit: z.boolean().optional(),
   artifacts: z.array(artifactItemSchema).optional(),
   executionTrace: z.array(executionStepSchema).optional(),
   citations: z.array(citationSchema).optional(),
+  /** Сколько ПДн обезличено перед отправкой во внешнюю LLM (152-ФЗ). */
+  piiMaskedCount: z.number().int().nonnegative().optional(),
+  modelTier: modelTierSchema.optional(),
 });
 
 export type Citation = z.infer<typeof citationSchema>;
+export type ModelTier = z.infer<typeof modelTierSchema>;
 export type AssistantMessageMetadata = z.infer<
   typeof assistantMessageMetadataSchema
 >;
@@ -43,4 +50,26 @@ export function isCacheHitMessage(message: {
   metadata?: AssistantMessageMetadata;
 }): boolean {
   return message.metadata?.cacheHit === true;
+}
+
+/**
+ * Количество ПДн для бейджа 152-ФЗ: `0` означает, что бейдж не показывается.
+ * Отрицательные и дробные значения отсекает Zod-схема метаданных.
+ */
+export function getPiiMaskedBadgeCount(metadata?: AssistantMessageMetadata): number {
+  const count = metadata?.piiMaskedCount;
+
+  return typeof count === 'number' && count > 0 ? count : 0;
+}
+
+/** Уровень модели для бейджа Smart Cascade или `null`, если его нет. */
+export function getModelTier(
+  metadata?: AssistantMessageMetadata,
+): ModelTier | null {
+  return metadata?.modelTier ?? null;
+}
+
+/** Ключ i18n для подписи уровня модели. */
+export function getModelTierLabelKey(tier: ModelTier): string {
+  return `chat.modelTier.${tier}`;
 }

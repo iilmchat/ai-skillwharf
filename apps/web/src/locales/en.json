@@ -1612,6 +1612,17 @@
       "label": "Cached · 0 ₽",
       "tooltip": "Answer found in the semantic cache without spending tokens."
     },
+    "piiMasked": {
+      "label": "152-FZ: {{count}} PII masked",
+      "tooltip": "Personal data was replaced with tokens before the request was sent to the external LLM and restored locally in the reply."
+    },
+    "modelTier": {
+      "label": "Smart Cascade · {{tier}}",
+      "tooltip": "Model tier chosen by the smart cascade: Lite for routine jobs, Flagship for deep analytics.",
+      "lite": "Lite · Cost-saving",
+      "standard": "Standard",
+      "flagship": "Flagship · Deep analysis"
+    },
     "artifacts": {
       "open": "Open in Canvas",
       "types": {
