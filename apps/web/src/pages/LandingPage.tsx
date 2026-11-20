@@ -4,22 +4,44 @@ import {
   useReducedMotion,
   type Variants,
 } from 'framer-motion';
-import { useCallback, useState } from 'react';
+import { lazy, Suspense, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brand } from '../components/Brand';
-import { DesignPartnerSection } from '../components/DesignPartnerSection';
 import {
   IntegrationIcon,
   type IntegrationLogoProvider,
 } from '../components/IntegrationIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
-import { OfficeSimulator } from '../components/OfficeSimulator';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { TrackDetailsModal } from '../components/TrackDetailsModal';
 import { LANDING_TRACKS, type TrackId } from '../lib/landing-tracks';
 import { useAuthStore } from '../store/auth.store';
 import { LandingContact } from '../components/LandingContact';
 import { LandingSupport } from '../components/LandingSupport';
+
+/**
+ * Тяжёлые интерактивные блоки лендинга подгружаются отдельными чанками:
+ * первый экран не ждёт код симулятора и модальной заявки.
+ */
+const OfficeSimulator = lazy(() =>
+  import('../components/OfficeSimulator').then((module) => ({
+    default: module.OfficeSimulator,
+  })),
+);
+const DesignPartnerSection = lazy(() =>
+  import('../components/DesignPartnerSection').then((module) => ({
+    default: module.DesignPartnerSection,
+  })),
+);
+const TrackDetailsModal = lazy(() =>
+  import('../components/TrackDetailsModal').then((module) => ({
+    default: module.TrackDetailsModal,
+  })),
+);
+
+/** Заглушка сохраняет высоту секции, чтобы не было скачка после загрузки. */
+function SimulatorFallback() {
+  return <div className="min-h-[560px] w-full" aria-hidden="true" />;
+}
 
 type PreviewStatus = 'idle' | 'working' | 'waiting_approval';
 type WhyId = 'hitl' | 'outcome' | 'selfHosted';
@@ -771,7 +793,9 @@ export function LandingPage() {
             </div>
           </section>
 
-          <OfficeSimulator officeHref={appHref('/app/office')} />
+          <Suspense fallback={<SimulatorFallback />}>
+            <OfficeSimulator officeHref={appHref('/app/office')} />
+          </Suspense>
 
           <section
             id="ecosystem"
@@ -901,10 +925,12 @@ export function LandingPage() {
             </div>
           </section>
 
-          <DesignPartnerSection
-            email={CONTACT_EMAIL}
-            webhookUrl={LEAD_WEBHOOK_URL}
-          />
+          <Suspense fallback={<div className="min-h-[420px] w-full" aria-hidden="true" />}>
+            <DesignPartnerSection
+              email={CONTACT_EMAIL}
+              webhookUrl={LEAD_WEBHOOK_URL}
+            />
+          </Suspense>
 
           <LandingContact
             email={CONTACT_EMAIL}
@@ -947,10 +973,12 @@ export function LandingPage() {
           </div>
         </footer>
 
-        <TrackDetailsModal
-          trackId={activeTrackId}
-          onClose={closeTrackDetails}
-        />
+        <Suspense fallback={null}>
+          <TrackDetailsModal
+            trackId={activeTrackId}
+            onClose={closeTrackDetails}
+          />
+        </Suspense>
       </div>
     </MotionConfig>
   );

@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Производительность: Splitting бандла лендинга
+
+- `apps/web/vite.landing.config.ts`: добавлен
+  `build.rollupOptions.output.manualChunks` — отдельные чанки `react-vendor`,
+  `motion-vendor`, `i18n-vendor`, `vendor` и `landing-data` с данными 12 треков.
+- `apps/web/src/pages/LandingPage.tsx`: интерактивный симулятор AI-Офиса,
+  секция заявки Design Partner и модалка деталей трека переведены на
+  `React.lazy` + `Suspense` с заглушками, сохраняющими высоту секций.
+  Первый экран больше не ждёт код нижележащих блоков; предупреждение Vite
+  «Some chunks are larger than 500 kB» устранено (основной JS-чанк лендинга
+  уменьшен с 812 кБ до 195 кБ). Функциональность симулятора A–L, RU/EN и формы
+  заявки сохранена.
+
 ## [2.0.0] - 2026-11-19
 
 Финальный релиз стратегической дорожной карты: этапы 4–7 (Спринты 29–36)

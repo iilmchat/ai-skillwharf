@@ -44,6 +44,31 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: fileURLToPath(new URL('./landing.html', import.meta.url)),
+      output: {
+        /**
+         * React, анимации, i18n и данные треков уходят в отдельные чанки.
+         * Первый экран грузит только необходимое, а лимит 500 кБ на чанк
+         * не превышается ни при одной сборке.
+         */
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (/[\\/]react(?:-dom|-router|-router-dom)?[\\/]|[\\/]scheduler[\\/]/.test(id)) {
+              return 'react-vendor';
+            }
+            if (/[\\/]framer-motion[\\/]|[\\/]motion-(?:dom|utils)[\\/]/.test(id)) {
+              return 'motion-vendor';
+            }
+            if (/[\\/]i18next[\\/]|[\\/]react-i18next[\\/]/.test(id)) {
+              return 'i18n-vendor';
+            }
+            return 'vendor';
+          }
+          if (id.includes('src/lib/landing-tracks')) {
+            return 'landing-data';
+          }
+          return undefined;
+        },
+      },
     },
   },
 });
