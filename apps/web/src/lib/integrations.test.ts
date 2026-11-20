@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import {
   bitrix24WebhookUrlSchema,
+  connectEdoIntegration,
   connectKeyIntegration,
   connectTelegram,
+  diadocCredentialsSchema,
+  disconnectEdoIntegration,
   disconnectKeyIntegration,
   fetchGoogleAuthorizationUrl,
   fetchIntegrations,
@@ -21,6 +24,7 @@ import {
   oneCPasswordSchema,
   oneCUsernameSchema,
   PROVIDER_AUTH_REQUIRED_CODE,
+  sbisCredentialsSchema,
   telegramBotTokenSchema,
   type IntegrationsState,
 } from './integrations';
@@ -70,6 +74,8 @@ const ACTIVE_STATE: IntegrationsState = {
   bitrix24: { status: 'disconnected' },
   moysklad: { status: 'disconnected' },
   onec: { status: 'disconnected' },
+  diadoc: { status: 'disconnected' },
+  sbis: { status: 'disconnected' },
 };
 
 describe('integrationsSchema', () => {
@@ -89,6 +95,8 @@ describe('integrationsSchema', () => {
       bitrix24: { status: 'disconnected' },
       moysklad: { status: 'disconnected' },
       onec: { status: 'disconnected' },
+      diadoc: { status: 'disconnected' },
+      sbis: { status: 'disconnected' },
     });
   });
 
@@ -452,6 +460,8 @@ describe('getActiveIntegrationChannels', () => {
         bitrix24: { status: 'disconnected' },
         moysklad: { status: 'disconnected' },
         onec: { status: 'disconnected' },
+        diadoc: { status: 'disconnected' },
+        sbis: { status: 'disconnected' },
       }),
     ).toEqual(['telegram']);
     expect(getActiveIntegrationChannels(undefined)).toEqual([]);
@@ -747,5 +757,66 @@ describe('live-проверка ключей Битрикс24/МойСклад',
       kind: 'unavailable',
       serverMessage: 'errors.provider_unavailable',
     });
+  });
+});
+
+describe('ЭДО: Контур.Диадок и СБИС (Sprint 41)', () => {
+  const DIADOC = { apiKey: 'api-key', boxId: 'box-1', token: 'diadoc-token' };
+  const SBIS = { token: 'sbis-session', boxId: '7700000000' };
+
+  beforeEach(() => {
+    postMock.mockReset();
+    deleteMock.mockReset();
+  });
+
+  it('проверяет обязательные поля обеих форм', () => {
+    expect(diadocCredentialsSchema.parse(DIADOC)).toEqual(DIADOC);
+    expect(sbisCredentialsSchema.parse(SBIS)).toEqual(SBIS);
+    expect(
+      diadocCredentialsSchema.safeParse({ ...DIADOC, boxId: '' }).success,
+    ).toBe(false);
+    expect(sbisCredentialsSchema.safeParse({ token: '' }).success).toBe(false);
+  });
+
+  it('добавляет статусы EDO в общий ответ /integrations', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'active' },
+      google: { status: 'disconnected' },
+      diadoc: { status: 'active', boxId: 'box-1' },
+    });
+
+    expect(state.diadoc).toEqual({ status: 'active', boxId: 'box-1' });
+    expect(state.sbis).toEqual({ status: 'disconnected' });
+  });
+
+  it('подключает Диадок и СБИС отдельными POST-запросами', async () => {
+    await connectEdoIntegration({ provider: 'diadoc', ...DIADOC });
+    expect(postMock).toHaveBeenCalledWith('/integrations/diadoc', DIADOC);
+
+    await connectEdoIntegration({ provider: 'sbis', ...SBIS });
+    expect(postMock).toHaveBeenCalledWith('/integrations/sbis', SBIS);
+  });
+
+  it('не отправляет невалидную форму ЭДО', async () => {
+    await expect(
+      connectEdoIntegration({ provider: 'diadoc', ...DIADOC, token: '' }),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it('отключает провайдеров отдельными DELETE-запросами', async () => {
+    await disconnectEdoIntegration('diadoc');
+    await disconnectEdoIntegration('sbis');
+    expect(deleteMock).toHaveBeenNthCalledWith(1, '/integrations/diadoc');
+    expect(deleteMock).toHaveBeenNthCalledWith(2, '/integrations/sbis');
+  });
+
+  it('сопоставляет отказ ключей с карточкой провайдера', () => {
+    expect(
+      getProviderCredentialRejectionKey('diadocConnect'),
+    ).toBe('settings.integrations.diadoc.credentialsRejected');
+    expect(getProviderCredentialRejectionKey('sbisConnect')).toBe(
+      'settings.integrations.sbis.credentialsRejected',
+    );
   });
 });

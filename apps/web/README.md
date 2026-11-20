@@ -437,6 +437,19 @@ docker build -f apps/web/Dockerfile \
   UI показывает «Интеграция пока недоступна» и не падает; сырые сообщения
   провайдера в интерфейс не выводятся.
 
+## ЭДО: Контур.Диадок и СБИС (Sprint 41)
+
+В разделе «Интеграции» (/app/settings) добавлены карточки «Контур.Диадок
+(ЭДО)» и «СБИС / Saby (ЭДО)» (`src/components/IntegrationsSection.tsx`).
+Клиент `src/lib/integrations.ts` валидирует формы через Zod: Диадок требует
+`apiKey`, `boxId` и `token`, СБИС — сервисный `token` (`X-SBISSessionID`) и
+`boxId` (ИНН/КПП или ID кабинета). Отключение и подключение идут через
+`POST/DELETE /api/v1/integrations/diadoc` и `.../sbis`; статусы приходят в
+общем `GET /api/v1/integrations`. Секреты маскируются через `SecretField` и
+не возвращаются API после подключения. Иконки провайдеров — в
+`src/components/IntegrationIcon.tsx`, RU/EN-ключи — `settings.integrations.diadoc.*`
+и `settings.integrations.sbis.*`.
+
 ## Вебхук-триггеры (WEB-32.3)
 
 Секция «Вебхук-триггеры (Автозапуск агентов)» расположена на странице

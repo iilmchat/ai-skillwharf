@@ -161,6 +161,22 @@ export const oneCIntegrationSchema = z.object({
 
 export type OneCIntegration = z.infer<typeof oneCIntegrationSchema>;
 
+/** ЭДО-провайдеры (Sprint 41, EDO-41.1/41.2): статус без секретов. */
+export const EDO_INTEGRATION_PROVIDERS = ['diadoc', 'sbis'] as const;
+
+export type EdoIntegrationProvider =
+  (typeof EDO_INTEGRATION_PROVIDERS)[number];
+
+const edoIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  /** Идентификатор ящика/кабинета, если API его возвращает. */
+  boxId: z.string().trim().min(1).nullable().optional(),
+  source: z.enum(['user', 'env']).nullable().optional(),
+  error: integrationErrorTextSchema,
+});
+
+export type EdoIntegration = z.infer<typeof edoIntegrationSchema>;
+
 export const integrationsSchema = z.object({
   telegram: telegramIntegrationSchema,
   google: googleIntegrationSchema,
@@ -171,6 +187,8 @@ export const integrationsSchema = z.object({
   bitrix24: bitrix24IntegrationSchema.default({ status: 'disconnected' }),
   moysklad: moyskladIntegrationSchema.default({ status: 'disconnected' }),
   onec: oneCIntegrationSchema.default({ status: 'disconnected' }),
+  diadoc: edoIntegrationSchema.default({ status: 'disconnected' }),
+  sbis: edoIntegrationSchema.default({ status: 'disconnected' }),
 });
 
 export type IntegrationsState = z.infer<typeof integrationsSchema>;
@@ -260,6 +278,29 @@ export const oneCCredentialsSchema = z.object({
 
 export type OneCCredentials = z.infer<typeof oneCCredentialsSchema>;
 
+/**
+ * Контур.Диадок (Sprint 41): API Key, идентификатор ящика и токен доступа.
+ * Все поля обязательны и маскируются в UI через `SecretField`.
+ */
+export const diadocCredentialsSchema = z.object({
+  apiKey: z.string().trim().min(1),
+  boxId: z.string().trim().min(1),
+  token: z.string().trim().min(1),
+});
+
+/** СБИС/Saby (Sprint 41): сервисный токен (`X-SBISSessionID`) и кабинет. */
+export const sbisCredentialsSchema = z.object({
+  token: z.string().trim().min(1),
+  boxId: z.string().trim().min(1),
+});
+
+export type DiadocCredentials = z.infer<typeof diadocCredentialsSchema>;
+export type SbisCredentials = z.infer<typeof sbisCredentialsSchema>;
+
+export type EdoConnectInput =
+  | ({ provider: 'diadoc' } & DiadocCredentials)
+  | ({ provider: 'sbis' } & SbisCredentials);
+
 const googleAuthorizationResponseSchema = z.union([
   z.object({ url: z.string() }).transform((value) => value.url),
   z
@@ -325,6 +366,25 @@ export async function disconnectKeyIntegration(
   await api.delete(`/integrations/${provider}`);
 }
 
+/** Подключение Контур.Диадок / СБИС: тело зависит от провайдера. */
+export async function connectEdoIntegration(
+  input: EdoConnectInput,
+): Promise<void> {
+  const { provider, ...body } = input;
+  const parsed =
+    provider === 'diadoc'
+      ? diadocCredentialsSchema.parse(body)
+      : sbisCredentialsSchema.parse(body);
+
+  await api.post(`/integrations/${provider}`, parsed);
+}
+
+export async function disconnectEdoIntegration(
+  provider: EdoIntegrationProvider,
+): Promise<void> {
+  await api.delete(`/integrations/${provider}`);
+}
+
 /** Срок действия WB-токена из возможных полей backend. */
 export function getWildberriesTokenExpiry(
   integration: WildberriesIntegration,
@@ -381,7 +441,11 @@ export type IntegrationOperation =
   | 'moyskladConnect'
   | 'moyskladDisconnect'
   | '1cConnect'
-  | '1cDisconnect';
+  | '1cDisconnect'
+  | 'diadocConnect'
+  | 'diadocDisconnect'
+  | 'sbisConnect'
+  | 'sbisDisconnect';
 
 export type IntegrationErrorKind =
   | 'network'
@@ -453,6 +517,8 @@ const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
   'bitrix24Connect',
   'moyskladConnect',
   '1cConnect',
+  'diadocConnect',
+  'sbisConnect',
 ];
 
 /**
@@ -480,6 +546,10 @@ export function getProviderCredentialRejectionKey(
       return 'settings.integrations.moysklad.tokenRejected';
     case '1cConnect':
       return 'settings.integrations.oneC.credentialsRejected';
+    case 'diadocConnect':
+      return 'settings.integrations.diadoc.credentialsRejected';
+    case 'sbisConnect':
+      return 'settings.integrations.sbis.credentialsRejected';
     default:
       return null;
   }

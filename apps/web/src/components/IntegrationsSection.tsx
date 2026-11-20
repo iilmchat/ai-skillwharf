@@ -4,8 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useIntegrations } from '../hooks/useIntegrations';
 import {
   bitrix24WebhookUrlSchema,
+  connectEdoIntegration,
   connectKeyIntegration,
   connectTelegram,
+  diadocCredentialsSchema,
+  disconnectEdoIntegration,
   disconnectGoogle,
   disconnectKeyIntegration,
   disconnectTelegram,
@@ -21,7 +24,10 @@ import {
   oneCPasswordSchema,
   oneCUsernameSchema,
   PROVIDER_AUTH_REQUIRED_CODE,
+  sbisCredentialsSchema,
   telegramBotTokenSchema,
+  type EdoIntegration,
+  type EdoIntegrationProvider,
   type IntegrationErrorKind,
   type IntegrationOperation,
   type IntegrationStatus,
@@ -1150,6 +1156,230 @@ function OneCIntegrationCard({
   );
 }
 
+/**
+ * ЭДО-провайдеры (Sprint 41): у Диадока три поля, у СБИС два — отдельная
+ * карточка с Zod-валидацией обеих форм до запроса к API.
+ */
+function EdoIntegrationCard({
+  provider,
+  integration,
+  onRefresh,
+}: {
+  provider: EdoIntegrationProvider;
+  integration: EdoIntegration;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const prefix = `settings.integrations.${provider}`;
+  const [apiKey, setApiKey] = useState('');
+  const [boxId, setBoxId] = useState('');
+  const [token, setToken] = useState('');
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const isActive = integration.status === 'active';
+  const connectOperation =
+    provider === 'diadoc' ? 'diadocConnect' : 'sbisConnect';
+  const disconnectOperation =
+    provider === 'diadoc' ? 'diadocDisconnect' : 'sbisDisconnect';
+
+  const connectMutation = useMutation({
+    mutationFn: (input: Parameters<typeof connectEdoIntegration>[0]) =>
+      connectEdoIntegration(input),
+    onMutate: () => {
+      setNotice(null);
+      setFieldError(null);
+    },
+    onSuccess: () => {
+      setApiKey('');
+      setToken('');
+      setNotice(t(`${prefix}.connected`));
+      onRefresh();
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => disconnectEdoIntegration(provider),
+    onMutate: () => setNotice(null),
+    onSuccess: () => {
+      setNotice(t(`${prefix}.disconnected`));
+      onRefresh();
+    },
+  });
+
+  function handleConnect(): void {
+    if (provider === 'diadoc') {
+      const parsed = diadocCredentialsSchema.safeParse({ apiKey, boxId, token });
+
+      if (!parsed.success) {
+        setFieldError(t(`${prefix}.invalidFields`));
+        return;
+      }
+
+      connectMutation.mutate({ provider, ...parsed.data });
+      return;
+    }
+
+    const parsed = sbisCredentialsSchema.safeParse({ boxId, token });
+
+    if (!parsed.success) {
+      setFieldError(t(`${prefix}.invalidFields`));
+      return;
+    }
+
+    connectMutation.mutate({ provider, ...parsed.data });
+  }
+
+  return (
+    <article
+      aria-labelledby={`${provider}-integration-title`}
+      className={CARD_CLASSES}
+    >
+      <IntegrationCardHeader
+        provider={provider}
+        title={t(`${prefix}.title`)}
+        description={t(`${prefix}.description`)}
+        status={integration.status}
+        titleId={`${provider}-integration-title`}
+      />
+
+      {integration.status === 'error' && (
+        <IntegrationStateError text={integration.error} />
+      )}
+
+      {isActive ? (
+        <>
+          <ConnectedAccount
+            label={t(`${prefix}.boxId`)}
+            value={integration.boxId ?? null}
+            unknown={t('settings.integrations.providers.keySaved')}
+          />
+          <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+            {t(`${prefix}.keySaved`)}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              aria-busy={disconnectMutation.isPending}
+              className={DANGER_BUTTON_CLASSES}
+            >
+              {disconnectMutation.isPending
+                ? t(`${prefix}.disconnecting`)
+                : t(`${prefix}.disconnect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {disconnectMutation.isError && (
+            <IntegrationErrorAlert
+              error={disconnectMutation.error}
+              operation={disconnectOperation}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {provider === 'diadoc' && (
+            <SecretField
+              id="diadoc-api-key"
+              name="apiKey"
+              label={t(`${prefix}.apiKey`)}
+              hint={t(`${prefix}.apiKeyHint`)}
+              placeholder={t(`${prefix}.apiKeyPlaceholder`)}
+              value={apiKey}
+              onValueChange={setApiKey}
+              visible={apiKeyVisible}
+              onVisibleChange={setApiKeyVisible}
+              revealable
+              revealLabel={t('settings.integrations.secret.show')}
+              concealLabel={t('settings.integrations.secret.hide')}
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+          )}
+
+          <div className="mt-4">
+            <label
+              htmlFor={`${provider}-box-id`}
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t(`${prefix}.boxId`)}
+            </label>
+            <input
+              id={`${provider}-box-id`}
+              name="boxId"
+              autoComplete="off"
+              spellCheck={false}
+              value={boxId}
+              onChange={(event) => setBoxId(event.target.value)}
+              placeholder={t(`${prefix}.boxIdPlaceholder`)}
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              {t(`${prefix}.boxIdHint`)}
+            </p>
+          </div>
+
+          <SecretField
+            id={`${provider}-token`}
+            name="token"
+            label={t(`${prefix}.token`)}
+            hint={t(`${prefix}.tokenHint`)}
+            placeholder={t(`${prefix}.tokenPlaceholder`)}
+            value={token}
+            onValueChange={setToken}
+            visible={tokenVisible}
+            onVisibleChange={setTokenVisible}
+            revealable
+            revealLabel={t('settings.integrations.secret.show')}
+            concealLabel={t('settings.integrations.secret.hide')}
+            disabled={connectMutation.isPending}
+            className={INPUT_CLASSES}
+          />
+
+          {fieldError !== null && (
+            <p role="alert" className="mt-3 text-sm text-error">
+              {fieldError}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connectMutation.isPending}
+              aria-busy={connectMutation.isPending}
+              className={PRIMARY_BUTTON_CLASSES}
+            >
+              {connectMutation.isPending
+                ? t(`${prefix}.connecting`)
+                : t(`${prefix}.connect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {connectMutation.isError && (
+            <IntegrationErrorAlert
+              error={connectMutation.error}
+              operation={connectOperation}
+            />
+          )}
+        </>
+      )}
+    </article>
+  );
+}
+
 export function IntegrationsSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -1345,6 +1575,16 @@ export function IntegrationsSection() {
               />
               <OneCIntegrationCard
                 integration={data.onec}
+                onRefresh={refreshIntegrations}
+              />
+              <EdoIntegrationCard
+                provider="diadoc"
+                integration={data.diadoc}
+                onRefresh={refreshIntegrations}
+              />
+              <EdoIntegrationCard
+                provider="sbis"
+                integration={data.sbis}
                 onRefresh={refreshIntegrations}
               />
             </div>

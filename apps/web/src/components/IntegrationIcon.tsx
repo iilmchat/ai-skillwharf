@@ -1,4 +1,5 @@
 import type {
+  EdoIntegrationProvider,
   IntegrationProvider,
   KeyIntegrationProvider,
 } from '../lib/integrations';
@@ -6,11 +7,12 @@ import type {
 /** Каналы и провайдеры, для которых есть SVG-иконка или текстовый бейдж. */
 export type IntegrationLogoProvider =
   | IntegrationProvider
-  | KeyIntegrationProvider;
+  | KeyIntegrationProvider
+  | EdoIntegrationProvider;
 
 /** Бейджи провайдеров без отдельной SVG-иконки. */
 const PROVIDER_BADGE: Record<
-  Exclude<IntegrationLogoProvider, IntegrationProvider>,
+  Exclude<IntegrationLogoProvider, IntegrationProvider | EdoIntegrationProvider>,
   { label: string; className: string }
 > = {
   ozon: { label: 'OZ', className: 'bg-[#005BFF] text-white' },
@@ -60,6 +62,51 @@ export function IntegrationIcon({
         <path
           fill="#EA4335"
           d="M12 4.76c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.7 0 3.99 2.47 1.28 6.61l3.99 3.1C6.22 6.87 8.87 4.76 12 4.76Z"
+        />
+      </svg>
+    );
+  }
+
+  if (provider === 'diadoc') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className}>
+        <rect x="1" y="1" width="22" height="22" rx="5" fill="#1565C0" />
+        <path
+          d="M6.5 5.5h7.2l3.8 3.8v9.2H6.5v-13Z"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <path d="M13.5 5.8V10h4" fill="none" stroke="#fff" strokeWidth="1.4" />
+        <path
+          d="M9 13h6M9 16h4"
+          stroke="#fff"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  if (provider === 'sbis') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className}>
+        <rect x="1" y="1" width="22" height="22" rx="5" fill="#E53935" />
+        <path
+          d="M16.8 8.2A5 5 0 0 0 8 9.4M7.2 15.8A5 5 0 0 0 16 14.6"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <path
+          d="m15.8 5.4 1.3 3-3.2.3M8.2 18.6l-1.3-3 3.2-.3"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </svg>
     );
