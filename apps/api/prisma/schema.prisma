@@ -67,6 +67,7 @@ model Workspace {
   webhookTriggers WebhookTrigger[]
   customAgentRoles CustomAgentRole[]
   telegramChannels TelegramChannel[]
+  corpMessengerChannels CorpMessengerChannel[]
 
   @@unique([organizationId, slug])
 }
@@ -454,6 +455,31 @@ model TelegramChannel {
   @@unique([workspaceId, botUsername])
   @@index([workspaceId])
   @@index([userId])
+}
+
+/// Подключение корпоративного мессенджера (OMNI-40.1/40.2/40.3/40.4).
+model CorpMessengerChannel {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  /// vk_teams | pachca | yandex_messenger.
+  provider          String
+  name              String
+  /// On-premise VK Teams или кастомный стенд.
+  apiBaseUrl        String?
+  /// Bot Token в envelope TokenCipherService — не в логах/GET.
+  encryptedBotToken String
+  webhookSecret     String
+  allowedChatIds    String[]
+  isActive          Boolean   @default(true)
+  lastMessageAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([provider])
 }
 
 /// Действие агента, ожидающее решения пользователя (approval или оплата).
