@@ -17,6 +17,7 @@ import {
   type ArtifactCanvasLabels,
   type ArtifactCardLabels,
 } from '../components/chat/ArtifactCanvasDrawer';
+import { CitationBadges } from '../components/chat/CitationBadges';
 import {
   ExecutionTraceAccordion,
   type ExecutionTraceLabels,
@@ -44,6 +45,7 @@ import { useBalance } from '../hooks/useBalance';
 import { useActiveLlm } from '../hooks/useActiveLlm';
 import { usePendingApprovals } from '../hooks/usePendingApprovals';
 import { useTokenQuota } from '../hooks/useTokenQuota';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import type { ArtifactItem } from '../lib/artifacts';
 import { ledgerQueryKey } from '../lib/ledger';
 import { normalizeProvider } from '../lib/llm';
@@ -98,6 +100,7 @@ function MessageBubble({
   const isUser = message.role === 'user';
   const artifacts = message.metadata?.artifacts ?? [];
   const executionTrace = message.metadata?.executionTrace ?? [];
+  const citations = message.metadata?.citations ?? [];
 
   return (
     <li className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -123,6 +126,9 @@ function MessageBubble({
           imageAltFallback={t('chat.imageAlt')}
           labels={labels}
         />
+        {!isUser && citations.length > 0 && (
+          <CitationBadges citations={citations} />
+        )}
         {!isUser &&
           artifacts.map((artifact) => (
             <ArtifactCard
@@ -238,6 +244,12 @@ export function ChatPage() {
   const activeLlm = activeLlmQuery.data;
   const { refetch: refetchBalance } = balanceQuery;
   const [draft, setDraft] = useState('');
+  const voice = useVoiceRecorder({
+    onTranscript: (text) =>
+      setDraft((current) =>
+        current.trim() === '' ? text : `${current} ${text}`,
+      ),
+  });
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -499,6 +511,24 @@ export function ChatPage() {
                 <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-7a8 8 0 0 1 8-8h2a8 8 0 0 1 8 4Z" />
               </svg>
               {t('nav.chat')}
+            </NavLink>
+
+            <NavLink to="/app/knowledge" className={navItemClasses}>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5V5.5Z" />
+                <path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5" />
+                <path d="M8 7h7M8 11h5" />
+              </svg>
+              {t('nav.knowledge')}
             </NavLink>
 
             <NavLink to="/app/skills" className={navItemClasses}>
@@ -1044,6 +1074,60 @@ export function ChatPage() {
                   <path d="M20.5 11.5 12 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 18a2 2 0 0 1-3-3l7.5-7.5" />
                 </svg>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (voice.status === 'recording') {
+                    void voice.stop();
+                  } else {
+                    void voice.start();
+                  }
+                }}
+                disabled={!voice.isSupported || !isReady || voice.status === 'transcribing'}
+                aria-label={
+                  voice.status === 'recording'
+                    ? t('chat.voice.stop')
+                    : t('chat.voice.start')
+                }
+                title={
+                  voice.isSupported
+                    ? t('chat.voice.start')
+                    : t('chat.voice.unsupported')
+                }
+                aria-busy={voice.status === 'transcribing'}
+                className={`grid size-12 shrink-0 place-items-center rounded-xl border transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 ${
+                  voice.status === 'recording'
+                    ? 'border-error bg-error-container text-on-error-container'
+                    : 'border-outline bg-surface-container text-on-surface-variant hover:border-primary/40 hover:text-on-surface'
+                }`}
+              >
+                {voice.status === 'recording' ? (
+                  <span aria-hidden="true" className="size-3 animate-pulse rounded-full bg-error" />
+                ) : (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-5"
+                  >
+                    <rect x="9" y="3" width="6" height="11" rx="3" />
+                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                  </svg>
+                )}
+              </button>
+              {voice.status === 'recording' && (
+                <span
+                  role="status"
+                  className="shrink-0 tabular-nums text-xs font-semibold text-error"
+                >
+                  {String(Math.floor(voice.seconds / 60)).padStart(2, '0')}:
+                  {String(voice.seconds % 60).padStart(2, '0')}
+                </span>
+              )}
               <label htmlFor="chat-message" className="sr-only">
                 {t('chat.messageLabel')}
               </label>
@@ -1106,6 +1190,21 @@ export function ChatPage() {
                 )}
               </button>
             </div>
+            {voice.status === 'recording' && (
+              <p role="status" className="mx-auto mt-2 max-w-3xl text-xs text-error">
+                {t('chat.voice.recordingHint')}
+              </p>
+            )}
+            {voice.status === 'transcribing' && (
+              <p role="status" className="mx-auto mt-2 max-w-3xl text-xs text-on-surface-variant">
+                {t('chat.voice.transcribing')}
+              </p>
+            )}
+            {voice.errorKey !== null && (
+              <p role="alert" className="mx-auto mt-2 max-w-3xl text-xs text-error">
+                {t(voice.errorKey)}
+              </p>
+            )}
             <p className="mx-auto mt-2 max-w-3xl text-xs text-on-surface-variant">
               {t('chat.inputHint')}
             </p>

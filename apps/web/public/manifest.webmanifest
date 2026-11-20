@@ -1,0 +1,33 @@
+{
+  "name": "SkillWharf — рабочее пространство ИИ-агентов",
+  "short_name": "SkillWharf",
+  "description": "Чат с агентом, база знаний и рабочее пространство AI-Офиса.",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#8B5CF6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Чат",
+      "short_name": "Чат",
+      "url": "/app/chat"
+    },
+    {
+      "name": "База знаний",
+      "short_name": "Знания",
+      "url": "/app/knowledge"
+    }
+  ]
+}

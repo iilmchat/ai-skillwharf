@@ -86,6 +86,7 @@
   "nav": {
     "primary": "Primary navigation",
     "chat": "Chat",
+    "knowledge": "Knowledge Hub",
     "skills": "Skills",
     "team": "Team",
     "marketplace": "Marketplace",
@@ -96,6 +97,46 @@
     "finance": "Finance",
     "settings": "Settings",
     "admin": "Control plane"
+  },
+  "knowledge": {
+    "title": "Knowledge Hub",
+    "subtitle": "Regulation folders and indexed document chunks. Citation badges in assistant replies link here.",
+    "backToChat": "Back to chat",
+    "highlightHint": "Chunk from the assistant reply: {{chunkId}}",
+    "errors": {
+      "network": "Could not reach the knowledge service.",
+      "unavailable": "Knowledge Hub is not available yet: the API is not deployed.",
+      "invalid": "The server returned an unexpected response.",
+      "unauthorized": "Your session expired. Please sign in again.",
+      "unknown": "The operation failed. Please try again."
+    },
+    "folders": {
+      "title": "Regulation folders",
+      "all": "All documents",
+      "delete": "Delete folder {{name}}",
+      "nameLabel": "New folder name",
+      "namePlaceholder": "Folder name…",
+      "create": "Create folder",
+      "created": "Folder created",
+      "deleted": "Folder deleted"
+    },
+    "documents": {
+      "title": "Documents and chunks",
+      "fileLabel": "Regulation file",
+      "upload": "Upload regulation",
+      "searchLabel": "Search the knowledge base",
+      "searchPlaceholder": "Search by title and text…",
+      "loading": "Loading documents…",
+      "empty": "No documents found. Upload a regulation or change the search.",
+      "uploaded": "Regulation uploaded for indexing",
+      "chunks": "{{count}} chunks",
+      "createdAt": "Added {{date}}",
+      "status": {
+        "indexed": "Indexed",
+        "processing": "Indexing",
+        "failed": "Indexing failed"
+      }
+    }
   },
   "builder": {
     "title": "Agent Builder",
@@ -1624,6 +1665,25 @@
         "completed": "Completed",
         "failed": "Failed",
         "hitl_paused": "Awaiting approval"
+      }
+    },
+    "citations": {
+      "label": "Answer sources",
+      "source": "Source [{{index}}]: {{title}}",
+      "page": "Page {{pageNumber}}",
+      "openInHub": "Open in Knowledge Hub"
+    },
+    "voice": {
+      "start": "Record voice message",
+      "stop": "Stop recording",
+      "unsupported": "Voice input is not supported by this browser",
+      "recordingHint": "Recording. Tap the microphone again to transcribe.",
+      "transcribing": "Transcribing speech…",
+      "errors": {
+        "unsupported": "Voice input is not supported by this browser.",
+        "denied": "Allow microphone access in your browser settings.",
+        "failed": "Could not start the microphone. Please try again.",
+        "transcribe": "Could not transcribe the audio. Please try again."
       }
     },
     "messageLabel": "Message",

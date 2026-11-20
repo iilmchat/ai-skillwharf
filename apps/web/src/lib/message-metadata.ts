@@ -8,12 +8,23 @@ import { artifactItemSchema, executionStepSchema } from './artifacts';
  * отсутствие новых полей не должно ломать ленту сообщений. Невалидные
  * артефакты или шаги трассировки отбрасываются целиком парсером ниже.
  */
+/** Сноска на фрагмент документа в ответе ассистента (KB-38.2). */
+export const citationSchema = z.object({
+  index: z.number(),
+  chunkId: z.string(),
+  title: z.string(),
+  snippet: z.string(),
+  pageNumber: z.number().optional(),
+});
+
 export const assistantMessageMetadataSchema = z.object({
   cacheHit: z.boolean().optional(),
   artifacts: z.array(artifactItemSchema).optional(),
   executionTrace: z.array(executionStepSchema).optional(),
+  citations: z.array(citationSchema).optional(),
 });
 
+export type Citation = z.infer<typeof citationSchema>;
 export type AssistantMessageMetadata = z.infer<
   typeof assistantMessageMetadataSchema
 >;

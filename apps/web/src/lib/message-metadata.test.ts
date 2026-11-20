@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assistantMessageMetadataSchema,
+  citationSchema,
   isCacheHitMessage,
   parseAssistantMessageMetadata,
 } from './message-metadata';
@@ -49,6 +50,50 @@ describe('assistantMessageMetadataSchema (Sprint 37)', () => {
         executionTrace: [{ ...STEP, status: 'unknown' }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('citationSchema (KB-38.2)', () => {
+  const CITATION = {
+    index: 1,
+    chunkId: 'chunk-1',
+    title: 'Регламент приёмки',
+    snippet: 'Проверка номенклатуры',
+    pageNumber: 4,
+  };
+
+  it('принимает сноску с номером страницы и без него', () => {
+    expect(citationSchema.parse(CITATION)).toEqual(CITATION);
+    expect(
+      citationSchema.parse({
+        index: CITATION.index,
+        chunkId: CITATION.chunkId,
+        title: CITATION.title,
+        snippet: CITATION.snippet,
+      }).pageNumber,
+    ).toBeUndefined();
+  });
+
+  it('отклоняет сноску без обязательных полей', () => {
+    expect(
+      citationSchema.safeParse({
+        index: CITATION.index,
+        title: CITATION.title,
+        snippet: CITATION.snippet,
+      }).success,
+    ).toBe(false);
+    expect(citationSchema.safeParse({ index: '1' }).success).toBe(false);
+  });
+
+  it('входит в метаданные ответа и отбрасывается парсером при ошибке', () => {
+    const parsed = assistantMessageMetadataSchema.parse({
+      citations: [CITATION],
+    });
+
+    expect(parsed.citations?.[0]?.title).toBe('Регламент приёмки');
+    expect(
+      parseAssistantMessageMetadata({ citations: [{ ...CITATION, snippet: 3 }] }),
+    ).toEqual({});
   });
 });
 
