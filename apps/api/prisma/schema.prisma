@@ -158,10 +158,28 @@ model MemoryChunk {
   source    String?
   /// Тип фрагмента: fact | preference | summary (KI-024).
   kind      String   @default("fact")
+  /// Папка базы знаний и происхождение документа (KB-38.1/38.2).
+  folderId       String?
+  documentTitle  String?
+  pageNumber     Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+  @@index([folderId])
+}
+
+/// Папка регламентов базы знаний (KB-38.1).
+model KnowledgeFolder {
+  id          String   @id @default(uuid())
+  workspaceId String?
+  userId      String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([workspaceId])
 }
 
 model Wallet {

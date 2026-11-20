@@ -47,6 +47,7 @@ import type {
   AgentRole,
   ApprovalRule,
   ArtifactItem,
+  Citation,
   ExecutionStep,
   GraphEvent,
   OutcomePrice,
@@ -91,6 +92,8 @@ export interface ChatReply {
   artifacts?: ArtifactItem[];
   /** Хронология шагов графа (UX-37.3). */
   executionTrace?: ExecutionStep[];
+  /** Сноски на фрагменты базы знаний (KB-38.2). */
+  citations?: Citation[];
 }
 
 interface HistoryMessage {
@@ -105,6 +108,8 @@ interface PreparedMessage {
   approvalRules: ApprovalRule[];
   outcomePrices: Record<string, OutcomePrice>;
   memoryContext: string;
+  /** Сноски, соответствующие фрагментам памяти в systemPrompt. */
+  citations: Citation[];
   userRole: UserRole;
   toolSkills: Record<string, WorkerToolSkillContext[]>;
   systemPrompt: string;
@@ -584,6 +589,9 @@ export class ChatService {
         ...(result.executionTrace.length > 0
           ? { executionTrace: result.executionTrace }
           : {}),
+        ...(prepared.citations.length > 0
+          ? { citations: prepared.citations }
+          : {}),
       };
       await this.persistReply(conversationId, result.reply, metadata);
       await this.rememberExchange(userId, content, result.reply);
@@ -654,6 +662,9 @@ export class ChatService {
         ...(result.artifacts.length > 0 ? { artifacts: result.artifacts } : {}),
         ...(result.executionTrace.length > 0
           ? { executionTrace: result.executionTrace }
+          : {}),
+        ...(prepared.citations.length > 0
+          ? { citations: prepared.citations }
           : {}),
       };
       await this.persistReply(conversationId, result.reply, metadata);
@@ -790,9 +801,42 @@ export class ChatService {
 
     // Долговременная память: top-K фрагментов под последний вопрос.
     // Ошибки внутри MemoryService не прерывают диалог.
-    const memoryContext = await this.memoryService.buildContext(userId, content);
+    const memory = await this.loadMemory(userId, content);
 
-    return this.buildContext(userId, messages, memoryContext, conversationId);
+    return this.buildContext(
+      userId,
+      messages,
+      memory.context,
+      conversationId,
+      memory.citations,
+    );
+  }
+
+  /** Контекст памяти + сноски; совместим с моками старого buildContext. */
+  private async loadMemory(
+    userId: string,
+    content: string,
+  ): Promise<{ context: string; citations: Citation[] }> {
+    const withSources = this.memoryService.buildContextWithSources;
+
+    if (typeof withSources !== 'function') {
+      return { context: await this.memoryService.buildContext(userId, content), citations: [] };
+    }
+
+    const result = await withSources.call(this.memoryService, userId, content);
+
+    return {
+      context: result.context,
+      citations: result.chunks.map((chunk, index) => ({
+        index: index + 1,
+        chunkId: chunk.id,
+        title: chunk.title ?? chunk.source ?? 'Документ',
+        snippet: chunk.content.slice(0, 200),
+        ...(chunk.pageNumber === null || chunk.pageNumber === undefined
+          ? {}
+          : { pageNumber: chunk.pageNumber }),
+      })),
+    };
   }
 
   /** Контекст запуска/resume графа без записи сообщения пользователя. */
@@ -812,6 +856,7 @@ export class ChatService {
     messages: HistoryMessage[],
     memoryContext: string,
     conversationId?: string,
+    citations: Citation[] = [],
   ): Promise<PreparedMessage> {
     const skills = (await this.skillsService.getEnabledSkills()).map(
       (skill): SkillSnapshot => ({
@@ -844,6 +889,7 @@ export class ChatService {
       approvalRules: resolveApprovalRules(skills),
       outcomePrices: resolveOutcomePrices(skills),
       memoryContext,
+      citations,
       userRole,
       toolSkills: buildToolSkillContexts(skills),
       systemPrompt,

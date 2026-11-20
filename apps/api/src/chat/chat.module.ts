@@ -13,6 +13,7 @@ import { ArtifactRefineService } from './artifact-refine.service.js';
 import { ChatController } from './chat.controller.js';
 import { ChatGateway } from './chat.gateway.js';
 import { ChatService } from './chat.service.js';
+import { SpeechToTextService } from './speech-to-text.service.js';
 import { ChatPersistenceModule } from './persistence/persistence.module.js';
 
 @Module({
@@ -31,7 +32,12 @@ import { ChatPersistenceModule } from './persistence/persistence.module.js';
     ChatPersistenceModule,
   ],
   controllers: [ChatController],
-  providers: [ChatGateway, ChatService, ArtifactRefineService],
+  providers: [
+    ChatGateway,
+    ChatService,
+    ArtifactRefineService,
+    SpeechToTextService,
+  ],
   exports: [ChatService],
 })
 export class ChatModule {}

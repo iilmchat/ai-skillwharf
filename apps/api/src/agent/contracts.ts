@@ -189,10 +189,23 @@ export const executionStepSchema = z
   .strict();
 export type ExecutionStep = z.infer<typeof executionStepSchema>;
 
+/** Сноска на фрагмент базы знаний в ответе ассистента (KB-38.2). */
+export const citationSchema = z
+  .object({
+    index: z.number().int().positive(),
+    chunkId: z.string().min(1),
+    title: z.string().min(1),
+    snippet: z.string(),
+    pageNumber: z.number().int().positive().optional(),
+  })
+  .strict();
+export type Citation = z.infer<typeof citationSchema>;
+
 export const streamEndPayloadSchema = z.object({
   conversationId: z.string(),
   artifacts: z.array(artifactItemSchema).optional(),
   executionTrace: z.array(executionStepSchema).optional(),
+  citations: z.array(citationSchema).optional(),
 });
 export type StreamEndPayload = z.infer<typeof streamEndPayloadSchema>;
 

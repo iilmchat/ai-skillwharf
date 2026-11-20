@@ -188,6 +188,7 @@ export class ChatGateway implements OnGatewayConnection {
           ...(reply.executionTrace === undefined
             ? {}
             : { executionTrace: reply.executionTrace }),
+          ...(reply.citations === undefined ? {} : { citations: reply.citations }),
         }),
       );
 
@@ -275,6 +276,7 @@ export class ChatGateway implements OnGatewayConnection {
         ...(reply.executionTrace === undefined
           ? {}
           : { executionTrace: reply.executionTrace }),
+        ...(reply.citations === undefined ? {} : { citations: reply.citations }),
       }),
     );
 

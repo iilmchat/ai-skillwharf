@@ -163,6 +163,10 @@ services:
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
       # Полный URL веб-приложения для возврата после OAuth (пусто — JSON).
       GOOGLE_OAUTH_SUCCESS_REDIRECT: ${GOOGLE_OAUTH_SUCCESS_REDIRECT:-}
+      # Распознавание речи (Sprint 38 / VOICE-38.1): mock | whisper | yandex.
+      STT_PROVIDER: ${STT_PROVIDER:-mock}
+      STT_WHISPER_URL: ${STT_WHISPER_URL:-}
+      YANDEX_STT_IAM_TOKEN: ${YANDEX_STT_IAM_TOKEN:-}
       # Ключ AES-256-GCM для refresh/access-токенов (base64, 32 байта).
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       TOKEN_ENCRYPTION_KEY_ID: ${TOKEN_ENCRYPTION_KEY_ID:-local-v1}

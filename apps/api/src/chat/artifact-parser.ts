@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   artifactItemSchema,
+  citationSchema,
   executionStepSchema,
   type ArtifactItem,
 } from '../agent/contracts.js';
@@ -10,6 +11,7 @@ export const assistantMetadataSchema = z
   .object({
     artifacts: z.array(artifactItemSchema).optional(),
     executionTrace: z.array(executionStepSchema).optional(),
+    citations: z.array(citationSchema).optional(),
     cacheHit: z.boolean().optional(),
   })
   .strict();

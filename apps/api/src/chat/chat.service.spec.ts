@@ -54,7 +54,7 @@ interface Harness {
   billing: { getBalance: MockFn; cancelHold: MockFn };
   skills: { getEnabledSkills: MockFn };
   router: { selectRoutes: MockFn };
-  memory: { buildContext: MockFn; remember: MockFn };
+  memory: { buildContext: MockFn; buildContextWithSources: MockFn; remember: MockFn };
   prompts: { getActiveSystemPrompt: MockFn };
   checkpoints: { deleteThread: MockFn };
   pending: {
@@ -155,6 +155,10 @@ function createHarness(
   const router = { selectRoutes: vi.fn(async () => []) };
   const memory = {
     buildContext: vi.fn(async () => MEMORY_CONTEXT),
+    buildContextWithSources: vi.fn(async () => ({
+      context: MEMORY_CONTEXT,
+      chunks: [],
+    })),
     remember: vi.fn(async () => 1),
   };
   const prompts = {
@@ -222,7 +226,7 @@ describe('ChatService (llm-worker client)', () => {
 
     const request = harness.worker.run.mock.calls[0]?.[0] as RunGraphRequest;
 
-    expect(harness.memory.buildContext).toHaveBeenCalledWith(
+    expect(harness.memory.buildContextWithSources).toHaveBeenCalledWith(
       'u1',
       'сколько стоит доставка?',
     );
@@ -307,6 +311,46 @@ describe('ChatService (llm-worker client)', () => {
 
     expect(createCall?.data.metadataJson?.artifacts).toHaveLength(1);
     expect(createCall?.data.metadataJson?.executionTrace).toHaveLength(1);
+  });
+
+  it('формирует сноски из найденных фрагментов памяти (KB-38.2)', async () => {
+    const harness = createHarness([doneEvent('готово')]);
+    harness.memory.buildContextWithSources.mockResolvedValue({
+      context: MEMORY_CONTEXT,
+      chunks: [
+        {
+          id: 'chunk-1',
+          content: 'Доставка занимает 3 дня',
+          title: 'Политика доставки',
+          source: 'document',
+          folderId: 'folder-1',
+          pageNumber: 5,
+        },
+      ],
+    });
+
+    const result = await harness.service.streamMessage(
+      'u1',
+      'c1',
+      'сколько идёт доставка?',
+      () => {},
+    );
+
+    expect(result.citations).toEqual([
+      {
+        index: 1,
+        chunkId: 'chunk-1',
+        title: 'Политика доставки',
+        snippet: 'Доставка занимает 3 дня',
+        pageNumber: 5,
+      },
+    ]);
+
+    const createCall = harness.prisma.message.create.mock.calls.at(-1)?.[0] as {
+      data: { metadataJson?: { citations?: unknown[] } };
+    };
+
+    expect(createCall?.data.metadataJson?.citations).toHaveLength(1);
   });
 
   it('resolveApprovalRules передаёт условие HITL по stageId (KI-079)', () => {

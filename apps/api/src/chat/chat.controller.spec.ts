@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ArtifactRefineService } from './artifact-refine.service.js';
+import { SpeechToTextService } from './speech-to-text.service.js';
 import { ChatController } from './chat.controller.js';
 import { ChatService } from './chat.service.js';
 
@@ -30,6 +31,7 @@ describe('ChatController', () => {
   let controller: ChatController;
   let chat: ChatServiceMock;
   let refine: { refine: MockFn };
+  let speech: { transcribe: MockFn };
 
   beforeEach(async () => {
     chat = {
@@ -38,12 +40,14 @@ describe('ChatController', () => {
       listPendingApprovals: vi.fn(),
     };
     refine = { refine: vi.fn() };
+    speech = { transcribe: vi.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [ChatController],
       providers: [
         { provide: ChatService, useValue: chat },
         { provide: ArtifactRefineService, useValue: refine },
+        { provide: SpeechToTextService, useValue: speech },
       ],
     }).compile();
 
@@ -137,6 +141,54 @@ describe('ChatController', () => {
         controller.listPendingApprovals(createRequest()),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(chat.listPendingApprovals).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('transcribe', () => {
+    const body = {
+      audioBase64: Buffer.from('audio').toString('base64'),
+      mimeType: 'audio/webm',
+      language: 'ru',
+    };
+
+    it('возвращает результат транскрибации', async () => {
+      speech.transcribe.mockResolvedValue({
+        text: 'привет',
+        provider: 'mock',
+      });
+
+      const result = await controller.transcribe(
+        createRequest({
+          userId: USER_ID,
+          email: 'user@example.com',
+          role: 'user',
+        }),
+        undefined,
+        body,
+      );
+
+      expect(result).toEqual({ text: 'привет', provider: 'mock' });
+      expect(speech.transcribe).toHaveBeenCalledWith(body);
+    });
+
+    it('отвергает неподдерживаемый MIME у загруженного файла', async () => {
+      await expect(
+        controller.transcribe(
+          createRequest({
+            userId: USER_ID,
+            email: 'user@example.com',
+            role: 'user',
+          }),
+          {
+            buffer: Buffer.from('audio'),
+            mimetype: 'video/mp4',
+            size: 5,
+            originalname: 'a.mp4',
+          },
+          {},
+        ),
+      ).rejects.toThrow();
+      expect(speech.transcribe).not.toHaveBeenCalled();
     });
   });
 

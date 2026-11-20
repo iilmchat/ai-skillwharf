@@ -2,7 +2,10 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EmbeddingsService } from './embeddings.service.js';
 import { PgVectorMemoryStore, VECTOR_MEMORY_STORE } from './vector-store.js';
-import type { IVectorMemoryStore } from './vector-store.js';
+import type {
+  DetailedMemoryChunk,
+  IVectorMemoryStore,
+} from './vector-store.js';
 
 /** Сколько похожих фрагментов памяти добавляем в промпт. */
 export const MEMORY_TOP_K = 3;
@@ -139,9 +142,47 @@ export class MemoryService {
    * Пустая строка означает, что памяти по запросу нет.
    */
   async buildContext(userId: string, query: string): Promise<string> {
-    const chunks = await this.search(userId, query);
+    const { context } = await this.buildContextWithSources(userId, query);
 
-    return formatMemoryChunks(chunks);
+    return context;
+  }
+
+  /**
+   * Тот же контекст плюс метаданные найденных чанков для сносок (KB-38.2).
+   * Если хранилище не поддерживает расширенный поиск — сносок нет.
+   */
+  async buildContextWithSources(
+    userId: string,
+    query: string,
+  ): Promise<{ context: string; chunks: DetailedMemoryChunk[] }> {
+    const embedding = await this.embeddings.embed(query);
+
+    if (embedding === null) {
+      return { context: '', chunks: [] };
+    }
+
+    const safeLimit = Math.max(1, Math.min(MEMORY_TOP_K, 10));
+
+    if (this.store.searchDetailed === undefined) {
+      const texts = await this.search(userId, query);
+
+      return { context: formatMemoryChunks(texts), chunks: [] };
+    }
+
+    try {
+      const chunks = [
+        ...(await this.store.searchDetailed(userId, embedding, safeLimit)),
+      ];
+
+      return {
+        context: formatMemoryChunks(chunks.map((chunk) => chunk.content)),
+        chunks,
+      };
+    } catch (error) {
+      this.logger.warn(`Не удалось найти фрагменты памяти: ${describe(error)}`);
+
+      return { context: '', chunks: [] };
+    }
   }
 
   /**

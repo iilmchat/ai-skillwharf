@@ -26,6 +26,16 @@ function toVectorLiteral(vector: readonly number[]): string {
   return `[${vector.join(',')}]`;
 }
 
+/** Фрагмент с метаданными для сносок в ответе ассистента (KB-38.2). */
+export interface DetailedMemoryChunk {
+  readonly id: string;
+  readonly content: string;
+  readonly title?: string | null;
+  readonly source?: string | null;
+  readonly folderId?: string | null;
+  readonly pageNumber?: number | null;
+}
+
 export interface IVectorMemoryStore {
   readonly provider: 'pgvector' | 'qdrant';
   upsert(record: VectorMemoryRecord): Promise<void>;
@@ -34,6 +44,12 @@ export interface IVectorMemoryStore {
     embedding: readonly number[],
     limit: number,
   ): Promise<readonly string[]>;
+  /** Поиск с метаданными для цитирования; по умолчанию — обычный поиск. */
+  searchDetailed?(
+    userId: string,
+    embedding: readonly number[],
+    limit: number,
+  ): Promise<readonly DetailedMemoryChunk[]>;
   deleteAll(userId: string): Promise<number>;
 }
 
@@ -60,8 +76,15 @@ const qdrantSearchResponseSchema = z.object({
   result: z.object({
     points: z.array(
       z.object({
+        id: z.union([z.string(), z.number()]).optional(),
         payload: z
-          .object({ content: z.string() })
+          .object({
+            content: z.string(),
+            documentTitle: z.string().optional(),
+            source: z.string().optional(),
+            folderId: z.string().optional(),
+            pageNumber: z.number().int().optional(),
+          })
           .passthrough()
           .optional(),
       }),
@@ -98,6 +121,38 @@ export class PgVectorMemoryStore implements IVectorMemoryStore {
     `;
 
     return rows.map((row) => row.content);
+  }
+
+  async searchDetailed(
+    userId: string,
+    embedding: readonly number[],
+    limit: number,
+  ): Promise<readonly DetailedMemoryChunk[]> {
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        content: string;
+        source: string | null;
+        folderId: string | null;
+        documentTitle: string | null;
+        pageNumber: number | null;
+      }[]
+    >`
+      SELECT "id", "content", "source", "folderId", "documentTitle", "pageNumber"
+      FROM "MemoryChunk"
+      WHERE "userId" = ${userId} AND "embedding" IS NOT NULL
+      ORDER BY "embedding" <=> ${toVectorLiteral(embedding)}::vector
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      id: row.id,
+      content: row.content,
+      title: row.documentTitle,
+      source: row.source,
+      folderId: row.folderId,
+      pageNumber: row.pageNumber,
+    }));
   }
 
   async deleteAll(userId: string): Promise<number> {
@@ -181,6 +236,48 @@ export class QdrantVectorStore implements IVectorMemoryStore {
     return parsed.data.result.points
       .map((point) => point.payload?.content)
       .filter((content): content is string => content !== undefined);
+  }
+
+  async searchDetailed(
+    userId: string,
+    embedding: readonly number[],
+    limit: number,
+  ): Promise<readonly DetailedMemoryChunk[]> {
+    await this.ensureCollection();
+    const raw = await this.request(
+      'POST',
+      `/collections/${this.config.collection}/points/search`,
+      {
+        vector: [...embedding],
+        filter: {
+          must: [{ key: 'userId', match: { value: userId } }],
+        },
+        limit: Math.max(1, Math.min(limit, 10)),
+        with_payload: true,
+      },
+    );
+    const parsed = qdrantSearchResponseSchema.safeParse(raw);
+
+    if (!parsed.success) {
+      throw new Error('Qdrant: некорректный ответ поиска');
+    }
+
+    return parsed.data.result.points.flatMap((point) => {
+      const content = point.payload?.content;
+
+      return content === undefined
+        ? []
+        : [
+            {
+              id: point.id === undefined ? '' : String(point.id),
+              content,
+              title: point.payload?.documentTitle ?? null,
+              source: point.payload?.source ?? null,
+              folderId: point.payload?.folderId ?? null,
+              pageNumber: point.payload?.pageNumber ?? null,
+            },
+          ];
+    });
   }
 
   async deleteAll(userId: string): Promise<number> {

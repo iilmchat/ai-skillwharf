@@ -20,6 +20,7 @@ import {
 } from '../src/agent/contracts.js';
 import { BillingService } from '../src/billing/billing.service.js';
 import { ArtifactRefineService } from '../src/chat/artifact-refine.service.js';
+import { SpeechToTextService } from '../src/chat/speech-to-text.service.js';
 import { ChatController } from '../src/chat/chat.controller.js';
 import { ChatService } from '../src/chat/chat.service.js';
 import {
@@ -323,6 +324,7 @@ async function createHarness(): Promise<Harness> {
     providers: [
       ChatService,
       ArtifactRefineService,
+      SpeechToTextService,
       AgentRuntimeService,
       BillingService,
       PendingApprovalService,
