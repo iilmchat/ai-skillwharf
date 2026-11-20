@@ -8,6 +8,7 @@
 - [Спецификация Wharf Control Plane](architecture/Control-Plane-Specification.md)
 - [Специфика провайдеров LLM](architecture/LLM-Router-Providers.md)
 - [MCP/ERP-коннекторы](architecture/MCP-ERP-Connectors.md)
+- [Enterprise V4 Blueprint: B2B-биллинг, 152-ФЗ и A2A](architecture/Enterprise-V4-Blueprint.md)
 - [ADR 0001: Hub-and-Spoke](architecture/ADR/0001-hub-and-spoke.md)
 - [ADR 0002: Технологический стек](architecture/ADR/0002-tech-stack.md)
 
@@ -44,6 +45,7 @@
 - [Текущий Roadmap](development/ROADMAP.md)
 - [Дорожная карта Post-GA: v1.1.0 — v2.0.0](development/ROADMAP-V2.md)
 - [Дорожная карта v2.1.0 — v3.0.0 (UX, Омниканальность, ЭДО, 152-ФЗ)](development/ROADMAP-V3.md)
+- [Дорожная карта v3.1.0 — v4.0.0 (Runtime-аудит, B2B РФ, A2A)](development/ROADMAP-V4.md)
 - [План перехода в Production (Post-MVP)](development/POST-MVP-TODO.md)
 - [Промпт для AI-агентов](development/PROMPT_CURRENT.md)
 

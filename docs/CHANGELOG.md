@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Проектирование поколения v3.1.0 — v4.0.0
+
+- Добавлен `docs/development/ROADMAP-V4.md`: 4 стратегических этапа и
+  8 спринтов (45–52) с уникальными ID задач и чекбоксами. План покрывает
+  sandbox-аудит навыков и Security Badge/SBOM, B2B-счёта по ИНН с DaData и СБП
+  QR, автоматические УПД/Акты в ЭДО, сверку с ЮKassa и отчёты автора
+  (закрытие остатков OUTBOX-33.3 и DEVPORTAL-36.3), stateful-сессии и OCR из
+  мессенджеров, TTS/PWA, SSO/SCIM и журнал аудита ПДн, коннекторы ВАТС,
+  Visual Workflow DAG Studio (закрытие BUILDER-35.2) и протокол A2A.
+- Добавлен `docs/architecture/Enterprise-V4-Blueprint.md`: целевые схемы
+  B2B-биллинга РФ, шлюза 152-ФЗ с неизменяемым журналом обезличивания,
+  Workflow DAG Engine и подписанного протокола Agent-to-Agent.
+- Обновлён `docs/README.md` (ссылки на новые документы).
+
 ### Маркетинг: питч и продающие материалы под v3.0.0
 
 - `docs/marketing/pitch/create_pitch.py`: питч-дек переработан с 6 слайдов
