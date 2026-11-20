@@ -103,6 +103,12 @@ const TelegramMiniAppPage = lazy(() =>
   })),
 );
 
+const SchedulesPage = lazy(() =>
+  import('./pages/SchedulesPage').then((module) => ({
+    default: module.SchedulesPage,
+  })),
+);
+
 function RouteFallback() {
   const { t } = useTranslation();
 
@@ -189,6 +195,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <StorePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/schedules"
+            element={
+              <ProtectedRoute>
+                <SchedulesPage />
               </ProtectedRoute>
             }
           />

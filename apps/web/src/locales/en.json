@@ -87,6 +87,7 @@
     "primary": "Primary navigation",
     "chat": "Chat",
     "knowledge": "Knowledge Hub",
+    "schedules": "Schedules",
     "skills": "Skills",
     "team": "Team",
     "marketplace": "Marketplace",
@@ -2201,6 +2202,80 @@
         "invalid": "The server returned invalid memory data.",
         "unknown": "Could not load memory. Please try again."
       }
+    }
+  },
+  "schedules": {
+    "title": "Agent schedules",
+    "subtitle": "Create cron-based autonomous jobs and send morning digests to Telegram or a corporate messenger.",
+    "backToChat": "Back to chat",
+    "noWorkspace": "Select a workspace in the switcher above to manage schedules.",
+    "created": "Schedule created",
+    "deleted": "Schedule deleted",
+    "runStarted": "Job started",
+    "cron": {
+      "custom": "Cron schedule: {{expression}}"
+    },
+    "presets": {
+      "weekdays_morning": {
+        "label": "Weekdays at 08:30"
+      },
+      "hourly": {
+        "label": "Every hour"
+      },
+      "monday_morning": {
+        "label": "Monday at 09:00"
+      },
+      "custom": {
+        "label": "Custom schedule (cron)"
+      }
+    },
+    "form": {
+      "title": "Schedule builder",
+      "name": "Job name",
+      "namePlaceholder": "E.g. Morning stock digest",
+      "preset": "Quick preset",
+      "cron": "Cron expression (5 fields)",
+      "timezone": "Timezone (IANA)",
+      "prompt": "Task for the agent",
+      "promptPlaceholder": "Summarize yesterday's stock, deals and risks…",
+      "delivery": "Digest channel",
+      "channel": "Connected channel",
+      "selectChannel": "Select a channel…",
+      "chatId": "Delivery Chat ID",
+      "chatIdPlaceholder": "E.g. -1001234567890",
+      "create": "Create schedule"
+    },
+    "delivery": {
+      "none": "No delivery",
+      "telegram": "Telegram bot",
+      "corporate": "Corporate messenger"
+    },
+    "list": {
+      "title": "Active and paused schedules",
+      "loading": "Loading schedules…",
+      "empty": "No schedules yet. Create your first job above."
+    },
+    "job": {
+      "active": "Active",
+      "paused": "Paused",
+      "nextRun": "Next run: {{date}}",
+      "lastRun": "Last run: {{date}}",
+      "status": {
+        "completed": "Success",
+        "failed": "Failed"
+      },
+      "duration": "{{seconds}} s",
+      "pause": "Pause",
+      "resume": "Resume",
+      "runNow": "Run now",
+      "delete": "Delete"
+    },
+    "errors": {
+      "network": "Could not reach the schedules service.",
+      "unavailable": "Schedules API is not available yet.",
+      "invalid": "Check the name, cron, task and delivery channel.",
+      "forbidden": "You do not have permission to manage workspace schedules.",
+      "unknown": "The operation failed. Please try again."
     }
   },
   "tgApp": {
