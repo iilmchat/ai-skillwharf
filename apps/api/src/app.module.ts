@@ -21,6 +21,7 @@ import { PromptsModule } from './prompts/prompts.module.js';
 import { RegistryModule } from './registry/registry.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
 import { SkillsModule } from './skills/skills.module.js';
+import { SchedulesModule } from './schedules/schedules.module.js';
 import { WorkspacesModule } from './workspaces/workspaces.module.js';
 import { TriggersModule } from './triggers/triggers.module.js';
 
@@ -38,6 +39,7 @@ import { TriggersModule } from './triggers/triggers.module.js';
     WorkspacesModule,
     TriggersModule,
     ChannelsModule,
+    SchedulesModule,
     RegistryModule,
     MarketplaceModule,
     PromptsModule,

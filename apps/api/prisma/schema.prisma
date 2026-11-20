@@ -68,6 +68,7 @@ model Workspace {
   customAgentRoles CustomAgentRole[]
   telegramChannels TelegramChannel[]
   corpMessengerChannels CorpMessengerChannel[]
+  scheduledJobs      ScheduledAgentJob[]
 
   @@unique([organizationId, slug])
 }
@@ -480,6 +481,34 @@ model CorpMessengerChannel {
   @@index([workspaceId])
   @@index([userId])
   @@index([provider])
+}
+
+/// Автономная задача агента по cron-расписанию (CRON-43.1/43.2).
+model ScheduledAgentJob {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  userId             String
+  name               String
+  /// 5 полей: min hour dom month dow.
+  cronExpression     String
+  timezone           String    @default("Europe/Moscow")
+  prompt             String
+  /// none | telegram | corporate.
+  deliveryChannelType String   @default("none")
+  deliveryChannelId  String?
+  deliveryChatId     String?
+  isActive           Boolean   @default(true)
+  nextRunAt          DateTime
+  lastRunAt          DateTime?
+  /// completed | failed.
+  lastRunStatus      String?
+  lastRunSummary     String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([nextRunAt])
 }
 
 /// Действие агента, ожидающее решения пользователя (approval или оплата).

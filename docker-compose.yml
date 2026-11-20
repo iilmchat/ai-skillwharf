@@ -113,6 +113,8 @@ services:
       YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL}
       # Период опроса Transactional Outbox для выплат Revenue Share.
       BILLING_OUTBOX_POLL_MS: ${BILLING_OUTBOX_POLL_MS:-15000}
+      # Период опроса Cron-планировщика автономных задач (Sprint 43).
+      SCHEDULER_POLL_MS: ${SCHEDULER_POLL_MS:-30000}
       # API ходит к sandbox-worker по внутренней сети compose.
       SANDBOX_WORKER_URL: ${SANDBOX_WORKER_URL:-http://sandbox-worker:4000}
       # LLM-инференс и LangGraph вынесены в отдельный сервис.
