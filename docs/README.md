@@ -50,6 +50,8 @@
 ## 📣 Маркетинг и презентации (`marketing/`)
 
 - [Концепция AI-Офиса и Лендинга (треки A–L)](marketing/LANDING_CONCEPT.md)
+- [Питч-дек SkillWharf v3.0.0](marketing/pitch/README.md)
+- [Sales One-Pager и чек-лист пилота Design Partner](marketing/Sales-One-Pager-and-Pilot-Checklist.md)
 
 ## 🐞 Релизы и баги
 

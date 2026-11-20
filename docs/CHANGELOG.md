@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Маркетинг: питч и продающие материалы под v3.0.0
+
+- `docs/marketing/pitch/create_pitch.py`: питч-дек переработан с 6 слайдов
+  `v1.0.0-ga` на 7 слайдов релиза `v3.0.0`: титул, проблема/решение B2B, стек
+  для РФ (1С OData, Диадок/СБИС, Честный ЗНАК), омниканальность и UX
+  (Telegram/Mini App, VK Teams/Пачка/Яндекс, Artifacts Canvas, Cron), 152-ФЗ и
+  экономика LLM (PII-маскирование, Vault/Yandex KMS, Cascade + Semantic Cache),
+  No-Code/Маркетплейс (A–L, Evals, Developer Portal, 85/15) и внедрение за
+  3 дня с тарифами. `SkillWharf_Pitch.pptx` пересобран (7 слайдов).
+- Добавлен `docs/marketing/Sales-One-Pager-and-Pilot-Checklist.md`: КП для
+  генерального, коммерческого и ИТ-директора, матрица ценности по ролям,
+  критерии пилота и пошаговый чек-лист онбординга Design Partner за 3 дня.
+- Обновлены `docs/marketing/pitch/README.md` и `docs/README.md` (ссылки на
+  питч и продающий одностраничник).
+
 ## [3.0.0] - 2026-11-20
 
 Финальный релиз стратегической дорожной карты: этапы 8–11 (Спринты 37–44)
