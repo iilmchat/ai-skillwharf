@@ -113,13 +113,18 @@ H/J/K/L в российском контуре.
 
 ### Sprint 41 — MCP-коннекторы Контур.Диадок и СБИС
 
-* [ ] **[EDO-41.1]** MCP-коннектор Контур.Диадок: чтение входящих УПД и актов,
-  получение статусов подписания.
-* [ ] **[EDO-41.2]** MCP-коннектор СБИС (Saby): обмен документами и статусы
-  ЭДО с контрагентами.
-* [ ] **[EDO-41.3]** Автоматическая сверка номенклатуры и цен из УПД со
-  счётом/заказом в 1С с отчётом о расхождениях.
-* [ ] **[EDO-41.4]** Подготовка пакета документов на подпись КЭП и передача
+* [x] **[EDO-41.1]** MCP-коннектор Контур.Диадок: чтение входящих УПД и актов,
+  получение статусов подписания. Реализован `infra/mcp/edo/server.mjs` с
+  провайдерами `diadoc`/`sbis`, 4 инструментами, per-request кредами и 12
+  тестами; сервис `edo-mcp` подключён в `docker-compose.mcp.yml`.
+* [x] **[EDO-41.2]** Подключения `diadoc`/`sbis` в API: зашифрованные JSON-
+  креды, `POST/DELETE /integrations/{provider}`, пер-request заголовки
+  `X-Edo-*` для `EDO_MCP_URL`; GET возвращает только `boxId`.
+* [x] **[EDO-41.3]** Инструменты агента: чтение УПД/актов, детализация,
+  детерминированная сверка с заказом 1С/МойСклад в копейках
+  (`edo_reconcile_with_erp`) и подготовка пакета на КЭП с обязательным HITL
+  (`priceRub: 25`) + стартовый навык `edo-diadoc-sbis`.
+* [x] **[EDO-41.4]** Подготовка пакета документов на подпись КЭП и передача
   в ЭДО без ручного копирования данных.
 
 ### Sprint 42 — ГИС МТ «Честный ЗНАК» и ЕГАИС
@@ -167,3 +172,4 @@ H/J/K/L в российском контуре.
 | 2026-11-20 | Sprint 38 (38.0, 38.1, 38.2, WEB-38.2) | OpenCode / UI-Agent | Выполнено | `KnowledgeFolder` + миграция и REST `/knowledge/{folders,documents}`, `citations` в `stream_end`/`metadataJson` и кликабельные сноски, `SpeechToTextService` + `POST /chat/transcribe` (mock/Whisper/Yandex, STT-env в Compose); страница `/app/knowledge`, голосовой ввод через MediaRecorder, PWA-манифест, RU/EN и unit-тесты | VOICE-38.2 (TTS), offline-shell/push PWA и переиндексация — остаток |
 | 2026-11-20 | Sprint 39 (39.1–39.4) | OpenCode / UI-Agent | Выполнено | Модель `TelegramChannel` + миграция, REST привязки бота с `getMe`/`setWebhook` и маскировкой токена, публичный webhook с constant-time секретом, voice/photo, inline HITL approve/reject; UI — `TelegramChannelsSection` в `/app/settings` и Mini App `/tg-app`, STT/Compose-env, RU/EN и unit-тесты | VK Teams/Пачка/Яндекс (Sprint 40) — остаток |
 | 2026-11-20 | Sprint 40 (40.1–40.4) | OpenCode / UI-Agent | Выполнено | Модель `CorpMessengerChannel` + миграция, `ICorpMessengerAdapter` и реестр адаптеров VK Teams/Пачка/Яндекс Мессенджер, REST каналов и публичный webhook с constant-time секретом и HITL-кнопками; UI — `CorpChannelsSection` в `/app/settings` с настройкой токена, on-premise URL, Chat ID и Webhook Secret, RU/EN и unit-тесты | Этап 9 (`v2.2.0`) закрыт |
+| 2026-11-20 | Sprint 41 (41.1–41.4) | OpenCode / UI-Agent / Infra | Выполнено | MCP-шлюз `edo-mcp` (DiadocAuth / СБИС JSON-RPC, 4 инструмента, 12 тестов); провайдеры ключей `diadoc`/`sbis`, проброс EDO-заголовков, инструменты сверки УПД с ERP в копейках и стартовый навык; карточки Диадок/СБИС в `/app/settings`, RU/EN и unit-тесты | Этап 10 (`v2.3.0`) ЭДО-часть закрыта |

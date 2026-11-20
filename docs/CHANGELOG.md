@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### Sprint 41: ЭДО Контур.Диадок и СБИС (EDO-41.1–41.4)
+
+**MCP-шлюз ЭДО (EDO-41.1): `infra/mcp/edo/server.mjs`.**
+
+- `infra/mcp/edo/server.mjs` (новый): MCP-сервер с `GET /sse`, `POST /messages`,
+  `GET /health` и constant-time авторизацией `MCP_AUTH_TOKEN`. Per-request
+  заголовки `X-Edo-Provider` (`diadoc`/`sbis`), `X-Edo-Api-Key`, `X-Edo-Token`,
+  `X-Edo-Box-Id` с fallback на `EDO_*`; адреса `DIADOC_API_URL`/`SBIS_API_URL`.
+- Инструменты: `edo_list_incoming_documents` (Диадок `V3/GetDocuments` с
+  `Any.InboundNotFinished` / СБИС `СБИС.СписокДокументов`),
+  `edo_get_document_details` (реквизиты и товарные позиции),
+  `edo_prepare_sign_packet` (пакет к подписанию КЭП без самой подписи) и
+  `edo_reject_document` (уведомление об уточнении). Диадок использует
+  `DiadocAuth`, СБИС — `X-SBISSessionID` и JSON-RPC; retry до 2 попыток на
+  429/5xx, токены маскируются в ошибках.
+- Dockerfile, 12 тестов на `node:test`, сервис `edo-mcp` на `127.0.0.1:5006`
+  с healthcheck в `docker-compose.mcp.yml`, `EDO_MCP_URL` в API и переменные в
+  `.env.example`. Обновлён `docs/architecture/MCP-ERP-Connectors.md`.
+
+**Бэкенд (EDO-41.2/41.3): подключения и инструменты агента.**
+
+- Новые провайдеры ключей `diadoc` (`apiKey`/`boxId`/`token`) и `sbis`
+  (`token`/`boxId`): `POST/DELETE /integrations/diadoc|sbis`, шифрование всего
+  JSON через `TokenCipherService`, в GET — только `boxId`.
+- `McpProvider` расширен ЭДО: `MarketplaceMcpService` пробрасывает
+  `X-Edo-Provider`, `X-Edo-Api-Key`, `X-Edo-Token`, `X-Edo-Box-Id` в
+  `EDO_MCP_URL` (ключи пользователя или env-fallback).
+- Четыре инструмента (`edo_list_incoming_upd`, `edo_get_document_details`,
+  `edo_reconcile_with_erp`, `edo_prepare_sign_packet`) с Zod-валидацией.
+  Сверка детерминированная, деньги сравниваются в копейках и возвращают
+  `matched` + `discrepancies` (количество/цена/итог/отсутствующие позиции).
+- Политики: `approval: 'always'` для `edo_prepare_sign_packet`, `priceRub: 25`
+  для сверки и подготовки пакета. Стартовый навык
+  `starter-skills/edo-diadoc-sbis/SKILL.md` с регламентом проверки УПД.
+
+**Web UI (EDO-41.4): карточки Диадок и СБИС в `/app/settings`.**
+
+- `apps/web/src/lib/integrations.ts`: Zod-формы `diadocCredentialsSchema`
+  (`apiKey`, `boxId`, `token`) и `sbisCredentialsSchema` (`token`, `boxId`),
+  статусы `diadoc`/`sbis` в `GET /integrations`, клиенты подключения и
+  отключения, категории ошибок для новых карточек.
+- `IntegrationsSection`: карточки «Контур.Диадок (ЭДО)» и «СБИС / Saby (ЭДО)»
+  с подсказкой про проверку УПД, сверку с 1С/МойСклад и подготовку пакетов на
+  подпись КЭП; секреты через `SecretField`, валидация до запроса к API.
+- Векторные иконки Диадока и СБИС в `IntegrationIcon.tsx`, RU/EN-ключи и
+  unit-тесты. Все задачи Sprint 41 отмечены `[x]` в `ROADMAP-V3.md`.
+
 ### Sprint 40: Корпоративные мессенджеры РФ (VK Teams, Пачка, Яндекс)
 
 **Бэкенд (OMNI-40.1/40.2): единый шлюз и адаптеры.**

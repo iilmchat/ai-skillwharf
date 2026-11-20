@@ -80,6 +80,31 @@ Pod слушает `5005`, наружу выставлен только `127.0.0
 `moysklad_create_order`. Подробности публикации OData на стороне 1С — в
 [GETSTARTED.md](../../GETSTARTED.md) (раздел 3.9).
 
+### Коннектор ЭДО: Контур.Диадок и СБИС (EDO-41.1, оценивается)
+
+`edo-mcp` (`infra/mcp/edo/server.mjs`) — единый MCP-шлюз юридически значимого
+электронного документооборота. Слушает `5006`, наружу выставлен только
+`127.0.0.1:5006`. Провайдер выбирается заголовком `X-Edo-Provider`
+(`diadoc` | `sbis`) с fallback на `EDO_PROVIDER`.
+
+| Инструмент MCP | Диадок | СБИС (JSON-RPC) |
+| --- | --- | --- |
+| `edo_list_incoming_documents` | `GET /V3/GetDocuments?boxId=…&filterCategory=Any.InboundNotFinished` | `СБИС.СписокДокументов` |
+| `edo_get_document_details` | `GET /V3/GetDocument` (реквизиты и позиции) | `СБИС.ПрочитатьДокумент` |
+| `edo_prepare_sign_packet` | локальный пакет `BuyerTitle`, `unsigned: true` | `СБИС.ПодготовитьПодпись` |
+| `edo_reject_document` | `POST /V3/SendAmendmentRequest` | `СБИС.ОтклонитьДокумент` |
+
+Креды: `X-Edo-Api-Key`, `X-Edo-Token`, `X-Edo-Box-Id` (fallback —
+`EDO_API_KEY`, `EDO_TOKEN`, `EDO_BOX_ID`). Для Диадок сервер формирует
+`Authorization: DiadocAuth ddauth_api_client_id=…,ddauth_token=…`, для СБИС —
+`X-SBISSessionID`. Базовые адреса задаются `DIADOC_API_URL` (`https://kontur.ru`)
+и `SBIS_API_URL` (`https://sbis.ru`). Токены маскируются в сообщениях об
+ошибках; повтор — до двух попыток на 429/5xx.
+
+Криптоподпись КЭП на MCP-сервере **не выполняется**: `edo_prepare_sign_packet`
+только формирует пакет к подписанию руководителем. Сверка номенклатуры и цен
+со счётом/заказом 1С — отдельные задачи EDO-41.3/41.4.
+
 ## Схемы и ошибки
 
 - Аргументы инструментов — строгие Zod-схемы (`tool-schemas.ts`), политики
