@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Планирование: дорожная карта v2.1.0 — v3.0.0
+
+- Добавлен `docs/development/ROADMAP-V3.md`: 4 стратегических этапа и
+  8 спринтов (37–44) с уникальными ID задач и чекбоксами для агентов. План
+  покрывает Interactive Artifacts/Canvas и Execution DAG Inspector, Knowledge
+  Hub с цитированием и голосовой ввод/PWA, Telegram-бота с HITL и Mini App,
+  корпоративные мессенджеры РФ (VK Teams, Пачка, Яндекс Мессенджер),
+  MCP-коннекторы Диадок/СБИС и маркировку «Честный ЗНАК»/ЕГАИС, Cron-планировщик,
+  152-ФЗ PII-маскирование и Smart Model Cascade. Базой служит релиз `v2.0.0`;
+  ссылка добавлена в `docs/README.md`.
+
 ### Производительность: Splitting бандла лендинга
 
 - `apps/web/vite.landing.config.ts`: добавлен
