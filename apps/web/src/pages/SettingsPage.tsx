@@ -7,6 +7,7 @@ import { IntegrationsSection } from '../components/IntegrationsSection';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { RagMemoryPanel } from '../components/RagMemoryPanel';
 import { StatusToast } from '../components/StatusToast';
+import { TelegramChannelsSection } from '../components/TelegramChannelsSection';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TriggersSection } from '../components/TriggersSection';
 import { RAG_MEMORY_PANEL_ENABLED } from '../lib/feature-flags';
@@ -149,6 +150,8 @@ export function SettingsPage() {
 
         <div className="mt-8 space-y-6">
           <IntegrationsSection />
+
+          <TelegramChannelsSection />
 
           <TriggersSection />
 

@@ -97,6 +97,12 @@ const AdminPage = lazy(() =>
   })),
 );
 
+const TelegramMiniAppPage = lazy(() =>
+  import('./pages/TelegramMiniAppPage').then((module) => ({
+    default: module.TelegramMiniAppPage,
+  })),
+);
+
 function RouteFallback() {
   const { t } = useTranslation();
 
@@ -133,6 +139,7 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/welcome" element={<LandingPage />} />
           <Route path="/office" element={<OfficePage />} />
+          <Route path="/tg-app" element={<TelegramMiniAppPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 

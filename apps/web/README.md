@@ -253,6 +253,23 @@ Knowledge Hub с идентификатором чанка.
 Offline-shell и push-уведомления пока не реализованы. RU/EN-ключи —
 `knowledge.*`, `chat.citations.*`, `chat.voice.*` и `nav.knowledge`.
 
+## Telegram-каналы и Mini App (Sprint 39)
+
+В Настройках добавлена секция «Telegram-бот и мессенджеры»
+(`src/components/TelegramChannelsSection.tsx`): пошаговая инструкция по
+получению токена у `@BotFather`, поле токена через `SecretField`, список
+разрешённых Chat ID, список подключённых ботов со статусом, маскированным
+токеном, копируемым Webhook URL и кнопкой отключения. Клиент
+`src/lib/telegram-channels.ts` валидирует токен и chat_id через Zod и работает
+с `/api/v1/workspaces/:workspaceId/channels/telegram`.
+
+Маршрут `/tg-app` (`src/pages/TelegramMiniAppPage.tsx`) — компактный Mini App
+для Telegram WebView: инициализирует `Telegram.WebApp`, показывает статус
+AI-Офиса и счётчики HITL/передач, крупные кнопки «Одобрить»/«Отклонить» для
+ожидающих задач (через тот же socket-протокол `approve_action`, что и чат) и
+быстрые ссылки на бота и полную веб-версию. Вне Telegram страница работает как
+обычный мобильный экран. RU/EN-ключи — `settings.telegram.*` и `tgApp.*`.
+
 ## AI-Офис и ожидания подтверждения
 
 AI-Офис (`/office`, `/app/office`) показывает события агента из WebSocket и

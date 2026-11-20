@@ -2020,6 +2020,41 @@
         "unknown": "Could not complete the action. Please try again later."
       }
     },
+    "telegram": {
+      "title": "Telegram bot and messengers",
+      "subtitle": "Connect a workspace bot: texts, voice notes and invoice photos from Telegram reach the agent, and HITL approvals can be tapped right in the chat.",
+      "steps": {
+        "botfather": "Open @BotFather in Telegram and create a bot with /newbot.",
+        "token": "Copy the issued token like 123456:ABC… — it is shown only once.",
+        "chatId": "Find the numeric Chat ID of your group (e.g. via a counter bot) and paste it below."
+      },
+      "tokenLabel": "Bot token",
+      "tokenHint": "Token from @BotFather: 6–12 digits, a colon and at least 30 characters. Stored encrypted on the server.",
+      "chatIdsLabel": "Allowed Telegram Chat IDs (comma-separated)",
+      "chatIdsPlaceholder": "123456789, -1001234567890",
+      "chatIdsHint": "Only these chats may send tasks to the bot. Separate IDs with commas, spaces or line breaks.",
+      "connect": "Connect bot",
+      "connectedTitle": "Connected bots",
+      "loading": "Loading bots…",
+      "empty": "No bots connected yet.",
+      "unknownBot": "Unnamed",
+      "active": "Active",
+      "inactive": "Disconnected",
+      "allowedChats": "Allowed chats: {{ids}}",
+      "copyWebhook": "Copy webhook URL",
+      "copied": "Webhook URL copied",
+      "disconnect": "Disconnect",
+      "connected": "Bot connected",
+      "disconnectedDone": "Bot disconnected",
+      "noWorkspace": "Select a workspace in the switcher above to manage bots.",
+      "errors": {
+        "network": "Could not reach the Telegram channels service.",
+        "unavailable": "Telegram channels API is not available yet.",
+        "invalid": "Check the token and the Chat ID list.",
+        "forbidden": "You do not have permission to manage this workspace bot.",
+        "unknown": "Could not update the channel. Please try again."
+      }
+    },
     "memory": {
       "title": "Long-term memory",
       "description": "The assistant remembers details of your conversations to answer more accurately. Clearing will permanently delete all saved memory.",
@@ -2052,6 +2087,35 @@
         "invalid": "The server returned invalid memory data.",
         "unknown": "Could not load memory. Please try again."
       }
+    }
+  },
+  "tgApp": {
+    "title": "AI Office · Mini App",
+    "defaultWorkspace": "Default workspace",
+    "loginRequired": "Sign in to the full web app to approve tasks from this window.",
+    "status": {
+      "title": "Office status",
+      "idle": "Agents are online",
+      "working": "Agent is working",
+      "waiting_approval": "Awaiting approval"
+    },
+    "metrics": {
+      "pending": "Awaiting approval",
+      "handoffs": "Handoffs"
+    },
+    "hitl": {
+      "title": "Need your decision",
+      "empty": "Nothing is waiting for approval.",
+      "reason": "Reason: {{reason}}",
+      "approve": "Approve",
+      "reject": "Reject"
+    },
+    "openBot": "Open bot chat",
+    "openWeb": "Full web app",
+    "errors": {
+      "listFailed": "Could not load pending tasks.",
+      "actionFailed": "Could not send your decision. Please try again.",
+      "unknown": "Mini App error."
     }
   },
   "finance": {
