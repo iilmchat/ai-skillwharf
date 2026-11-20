@@ -450,6 +450,19 @@ docker build -f apps/web/Dockerfile \
 `src/components/IntegrationIcon.tsx`, RU/EN-ключи — `settings.integrations.diadoc.*`
 и `settings.integrations.sbis.*`.
 
+## ГИС МТ «Честный ЗНАК» (Sprint 42)
+
+Карточка «Честный ЗНАК (ГИС МТ)» в разделе «Интеграции» (/app/settings)
+подключает провайдер `chestny_znak` (`src/components/IntegrationsSection.tsx`).
+Форма принимает Bearer-токен True API (маскируется через `SecretField`) и ИНН
+организации/ИП — ровно 10 или 12 цифр; обе проверки описаны в
+`src/lib/integrations.ts` и валидируются Zod до вызова API. Статус из
+`GET /api/v1/integrations` содержит маскированный ИНН (`innMasked`), который
+клиент приводит к общему полю `inn`. Подключение/отключение идут через
+`POST/DELETE /api/v1/integrations/chestny_znak`. RU/EN-ключи —
+`settings.integrations.chestnyZnak.*`, иконка DataMatrix — в
+`src/components/IntegrationIcon.tsx`.
+
 ## Вебхук-триггеры (WEB-32.3)
 
 Секция «Вебхук-триггеры (Автозапуск агентов)» расположена на странице

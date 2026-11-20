@@ -4,15 +4,20 @@ import { useTranslation } from 'react-i18next';
 import { useIntegrations } from '../hooks/useIntegrations';
 import {
   bitrix24WebhookUrlSchema,
+  chestnyZnakCredentialsSchema,
+  chestnyZnakInnSchema,
+  connectChestnyZnak,
   connectEdoIntegration,
   connectKeyIntegration,
   connectTelegram,
   diadocCredentialsSchema,
+  disconnectChestnyZnak,
   disconnectEdoIntegration,
   disconnectGoogle,
   disconnectKeyIntegration,
   disconnectTelegram,
   fetchGoogleAuthorizationUrl,
+  getChestnyZnakInn,
   getIntegrationErrorDetails,
   getProviderCredentialRejectionKey,
   getTelegramDisplayName,
@@ -26,6 +31,7 @@ import {
   PROVIDER_AUTH_REQUIRED_CODE,
   sbisCredentialsSchema,
   telegramBotTokenSchema,
+  type ChestnyZnakIntegration,
   type EdoIntegration,
   type EdoIntegrationProvider,
   type IntegrationErrorKind,
@@ -1380,6 +1386,193 @@ function EdoIntegrationCard({
   );
 }
 
+/** ГИС МТ «Честный ЗНАК» (Sprint 42, MARK-42.1/42.3). */
+function ChestnyZnakIntegrationCard({
+  integration,
+  onRefresh,
+}: {
+  integration: ChestnyZnakIntegration;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const prefix = 'settings.integrations.chestnyZnak';
+  const [token, setToken] = useState('');
+  const [inn, setInn] = useState('');
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const isActive = integration.status === 'active';
+
+  const connectMutation = useMutation({
+    mutationFn: connectChestnyZnak,
+    onMutate: () => {
+      setNotice(null);
+      setFieldError(null);
+    },
+    onSuccess: () => {
+      setToken('');
+      setNotice(t(`${prefix}.connected`));
+      onRefresh();
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: disconnectChestnyZnak,
+    onMutate: () => setNotice(null),
+    onSuccess: () => {
+      setNotice(t(`${prefix}.disconnected`));
+      onRefresh();
+    },
+  });
+
+  function handleConnect(): void {
+    const innResult = chestnyZnakInnSchema.safeParse(inn);
+    const credentials = chestnyZnakCredentialsSchema.safeParse({ token, inn });
+
+    setFieldError(
+      innResult.success && credentials.success
+        ? null
+        : t(`${prefix}.invalidFields`),
+    );
+
+    if (!credentials.success) {
+      return;
+    }
+
+    connectMutation.mutate(credentials.data);
+  }
+
+  return (
+    <article
+      aria-labelledby="chestny-znak-integration-title"
+      className={CARD_CLASSES}
+    >
+      <IntegrationCardHeader
+        provider="chestny_znak"
+        title={t(`${prefix}.title`)}
+        description={t(`${prefix}.description`)}
+        status={integration.status}
+        titleId="chestny-znak-integration-title"
+      />
+
+      {integration.status === 'error' && (
+        <IntegrationStateError text={integration.error} />
+      )}
+
+      {isActive ? (
+        <>
+          <ConnectedAccount
+            label={t(`${prefix}.inn`)}
+            value={getChestnyZnakInn(integration)}
+            unknown={t('settings.integrations.providers.keySaved')}
+          />
+          <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+            {t(`${prefix}.keySaved`)}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              aria-busy={disconnectMutation.isPending}
+              className={DANGER_BUTTON_CLASSES}
+            >
+              {disconnectMutation.isPending
+                ? t(`${prefix}.disconnecting`)
+                : t(`${prefix}.disconnect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {disconnectMutation.isError && (
+            <IntegrationErrorAlert
+              error={disconnectMutation.error}
+              operation="chestnyZnakDisconnect"
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <div className="mt-4">
+            <label
+              htmlFor="chestny-znak-inn"
+              className="block text-sm font-medium text-on-surface"
+            >
+              {t(`${prefix}.inn`)}
+            </label>
+            <input
+              id="chestny-znak-inn"
+              name="inn"
+              inputMode="numeric"
+              autoComplete="off"
+              spellCheck={false}
+              value={inn}
+              onChange={(event) => setInn(event.target.value)}
+              placeholder={t(`${prefix}.innPlaceholder`)}
+              disabled={connectMutation.isPending}
+              className={INPUT_CLASSES}
+            />
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              {t(`${prefix}.innHint`)}
+            </p>
+          </div>
+
+          <SecretField
+            id="chestny-znak-token"
+            name="token"
+            label={t(`${prefix}.token`)}
+            hint={t(`${prefix}.tokenHint`)}
+            placeholder={t(`${prefix}.tokenPlaceholder`)}
+            value={token}
+            onValueChange={setToken}
+            visible={tokenVisible}
+            onVisibleChange={setTokenVisible}
+            revealable
+            revealLabel={t('settings.integrations.secret.show')}
+            concealLabel={t('settings.integrations.secret.hide')}
+            disabled={connectMutation.isPending}
+            className={INPUT_CLASSES}
+          />
+
+          {fieldError !== null && (
+            <p role="alert" className="mt-3 text-sm text-error">
+              {fieldError}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connectMutation.isPending}
+              aria-busy={connectMutation.isPending}
+              className={PRIMARY_BUTTON_CLASSES}
+            >
+              {connectMutation.isPending
+                ? t(`${prefix}.connecting`)
+                : t(`${prefix}.connect`)}
+            </button>
+            {notice !== null && (
+              <p role="status" className="text-sm font-medium text-success">
+                {notice}
+              </p>
+            )}
+          </div>
+          {connectMutation.isError && (
+            <IntegrationErrorAlert
+              error={connectMutation.error}
+              operation="chestnyZnakConnect"
+            />
+          )}
+        </>
+      )}
+    </article>
+  );
+}
+
 export function IntegrationsSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -1585,6 +1778,10 @@ export function IntegrationsSection() {
               <EdoIntegrationCard
                 provider="sbis"
                 integration={data.sbis}
+                onRefresh={refreshIntegrations}
+              />
+              <ChestnyZnakIntegrationCard
+                integration={data.chestny_znak}
                 onRefresh={refreshIntegrations}
               />
             </div>

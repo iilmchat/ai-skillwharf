@@ -1990,6 +1990,25 @@
         "connected": "Sbis / Saby connected.",
         "disconnected": "Sbis / Saby disconnected."
       },
+      "chestnyZnak": {
+        "title": "Chestny ZNAK (GIS MT)",
+        "description": "DataMatrix code checks in the warehouse, wholesale and pickup points: the agent verifies code statuses against shipments and blocks discrepancies before handover.",
+        "token": "True API bearer token",
+        "tokenPlaceholder": "True API access token",
+        "tokenHint": "Issued in your Chestny ZNAK (GIS MT) account. Stored encrypted on the server.",
+        "inn": "Organization INN",
+        "innPlaceholder": "7700000000 or 500100732259",
+        "innHint": "Tax ID of a legal entity (10 digits) or an individual entrepreneur (12 digits).",
+        "invalidFields": "Enter the True API token and a 10- or 12-digit INN.",
+        "credentialsRejected": "GIS MT rejected the token or INN. Check your account credentials.",
+        "connect": "Connect Chestny ZNAK",
+        "connecting": "Checking connection…",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "keySaved": "Token is stored on the server and is not shown again",
+        "connected": "Chestny ZNAK connected.",
+        "disconnected": "Chestny ZNAK disconnected."
+      },
       "errors": {
         "network": "The server is unreachable. Check your connection.",
         "sessionExpired": "Your session has expired. Please sign in again.",

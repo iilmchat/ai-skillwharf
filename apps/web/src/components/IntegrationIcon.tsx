@@ -8,11 +8,15 @@ import type {
 export type IntegrationLogoProvider =
   | IntegrationProvider
   | KeyIntegrationProvider
-  | EdoIntegrationProvider;
+  | EdoIntegrationProvider
+  | 'chestny_znak';
 
 /** Бейджи провайдеров без отдельной SVG-иконки. */
 const PROVIDER_BADGE: Record<
-  Exclude<IntegrationLogoProvider, IntegrationProvider | EdoIntegrationProvider>,
+  Exclude<
+    IntegrationLogoProvider,
+    IntegrationProvider | EdoIntegrationProvider | 'chestny_znak'
+  >,
   { label: string; className: string }
 > = {
   ozon: { label: 'OZ', className: 'bg-[#005BFF] text-white' },
@@ -108,6 +112,26 @@ export function IntegrationIcon({
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+      </svg>
+    );
+  }
+
+  if (provider === 'chestny_znak') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className}>
+        <rect x="1" y="1" width="22" height="22" rx="5" fill="#0B7A48" />
+        <g fill="#fff">
+          <rect x="5" y="5" width="4" height="4" rx="0.5" />
+          <rect x="15" y="5" width="4" height="4" rx="0.5" />
+          <rect x="5" y="15" width="4" height="4" rx="0.5" />
+          <rect x="11" y="6" width="2" height="2" />
+          <rect x="14" y="11" width="2" height="2" />
+          <rect x="17" y="14" width="2" height="2" />
+          <rect x="10" y="17" width="2" height="2" />
+          <rect x="6.5" y="6.5" width="1" height="1" fill="#0B7A48" />
+          <rect x="16.5" y="6.5" width="1" height="1" fill="#0B7A48" />
+          <rect x="6.5" y="16.5" width="1" height="1" fill="#0B7A48" />
+        </g>
       </svg>
     );
   }

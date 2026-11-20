@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import {
   bitrix24WebhookUrlSchema,
+  chestnyZnakCredentialsSchema,
+  chestnyZnakInnSchema,
+  connectChestnyZnak,
   connectEdoIntegration,
   connectKeyIntegration,
   connectTelegram,
   diadocCredentialsSchema,
+  disconnectChestnyZnak,
   disconnectEdoIntegration,
   disconnectKeyIntegration,
   fetchGoogleAuthorizationUrl,
   fetchIntegrations,
   getActiveIntegrationChannels,
+  getChestnyZnakInn,
   getIntegrationErrorDetails,
   getProviderCredentialRejectionKey,
   getTelegramDisplayName,
@@ -76,6 +81,7 @@ const ACTIVE_STATE: IntegrationsState = {
   onec: { status: 'disconnected' },
   diadoc: { status: 'disconnected' },
   sbis: { status: 'disconnected' },
+  chestny_znak: { status: 'disconnected' },
 };
 
 describe('integrationsSchema', () => {
@@ -97,6 +103,7 @@ describe('integrationsSchema', () => {
       onec: { status: 'disconnected' },
       diadoc: { status: 'disconnected' },
       sbis: { status: 'disconnected' },
+      chestny_znak: { status: 'disconnected' },
     });
   });
 
@@ -462,6 +469,7 @@ describe('getActiveIntegrationChannels', () => {
         onec: { status: 'disconnected' },
         diadoc: { status: 'disconnected' },
         sbis: { status: 'disconnected' },
+        chestny_znak: { status: 'disconnected' },
       }),
     ).toEqual(['telegram']);
     expect(getActiveIntegrationChannels(undefined)).toEqual([]);
@@ -817,6 +825,75 @@ describe('ЭДО: Контур.Диадок и СБИС (Sprint 41)', () => {
     ).toBe('settings.integrations.diadoc.credentialsRejected');
     expect(getProviderCredentialRejectionKey('sbisConnect')).toBe(
       'settings.integrations.sbis.credentialsRejected',
+    );
+  });
+});
+
+describe('ГИС МТ «Честный ЗНАК» (Sprint 42)', () => {
+  const CREDENTIALS = { token: 'true-api-token', inn: '7700000000' };
+
+  beforeEach(() => {
+    postMock.mockReset();
+    deleteMock.mockReset();
+  });
+
+  it('принимает ИНН 10 и 12 цифр', () => {
+    expect(chestnyZnakInnSchema.parse('7700000000')).toBe('7700000000');
+    expect(chestnyZnakInnSchema.parse('500100732259')).toBe('500100732259');
+    expect(chestnyZnakCredentialsSchema.parse(CREDENTIALS)).toEqual(CREDENTIALS);
+  });
+
+  it('отклоняет невалидный ИНН и пустой токен', () => {
+    expect(chestnyZnakInnSchema.safeParse('12345').success).toBe(false);
+    expect(chestnyZnakInnSchema.safeParse('7700000000a').success).toBe(false);
+    expect(chestnyZnakInnSchema.safeParse('7700000000000').success).toBe(false);
+    expect(
+      chestnyZnakCredentialsSchema.safeParse({ ...CREDENTIALS, token: '' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('добавляет статус в общий ответ /integrations', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'active' },
+      google: { status: 'disconnected' },
+      chestny_znak: { status: 'active', inn: '7700000000' },
+    });
+
+    expect(state.chestny_znak).toEqual({ status: 'active', inn: '7700000000' });
+  });
+
+  it('читает маскированный ИНН из статуса API', () => {
+    const state = integrationsSchema.parse({
+      telegram: { status: 'disconnected' },
+      google: { status: 'disconnected' },
+      chestny_znak: { status: 'active', innMasked: '7700****00' },
+    });
+
+    expect(getChestnyZnakInn(state.chestny_znak)).toBe('7700****00');
+  });
+
+  it('подключает и отключает провайдера отдельными запросами', async () => {
+    await connectChestnyZnak(CREDENTIALS);
+    expect(postMock).toHaveBeenCalledWith(
+      '/integrations/chestny_znak',
+      CREDENTIALS,
+    );
+
+    await disconnectChestnyZnak();
+    expect(deleteMock).toHaveBeenCalledWith('/integrations/chestny_znak');
+  });
+
+  it('не отправляет запрос с невалидным ИНН', async () => {
+    await expect(
+      connectChestnyZnak({ ...CREDENTIALS, inn: 'bad' }),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it('использует отдельный ключ ошибки для карточки', () => {
+    expect(getProviderCredentialRejectionKey('chestnyZnakConnect')).toBe(
+      'settings.integrations.chestnyZnak.credentialsRejected',
     );
   });
 });

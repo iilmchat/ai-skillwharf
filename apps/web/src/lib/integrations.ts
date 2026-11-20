@@ -177,6 +177,27 @@ const edoIntegrationSchema = z.object({
 
 export type EdoIntegration = z.infer<typeof edoIntegrationSchema>;
 
+/** ГИС МТ «Честный ЗНАК» (Sprint 42): в статусе виден только маскированный ИНН. */
+export const chestnyZnakIntegrationSchema = z.object({
+  status: integrationStatusSchema,
+  /** Backend возвращает `innMasked`; старые ответы могли содержать `inn`. */
+  inn: z.string().trim().min(1).nullable().optional(),
+  innMasked: z.string().trim().min(1).nullable().optional(),
+  source: z.enum(['user', 'env']).nullable().optional(),
+  error: integrationErrorTextSchema,
+});
+
+export type ChestnyZnakIntegration = z.infer<
+  typeof chestnyZnakIntegrationSchema
+>;
+
+/** ИНН для отображения: маскированный из API или полный из старого ответа. */
+export function getChestnyZnakInn(
+  integration: ChestnyZnakIntegration,
+): string | null {
+  return integration.innMasked ?? integration.inn ?? null;
+}
+
 export const integrationsSchema = z.object({
   telegram: telegramIntegrationSchema,
   google: googleIntegrationSchema,
@@ -189,6 +210,9 @@ export const integrationsSchema = z.object({
   onec: oneCIntegrationSchema.default({ status: 'disconnected' }),
   diadoc: edoIntegrationSchema.default({ status: 'disconnected' }),
   sbis: edoIntegrationSchema.default({ status: 'disconnected' }),
+  chestny_znak: chestnyZnakIntegrationSchema.default({
+    status: 'disconnected',
+  }),
 });
 
 export type IntegrationsState = z.infer<typeof integrationsSchema>;
@@ -301,6 +325,26 @@ export type EdoConnectInput =
   | ({ provider: 'diadoc' } & DiadocCredentials)
   | ({ provider: 'sbis' } & SbisCredentials);
 
+/** Токен True API ГИС МТ «Честный ЗНАК»: маскируется в UI через SecretField. */
+export const chestnyZnakTokenSchema = z.string().trim().min(1).max(2048);
+
+/** ИНН юридического лица (10 цифр) или ИП (12 цифр). */
+export const chestnyZnakInnSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{10}(\d{2})?$/, {
+    message: 'ожидается ИНН из 10 или 12 цифр',
+  });
+
+export const chestnyZnakCredentialsSchema = z.object({
+  token: chestnyZnakTokenSchema,
+  inn: chestnyZnakInnSchema,
+});
+
+export type ChestnyZnakCredentials = z.infer<
+  typeof chestnyZnakCredentialsSchema
+>;
+
 const googleAuthorizationResponseSchema = z.union([
   z.object({ url: z.string() }).transform((value) => value.url),
   z
@@ -385,6 +429,19 @@ export async function disconnectEdoIntegration(
   await api.delete(`/integrations/${provider}`);
 }
 
+/** Подключение ГИС МТ «Честный ЗНАК» (Bearer-токен True API + ИНН). */
+export async function connectChestnyZnak(
+  input: ChestnyZnakCredentials,
+): Promise<void> {
+  const parsed = chestnyZnakCredentialsSchema.parse(input);
+
+  await api.post('/integrations/chestny_znak', parsed);
+}
+
+export async function disconnectChestnyZnak(): Promise<void> {
+  await api.delete('/integrations/chestny_znak');
+}
+
 /** Срок действия WB-токена из возможных полей backend. */
 export function getWildberriesTokenExpiry(
   integration: WildberriesIntegration,
@@ -445,7 +502,9 @@ export type IntegrationOperation =
   | 'diadocConnect'
   | 'diadocDisconnect'
   | 'sbisConnect'
-  | 'sbisDisconnect';
+  | 'sbisDisconnect'
+  | 'chestnyZnakConnect'
+  | 'chestnyZnakDisconnect';
 
 export type IntegrationErrorKind =
   | 'network'
@@ -519,6 +578,7 @@ const KEY_CONNECT_OPERATIONS: readonly IntegrationOperation[] = [
   '1cConnect',
   'diadocConnect',
   'sbisConnect',
+  'chestnyZnakConnect',
 ];
 
 /**
@@ -550,6 +610,8 @@ export function getProviderCredentialRejectionKey(
       return 'settings.integrations.diadoc.credentialsRejected';
     case 'sbisConnect':
       return 'settings.integrations.sbis.credentialsRejected';
+    case 'chestnyZnakConnect':
+      return 'settings.integrations.chestnyZnak.credentialsRejected';
     default:
       return null;
   }
