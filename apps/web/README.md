@@ -270,6 +270,18 @@ AI-Офиса и счётчики HITL/передач, крупные кнопк
 быстрые ссылки на бота и полную веб-версию. Вне Telegram страница работает как
 обычный мобильный экран. RU/EN-ключи — `settings.telegram.*` и `tgApp.*`.
 
+## Корпоративные мессенджеры (Sprint 40)
+
+Секция `/app/settings` «Корпоративные мессенджеры (VK Teams, Пачка, Яндекс)»
+(`src/components/CorpChannelsSection.tsx`) подключает единый канал
+`/api/v1/workspaces/:workspaceId/channels/corporate` для провайдеров
+`vk_teams`, `pachca` и `yandex_messenger`. Карточки провайдера показывают, где
+взять токен бота; форма проверяет название, токен, необязательный API Base URL
+(для on-premise VK Teams) и список Chat ID через Zod
+(`src/lib/corp-channels.ts`). После создания показываются одноразовый Webhook
+Secret и Webhook URL с кнопками копирования. Список каналов содержит бейдж
+провайдера, статус и кнопку отключения. RU/EN-ключи — `settings.corp.*`.
+
 ## AI-Офис и ожидания подтверждения
 
 AI-Офис (`/office`, `/app/office`) показывает события агента из WebSocket и

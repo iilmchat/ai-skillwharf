@@ -2055,6 +2055,60 @@
         "unknown": "Could not update the channel. Please try again."
       }
     },
+    "corp": {
+      "title": "Corporate messengers (VK Teams, Pachca, Yandex)",
+      "subtitle": "Connect a corporate messenger for this workspace: messages and attachments reach the agent, replies go back to allowed chats.",
+      "providerLabel": "Messenger provider",
+      "providers": {
+        "vk_teams": {
+          "label": "VK Teams",
+          "hint": "VK corporate messenger: bots, commands and attachments for internal workflows.",
+          "tokenHint": "Create the bot token in the Bots section of the VK Teams admin panel."
+        },
+        "pachca": {
+          "label": "Pachca",
+          "hint": "Messenger for a company's private perimeter: message and event delivery.",
+          "tokenHint": "The bot token is issued in Pachca integrations (Bots section)."
+        },
+        "yandex_messenger": {
+          "label": "Yandex Messenger",
+          "hint": "Bots and file attachments in Yandex Messenger for corporate chats.",
+          "tokenHint": "Get the bot token in the Yandex 360 organization console."
+        }
+      },
+      "nameLabel": "Channel name",
+      "namePlaceholder": "E.g. Procurement support",
+      "tokenLabel": "Bot token",
+      "apiBaseUrlLabel": "API Base URL (optional)",
+      "apiBaseUrlPlaceholder": "https://messenger.company.ru",
+      "apiBaseUrlHint": "Only for an on-premise VK Teams server. Leave empty for the cloud API.",
+      "chatIdsLabel": "Allowed Chat IDs",
+      "chatIdsPlaceholder": "12345, -100500, user@chat",
+      "connect": "Connect channel",
+      "connectedTitle": "Connected channels",
+      "loading": "Loading channels…",
+      "empty": "No corporate channels connected yet.",
+      "active": "Active",
+      "inactive": "Disconnected",
+      "allowedChats": "Allowed chats: {{ids}}",
+      "copyUrl": "Copy URL",
+      "copySecret": "Copy secret",
+      "copied": "Webhook URL copied",
+      "copiedSecret": "Webhook secret copied",
+      "disconnect": "Disconnect",
+      "connected": "Channel connected",
+      "disconnectedDone": "Channel disconnected",
+      "noWorkspace": "Select a workspace in the switcher above to manage channels.",
+      "createdTitle": "Channel is ready",
+      "createdHint": "Copy the webhook URL and secret: the secret is shown only once.",
+      "errors": {
+        "network": "Could not reach the corporate channels service.",
+        "unavailable": "Corporate channels API is not available yet.",
+        "invalid": "Check the name, token and Chat ID list.",
+        "forbidden": "You do not have permission to manage workspace channels.",
+        "unknown": "Could not update the channel. Please try again."
+      }
+    },
     "memory": {
       "title": "Long-term memory",
       "description": "The assistant remembers details of your conversations to answer more accurately. Clearing will permanently delete all saved memory.",

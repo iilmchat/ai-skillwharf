@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink } from 'react-router-dom';
 import { Brand } from '../components/Brand';
+import { CorpChannelsSection } from '../components/CorpChannelsSection';
 import { ErrorToast } from '../components/ErrorToast';
 import { IntegrationsSection } from '../components/IntegrationsSection';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -152,6 +153,8 @@ export function SettingsPage() {
           <IntegrationsSection />
 
           <TelegramChannelsSection />
+
+          <CorpChannelsSection />
 
           <TriggersSection />
 
