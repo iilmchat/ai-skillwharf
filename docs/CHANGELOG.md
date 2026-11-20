@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+### Sprint 38: Knowledge Hub, цитаты, голосовой ввод и PWA
+
+**Бэкенд (API-38.0): папки знаний, цитаты и Speech-to-Text.**
+
+- Модель `KnowledgeFolder` и поля `MemoryChunk.folderId/documentTitle/pageNumber`,
+  а также миграция `20261120110000_add_knowledge_folders`.
+- `GET|POST /api/v1/knowledge/folders`, `DELETE .../folders/:id` (удаление только
+  владельцем, 403), `GET /api/v1/knowledge/documents` с фильтрами `folderId` и
+  `search`. Все входные/выходные данные — Zod.
+- Расширенный поиск в `PgVectorMemoryStore`/`QdrantVectorStore` возвращает
+  метаданные чанков; `ChatService` строит `citations` и пишет их в
+  `Message.metadataJson` и `stream_end`.
+- `SpeechToTextService` + `POST /api/v1/chat/transcribe`: `STT_PROVIDER=mock`
+  (по умолчанию), Whisper и Yandex SpeechKit через Zod-валидируемые ответы,
+  multipart-поле `audio` или JSON `audioBase64`, лимит 15 МБ и список MIME.
+  Переменные `STT_PROVIDER`, `STT_WHISPER_URL`, `YANDEX_STT_IAM_TOKEN`
+  добавлены в `.env.example` и проброшены в сервис `api` в `docker-compose.yml`.
+
+**Web UI (KB-38.1/38.2, VOICE-38.1, WEB-38.2).**
+
+- `apps/web/src/lib/knowledge.ts`: Zod-схемы и клиент папок/документов Базы
+  знаний (`/knowledge/folders`, `/knowledge/documents`), загрузка регламента и
+  `transcribeVoiceAudio` (`POST /chat/transcribe`). `message-metadata.ts`
+  расширен необязательным массивом `citations`.
+- `KnowledgeHubPage`: защищённый маршрут `/app/knowledge` и пункт навигации;
+  папки регламентов (создание/выбор/удаление), поиск, фильтр по папке,
+  загрузка документа и статусы индексации. Ошибки API локализованы.
+- `CitationBadges`: кликабельные сноски в ответе ассистента с подсвеченным
+  фрагментом, номером страницы и переходом в Knowledge Hub по `chunkId`.
+- Голосовой ввод в чате через `getUserMedia`/`MediaRecorder` с таймером и
+  индикатором записи; результат транскрибации подставляется в поле ввода,
+  неподдерживаемые браузеры получают подсказку.
+- PWA-манифест `public/manifest.webmanifest` и `<link rel="manifest">` в
+  `index.html`. RU/EN-ключи и unit-тесты на новые схемы и клиенты; задачи
+  `KB-38.1`, `KB-38.2`, `VOICE-38.1` и `WEB-38.2` отмечены `[x]` в `ROADMAP-V3.md`.
+
 ### Планирование: дорожная карта v2.1.0 — v3.0.0
 
 - Добавлен `docs/development/ROADMAP-V3.md`: 4 стратегических этапа и

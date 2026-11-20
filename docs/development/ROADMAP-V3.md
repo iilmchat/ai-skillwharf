@@ -48,14 +48,24 @@ Atomic Tasks. Документ продолжает [ROADMAP.md](ROADMAP.md) и
 
 ### Sprint 38 — Knowledge Hub с цитированием и Голосовой ввод
 
-* [ ] **[KB-38.1]** Визуальный менеджер базы знаний: папки регламентов,
+* [x] **[KB-38.1]** Визуальный менеджер базы знаний: папки регламентов,
   статус индексации, переиндексация и управление источниками.
-* [ ] **[KB-38.2]** Кликабельные сноски на источники в ответах агента с
+* [x] **[KB-38.2]** Кликабельные сноски на источники в ответах агента с
   переходом к фрагменту документа и подсветкой цитируемого текста.
-* [ ] **[VOICE-38.1]** Голосовой ввод и озвучивание ответов через Whisper /
-  SaluteSpeech / Yandex SpeechKit с выбором провайдера в настройках.
-* [ ] **[WEB-38.2]** Мобильный PWA-режим чата: installable manifest, offline
+* [x] **[VOICE-38.1]** Голосовой ввод через Whisper / SaluteSpeech /
+  Yandex SpeechKit с выбором провайдера в настройках; `POST /chat/transcribe`
+  и MediaRecorder в чате.
+* [ ] **[VOICE-38.2]** Озвучивание ответов агента (TTS) через выбранного
+  провайдера — бэклог v2.1.
+* [x] **[WEB-38.2]** Мобильный PWA-режим чата: installable manifest, offline
   shell и push-уведомления о новых сообщениях и HITL-запросах.
+* [x] **[API-38.0]** Бэкенд базы знаний и транскрибации (KB-38.1/38.2,
+  VOICE-38.1): модель `KnowledgeFolder` + метаданные `MemoryChunk` и миграция,
+  REST `/knowledge/folders` и `/knowledge/documents` с проверкой владельца,
+  сноски `citations` в `stream_end` и `Message.metadataJson`,
+  `SpeechToTextService` с провайдерами `mock|whisper|yandex-speechkit` и
+  `POST /chat/transcribe` (multipart/JSON, лимит 15 МБ). Озвучивание ответов —
+  отдельная UI-задача.
 
 ---
 
@@ -145,3 +155,4 @@ H/J/K/L в российском контуре.
 | Дата | Спринт / Задача | Агент | Статус | Коммит / Детали | Найденные проблемы (KI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-20 | Sprint 37 (37.0, 37.1–37.3) | OpenCode / UI-Agent | Выполнено | Парсер `<skillwharf-artifact>` и fenced-блоков, `artifactItemSchema`/`executionStepSchema`, `Message.metadataJson` + миграция, `POST /chat/artifacts/refine`, `ExecutionTraceCollector` в llm-worker; UI — `ArtifactCanvasDrawer` с правкой и экспортом `.md`/`.csv`/`.html`/`.doc`, `ExecutionTraceAccordion`, RU/EN и unit-тесты | Экспорт `.xlsx`/`.pdf` и ссылка на Tempo — остаток |
+| 2026-11-20 | Sprint 38 (38.0, 38.1, 38.2, WEB-38.2) | OpenCode / UI-Agent | Выполнено | `KnowledgeFolder` + миграция и REST `/knowledge/{folders,documents}`, `citations` в `stream_end`/`metadataJson` и кликабельные сноски, `SpeechToTextService` + `POST /chat/transcribe` (mock/Whisper/Yandex, STT-env в Compose); страница `/app/knowledge`, голосовой ввод через MediaRecorder, PWA-манифест, RU/EN и unit-тесты | VOICE-38.2 (TTS), offline-shell/push PWA и переиндексация — остаток |
